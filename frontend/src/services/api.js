@@ -1,5 +1,5 @@
 // API Base URL - Update this to your backend URL when deployed
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = '/api';
 
 // Helper function to get auth headers
 function getAuthHeaders() {

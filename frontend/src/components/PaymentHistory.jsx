@@ -49,7 +49,7 @@ import {
     
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/payments?seatNumber=${student.seatNumber}`, {
+  `/api/payments?seatNumber=${student.seatNumber}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'

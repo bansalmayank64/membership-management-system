@@ -106,7 +106,7 @@ function AdminPanel() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/users`, {
+  const response = await fetch(`/api/auth/users`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
@@ -125,7 +125,7 @@ function AdminPanel() {
 
   const fetchSeats = async () => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/seats`, {
+  const response = await fetch(`/api/admin/seats`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
@@ -143,7 +143,7 @@ function AdminPanel() {
 
   const fetchStudents = async () => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/students`, {
+  const response = await fetch(`/api/students`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
@@ -187,7 +187,7 @@ function AdminPanel() {
     formData.append('file', importFile);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/import-excel`, {
+  const response = await fetch(`/api/admin/import-excel`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
@@ -261,8 +261,8 @@ function AdminPanel() {
     setLoading(true);
     try {
       const url = selectedUser 
-        ? `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/users/${selectedUser.id}`
-        : `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/register`;
+  ? `/api/admin/users/${selectedUser.id}`
+  : `/api/auth/register`;
       
       const method = selectedUser ? 'PUT' : 'POST';
       
@@ -296,7 +296,7 @@ function AdminPanel() {
   const handleDeleteUser = async (userId) => {
     setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/users/${userId}`, {
+  const response = await fetch(`/api/admin/users/${userId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
@@ -339,8 +339,8 @@ function AdminPanel() {
     setLoading(true);
     try {
       const url = selectedSeat 
-        ? `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/seats/${selectedSeat.seat_number}`
-        : `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/seats`;
+  ? `/api/admin/seats/${selectedSeat.seat_number}`
+  : `/api/admin/seats`;
       
       const method = selectedSeat ? 'PUT' : 'POST';
       
@@ -374,7 +374,7 @@ function AdminPanel() {
   const handleDeleteSeat = async (seatNumber) => {
     setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/seats/${seatNumber}`, {
+  const response = await fetch(`/api/admin/seats/${seatNumber}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
@@ -416,7 +416,7 @@ function AdminPanel() {
   const handleChangeSeat = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/change-seat`, {
+  const response = await fetch(`/api/admin/change-seat`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
@@ -448,7 +448,7 @@ function AdminPanel() {
   const handleCleanDatabase = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/clean-database`, {
+  const response = await fetch(`/api/admin/clean-database`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
@@ -472,7 +472,7 @@ function AdminPanel() {
   const handleExportData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/admin/export-excel`, {
+  const response = await fetch(`/api/admin/export-excel`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         }

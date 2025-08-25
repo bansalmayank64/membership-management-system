@@ -178,7 +178,7 @@ function Students() {
       
       // Fetch students with unassigned seats and seat chart data
       const [studentsWithSeatsResponse, seatChartData] = await Promise.all([
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/students/with-unassigned-seats`, {
+  fetch(`/api/students/with-unassigned-seats`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'
@@ -216,7 +216,7 @@ function Students() {
       console.error('📄 Error message:', error.message);
       console.error('📍 Error stack:', error.stack);
       console.error('🌐 Network error details:', {
-        url: `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/students/with-unassigned-seats`,
+  url: `/api/students/with-unassigned-seats`,
         headers: {
           'Authorization': localStorage.getItem('authToken') ? 'Bearer [TOKEN_PRESENT]' : '[NO_TOKEN]',
           'Content-Type': 'application/json'
@@ -240,7 +240,7 @@ function Students() {
     try {
       console.log('🚀 Making API request to fetch seat history...');
       
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/seats/${seatNumber}/history`, {
+  const response = await fetch(`/api/seats/${seatNumber}/history`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
@@ -267,7 +267,7 @@ function Students() {
       console.error('📄 Error message:', error.message);
       console.error('📍 Error stack:', error.stack);
       console.error('🌐 Request details:', {
-        url: `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/seats/${seatNumber}/history`,
+  url: `/api/seats/${seatNumber}/history`,
         seatNumber: seatNumber
       });
       
@@ -832,7 +832,7 @@ function Students() {
               console.log('📝 Prepared student data:', studentData);
               console.log('🚀 Step 2: Making API request...');
               
-              const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/students`, {
+              const response = await fetch(`/api/students`, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
@@ -869,7 +869,7 @@ function Students() {
               console.error('📄 Error message:', err.message);
               console.error('📍 Error stack:', err.stack);
               console.error('📤 Request payload:', {
-                url: `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/students`,
+                url: `/api/students`,
                 method: 'POST',
                 studentData: newStudent
               });
@@ -918,7 +918,7 @@ function Students() {
               
               console.log('🚀 Sending payment request:', paymentData);
               
-              const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/payments`, {
+              const response = await fetch(`/api/payments`, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${localStorage.getItem('authToken')}`,

@@ -96,7 +96,7 @@ function Expenses() {
       };
       
       // Fetch expenses
-      const expensesResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/expenses`, {
+  const expensesResponse = await fetch(`/api/expenses`, {
         headers: authHeaders
       });
       
@@ -106,7 +106,7 @@ function Expenses() {
       }
 
       // Fetch payments to calculate total income
-      const paymentsResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/payments`, {
+  const paymentsResponse = await fetch(`/api/payments`, {
         headers: authHeaders
       });
       
@@ -145,7 +145,7 @@ function Expenses() {
         modified_by: 1 // TODO: Get actual user ID from auth context
       };
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/expenses`, {
+  const response = await fetch(`/api/expenses`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
