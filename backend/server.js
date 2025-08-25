@@ -1,14 +1,16 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import pool from './config/database.js';
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const { pool } = require('./config/database');
 
 // Import routes
-import seatRoutes from './routes/seats.js';
-import studentRoutes from './routes/students.js';
-import paymentRoutes from './routes/payments.js';
-import expenseRoutes from './routes/expenses.js';
-import authRoutes from './routes/auth.js';
+const seatRoutes = require('./routes/seats');
+const studentRoutes = require('./routes/students');
+const paymentRoutes = require('./routes/payments');
+const expenseRoutes = require('./routes/expenses');
+const authRoutes = require('./routes/auth');
+const adminRoutes = require('./routes/admin');
+const auth = require('./middleware/auth');
 
 dotenv.config();
 
@@ -44,11 +46,12 @@ app.get('/db-test', async (req, res) => {
 });
 
 // API Routes
-app.use('/api/seats', seatRoutes);
-app.use('/api/students', studentRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/expenses', expenseRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', auth, adminRoutes);
+app.use('/api/seats', auth, seatRoutes);
+app.use('/api/students', auth, studentRoutes);
+app.use('/api/payments', auth, paymentRoutes);
+app.use('/api/expenses', auth, expenseRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -69,4 +72,4 @@ app.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV}`);
 });
 
-export default app;
+module.exports = app;

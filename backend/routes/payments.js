@@ -1,5 +1,5 @@
-import express from 'express';
-import pool from '../config/database.js';
+const express = require('express');
+const { pool } = require('../config/database');
 
 const router = express.Router();
 
@@ -9,10 +9,11 @@ router.get('/', async (req, res) => {
     const query = `
       SELECT 
         p.*,
-        s.name_student,
-        s.seat_number
+        s.name as student_name,
+        seats.seat_number
       FROM payments p
       LEFT JOIN students s ON p.student_id = s.id
+      LEFT JOIN seats ON s.id = seats.student_id
       ORDER BY p.payment_date DESC
     `;
     
@@ -31,10 +32,11 @@ router.get('/student/:studentId', async (req, res) => {
     const query = `
       SELECT 
         p.*,
-        s.name_student,
-        s.seat_number
+        s.name as student_name,
+        seats.seat_number
       FROM payments p
       LEFT JOIN students s ON p.student_id = s.id
+      LEFT JOIN seats ON s.id = seats.student_id
       WHERE p.student_id = $1
       ORDER BY p.payment_date DESC
     `;
@@ -49,6 +51,11 @@ router.get('/student/:studentId', async (req, res) => {
 
 // POST /api/payments - Create a new payment
 router.post('/', async (req, res) => {
+  const startTime = Date.now();
+  console.log('\n🔥 === PAYMENT CREATE REQUEST START ===');
+  console.log('📅 Timestamp:', new Date().toISOString());
+  console.log('📨 Request Body:', JSON.stringify(req.body, null, 2));
+  
   try {
     const {
       student_id,
@@ -59,10 +66,32 @@ router.post('/', async (req, res) => {
       modified_by
     } = req.body;
     
+    console.log('🔍 Step 1: Validating payment data...');
+    
+    // Validation
+    if (!student_id || !amount || !payment_date || !payment_mode) {
+      console.log('❌ Validation failed - missing required fields');
+      return res.status(400).json({ 
+        error: 'Missing required fields: student_id, amount, payment_date, payment_mode' 
+      });
+    }
+    
+    if (isNaN(amount) || parseFloat(amount) <= 0) {
+      console.log('❌ Validation failed - invalid amount:', amount);
+      return res.status(400).json({ 
+        error: 'Amount must be a positive number' 
+      });
+    }
+    
+    console.log('✅ Step 1: Validation passed');
+    console.log('🚀 Step 2: Starting database transaction...');
+    
     // Start transaction
     await pool.query('BEGIN');
     
     try {
+      console.log('💾 Step 3: Inserting payment record...');
+      
       // Insert payment
       const paymentQuery = `
         INSERT INTO payments (
@@ -72,9 +101,17 @@ router.post('/', async (req, res) => {
         RETURNING *
       `;
       
-      const paymentResult = await pool.query(paymentQuery, [
+      const paymentValues = [
         student_id, amount, payment_date, payment_mode, remarks, modified_by
-      ]);
+      ];
+      
+      console.log('📝 Payment query:', paymentQuery);
+      console.log('📝 Payment values:', paymentValues);
+      
+      const paymentResult = await pool.query(paymentQuery, paymentValues);
+      console.log('✅ Step 3: Payment record inserted:', paymentResult.rows[0]);
+      
+      console.log('🔄 Step 4: Updating student record...');
       
       // Update student's total_paid and last_payment_date
       const updateStudentQuery = `
@@ -88,19 +125,35 @@ router.post('/', async (req, res) => {
         RETURNING *
       `;
       
-      await pool.query(updateStudentQuery, [
-        amount, payment_date, modified_by, student_id
-      ]);
+      const updateValues = [amount, payment_date, modified_by, student_id];
+      console.log('📝 Update query:', updateStudentQuery);
+      console.log('📝 Update values:', updateValues);
       
+      const updateResult = await pool.query(updateStudentQuery, updateValues);
+      console.log('✅ Step 4: Student record updated:', updateResult.rows[0]);
+      
+      console.log('💯 Step 5: Committing transaction...');
       await pool.query('COMMIT');
+      
+      const executionTime = Date.now() - startTime;
+      console.log('🎉 === PAYMENT CREATE SUCCESS ===');
+      console.log('⏱️ Total execution time:', executionTime + 'ms');
+      console.log('📤 Response:', JSON.stringify(paymentResult.rows[0], null, 2));
+      
       res.status(201).json(paymentResult.rows[0]);
     } catch (error) {
+      console.log('💥 Database operation failed, rolling back...');
       await pool.query('ROLLBACK');
       throw error;
     }
   } catch (error) {
-    console.error('Error creating payment:', error);
-    res.status(500).json({ error: 'Failed to create payment' });
+    const executionTime = Date.now() - startTime;
+    console.error('❌ === PAYMENT CREATE ERROR ===');
+    console.error('⏱️ Failed after:', executionTime + 'ms');
+    console.error('💥 Error details:', error);
+    console.error('📍 Stack trace:', error.stack);
+    
+    res.status(500).json({ error: 'Failed to create payment: ' + error.message });
   }
 });
 
@@ -189,4 +242,4 @@ router.get('/summary/stats', async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;
