@@ -1,12 +1,26 @@
 // API Base URL - Update this to your backend URL when deployed
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+// Helper function to get auth headers
+function getAuthHeaders() {
+  const token = localStorage.getItem('authToken');
+  return {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` })
+  };
+}
+
 // Fetch seat chart data from PostgreSQL backend
 export async function getSeatChartData() {
   try {
-    const response = await fetch(`${API_BASE_URL}/seats`);
+    const response = await fetch(`${API_BASE_URL}/seats`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Authentication required');
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
@@ -14,6 +28,11 @@ export async function getSeatChartData() {
     return seats;
   } catch (error) {
     console.error('Error fetching seat chart data:', error);
+    
+    // If authentication is required, throw the error
+    if (error.message === 'Authentication required') {
+      throw error;
+    }
     
     // Fallback to mock data if backend is not available
     return getMockSeatData();
@@ -81,9 +100,7 @@ export async function addSeat(seatData) {
   try {
     const response = await fetch(`${API_BASE_URL}/seats`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(seatData),
     });
 
@@ -102,9 +119,7 @@ export async function updateSeat(seatNumber, updateData) {
   try {
     const response = await fetch(`${API_BASE_URL}/seats/${seatNumber}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(updateData),
     });
 
@@ -123,9 +138,7 @@ export async function removeSeat(seatNumber, modifiedBy) {
   try {
     const response = await fetch(`${API_BASE_URL}/seats/${seatNumber}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ modified_by: modifiedBy }),
     });
 
@@ -143,7 +156,9 @@ export async function removeSeat(seatNumber, modifiedBy) {
 // Student management functions
 export async function getStudents() {
   try {
-    const response = await fetch(`${API_BASE_URL}/students`);
+    const response = await fetch(`${API_BASE_URL}/students`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -160,9 +175,7 @@ export async function addStudent(studentData) {
   try {
     const response = await fetch(`${API_BASE_URL}/students`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(studentData),
     });
 
@@ -180,7 +193,9 @@ export async function addStudent(studentData) {
 // Payment management functions
 export async function getPayments() {
   try {
-    const response = await fetch(`${API_BASE_URL}/payments`);
+    const response = await fetch(`${API_BASE_URL}/payments`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -197,9 +212,7 @@ export async function addPayment(paymentData) {
   try {
     const response = await fetch(`${API_BASE_URL}/payments`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(paymentData),
     });
 
@@ -217,7 +230,9 @@ export async function addPayment(paymentData) {
 // Expense management functions
 export async function getExpenses() {
   try {
-    const response = await fetch(`${API_BASE_URL}/expenses`);
+    const response = await fetch(`${API_BASE_URL}/expenses`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -234,9 +249,7 @@ export async function addExpense(expenseData) {
   try {
     const response = await fetch(`${API_BASE_URL}/expenses`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(expenseData),
     });
 
@@ -247,6 +260,29 @@ export async function addExpense(expenseData) {
     return await response.json();
   } catch (error) {
     console.error('Error adding expense:', error);
+    throw error;
+  }
+}
+
+// Mark expired seat as vacant
+export async function markSeatAsVacant(seatNumber) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/seats/${seatNumber}/mark-vacant`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        modified_by: 1 // TODO: Get actual user ID from auth context
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error marking seat as vacant:', error);
     throw error;
   }
 }

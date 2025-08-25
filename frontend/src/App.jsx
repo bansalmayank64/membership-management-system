@@ -1,30 +1,52 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { theme } from './config/theme';
+import { AuthProvider } from './contexts/AuthContext';
 import Navigation from './components/Navigation';
+import ProtectedRoute from './components/ProtectedRoute';
 import Students from './pages/Students';
 import StudentProfile from './pages/StudentProfile';
 import Payments from './pages/Payments';
 import Expenses from './pages/Expenses';
-import ContactUs from './pages/ContactUs';
-import SeatChartReport from './pages/SeatChartReport';
+import AdminPanel from './pages/AdminPanel';
 
 function App() {
   return (
-    <Router>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Navigation />
-        <Routes>
-          <Route path="/" element={<Students />} />
-          <Route path="/student/:seatNumber" element={<StudentProfile />} />
-          <Route path="/payments" element={<Payments />} />
-          <Route path="/expenses" element={<Expenses />} />
-          <Route path="/seat-chart" element={<SeatChartReport />} />
-          <Route path="/contact" element={<ContactUs />} />
-        </Routes>
-      </ThemeProvider>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <Navigation />
+          <Routes>
+            <Route path="/" element={
+              <ProtectedRoute>
+                <Students />
+              </ProtectedRoute>
+            } />
+            <Route path="/student/:seatNumber" element={
+              <ProtectedRoute>
+                <StudentProfile />
+              </ProtectedRoute>
+            } />
+            <Route path="/payments" element={
+              <ProtectedRoute>
+                <Payments />
+              </ProtectedRoute>
+            } />
+            <Route path="/expenses" element={
+              <ProtectedRoute>
+                <Expenses />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin" element={
+              <ProtectedRoute>
+                <AdminPanel />
+              </ProtectedRoute>
+            } />
+          </Routes>
+        </ThemeProvider>
+      </Router>
+    </AuthProvider>
   );
 }
 

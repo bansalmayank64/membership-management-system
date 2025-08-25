@@ -90,20 +90,29 @@ function Expenses() {
     setLoading(true);
     setError(null);
     try {
-      // Fetch expenses
-      const expensesResponse = await fetch(`https://script.google.com/macros/s/AKfycbzlbGW2MKy7YlUEuV5mFJDLi3J3MoyB39VhW3tE3vdL8gKWwu8Zw5x6oIwJiafmrVdJAA/exec?action=getExpenses`);
-      const expensesData = await expensesResponse.json();
+      const authHeaders = {
+        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+        'Content-Type': 'application/json'
+      };
       
-      if (expensesData.code === 200) {
-        setExpenses(expensesData.data || []);
+      // Fetch expenses
+      const expensesResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/expenses`, {
+        headers: authHeaders
+      });
+      
+      if (expensesResponse.ok) {
+        const expensesData = await expensesResponse.json();
+        setExpenses(expensesData || []);
       }
 
       // Fetch payments to calculate total income
-      const paymentsResponse = await fetch(`https://script.google.com/macros/s/AKfycbzlbGW2MKy7YlUEuV5mFJDLi3J3MoyB39VhW3tE3vdL8gKWwu8Zw5x6oIwJiafmrVdJAA/exec?action=getPayments`);
-      const paymentsData = await paymentsResponse.json();
+      const paymentsResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/payments`, {
+        headers: authHeaders
+      });
       
-      if (paymentsData.code === 200) {
-        const payments = paymentsData.data || [];
+      if (paymentsResponse.ok) {
+        const paymentsData = await paymentsResponse.json();
+        const payments = paymentsData || [];
         const income = payments
           .filter(payment => payment.amount > 0) // Only positive amounts (exclude refunds)
           .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
@@ -128,20 +137,25 @@ function Expenses() {
       
       // Prepare form data for POST request
       const formData = new FormData();
-      formData.append('action', 'addExpense');
-      formData.append('date', newExpense.date);
-      formData.append('type', newExpense.type);
-      formData.append('description', newExpense.description);
-      formData.append('amount', newExpense.amount);
+      const expenseData = {
+        category: newExpense.type,
+        description: newExpense.description,
+        amount: parseFloat(newExpense.amount),
+        expense_date: newExpense.date,
+        modified_by: 1 // TODO: Get actual user ID from auth context
+      };
 
-      const response = await fetch(`https://script.google.com/macros/s/AKfycbzlbGW2MKy7YlUEuV5mFJDLi3J3MoyB39VhW3tE3vdL8gKWwu8Zw5x6oIwJiafmrVdJAA/exec`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/expenses`, {
         method: 'POST',
-        body: formData
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(expenseData)
       });
 
-      const result = await response.json();
-      
-      if (result.code === 200) {
+      if (response.ok) {
+        const result = await response.json();
         // Add to local state
         const newExpenseWithId = {
           ...newExpense,

@@ -49,18 +49,24 @@ import {
     
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL}?action=getPayments&seatNumber=${student.seatNumber}`
+        `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/payments?seatNumber=${student.seatNumber}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json'
+          }
+        }
       );
-      const result = await response.json();
       
-      if (result.code !== 200) {
-        throw new Error(result.data?.error || 'Failed to fetch payment history');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
+      const allPayments = await response.json();
+      
       // Filter payments for this student and sort by date (newest first)
-      const studentPayments = (result.data || [])
-        .filter(payment => String(payment.seatNumber) === String(student.seatNumber))
-        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      const studentPayments = (allPayments || [])
+        .filter(payment => String(payment.seat_number) === String(student.seatNumber))
+        .sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date));
       
       setPayments(studentPayments);
     } catch (err) {

@@ -115,14 +115,18 @@ function Payments() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL}?action=getPayments`);
-      const result = await response.json();
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/payments`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
       
-      if (result.code === 400 || result.data?.error) {
-        throw new Error(result.data?.error || 'Failed to fetch payments');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const paymentArray = Array.isArray(result.data) ? result.data : [];
+      const paymentArray = await response.json();
       setPayments(paymentArray);
     } catch (error) {
       console.error('Error fetching payments:', error);

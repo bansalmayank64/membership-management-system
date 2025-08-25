@@ -281,7 +281,20 @@ function SeatChartReport() {
   };
 
   const addNewSeat = () => {
-    const newSeatNumber = Math.max(...seatData.map(s => s.seatNumber)) + 1;
+    // Generate next seat number - try to find the highest numeric seat first
+    const numericSeats = seatData
+      .map(s => s.seatNumber)
+      .filter(num => /^\d+$/.test(num.toString()))
+      .map(num => parseInt(num));
+    
+    let newSeatNumber;
+    if (numericSeats.length > 0) {
+      newSeatNumber = Math.max(...numericSeats) + 1;
+    } else {
+      // If no numeric seats exist, start from 1
+      newSeatNumber = 1;
+    }
+    
     const newSeat = {
       seatNumber: newSeatNumber,
       occupied: false,

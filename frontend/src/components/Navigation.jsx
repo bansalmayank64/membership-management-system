@@ -15,7 +15,10 @@ import {
   ListItemText,
   useTheme,
   useMediaQuery,
-  Avatar
+  Avatar,
+  Menu,
+  MenuItem,
+  Divider
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -24,32 +27,50 @@ import {
   Warning as WarningIcon,
   Receipt as ReceiptIcon,
   LibraryBooks as LibraryIcon,
-  ContactPhone as ContactIcon,
   Storage as StorageIcon,
-  EventSeat as EventSeatIcon
+  Logout as LogoutIcon,
+  AccountCircle as AccountIcon,
+  AdminPanelSettings as AdminIcon
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from './LanguageSwitcher';
+import { useAuth } from '../contexts/AuthContext';
 
 function Navigation() {
   const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [userMenuAnchor, setUserMenuAnchor] = useState(null);
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { user, logout, isAuthenticated } = useAuth();
 
   const navigationItems = [
     { label: t('nav.students'), path: '/', icon: <PeopleIcon /> },
     { label: t('nav.payments'), path: '/payments', icon: <PaymentIcon /> },
     { label: t('nav.expenses'), path: '/expenses', icon: <ReceiptIcon /> },
-    { label: 'Seat Chart', path: '/seat-chart', icon: <EventSeatIcon /> },
-    { label: t('nav.contactUs'), path: '/contact', icon: <ContactIcon /> },
+    ...(user?.role === 'admin' || user?.permissions?.canManageUsers ? [
+      { label: 'Admin Panel', path: '/admin', icon: <AdminIcon /> }
+    ] : [])
   ];
 
   const currentTab = navigationItems.findIndex(item => item.path === location.pathname);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
+  };
+
+  const handleUserMenuOpen = (event) => {
+    setUserMenuAnchor(event.currentTarget);
+  };
+
+  const handleUserMenuClose = () => {
+    setUserMenuAnchor(null);
+  };
+
+  const handleLogout = () => {
+    logout();
+    handleUserMenuClose();
   };
 
   const drawer = (
@@ -133,6 +154,44 @@ function Navigation() {
           </Box>
 
           <LanguageSwitcher />
+
+          {isAuthenticated && (
+            <>
+              <IconButton
+                color="inherit"
+                onClick={handleUserMenuOpen}
+                sx={{ ml: 1 }}
+              >
+                <AccountIcon />
+              </IconButton>
+              <Menu
+                anchorEl={userMenuAnchor}
+                open={Boolean(userMenuAnchor)}
+                onClose={handleUserMenuClose}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+              >
+                <MenuItem disabled>
+                  <Typography variant="subtitle2">
+                    Welcome, {user?.username}
+                  </Typography>
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={handleLogout}>
+                  <ListItemIcon>
+                    <LogoutIcon fontSize="small" />
+                  </ListItemIcon>
+                  Logout
+                </MenuItem>
+              </Menu>
+            </>
+          )}
 
           {!isMobile && (
             <Tabs
