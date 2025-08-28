@@ -48,6 +48,7 @@ import {
   SwapHoriz as ChangeIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 
 function AdminPanel() {
   const [tabValue, setTabValue] = useState(0);
@@ -64,6 +65,18 @@ function AdminPanel() {
   const [confirmDialog, setConfirmDialog] = useState({ open: false, action: '', data: null });
   
   const { user } = useAuth();
+
+  // Global error handler for API calls
+  const handleApiError = (error, fallbackMessage = 'An error occurred') => {
+    if (error?.response?.data?.error === 'TOKEN_EXPIRED') {
+      // Let the global interceptor handle token expiration
+      return;
+    }
+    setMessage({ 
+      type: 'error', 
+      text: error?.response?.data?.message || error?.message || fallbackMessage 
+    });
+  };
 
   // User form state
   const [userForm, setUserForm] = useState({
@@ -775,7 +788,7 @@ function AdminPanel() {
                       <Table>
                         <TableHead>
                           <TableRow>
-                            <TableCell>Seat Number</TableCell>
+                            <TableCell>Seat#</TableCell>
                             <TableCell>Status</TableCell>
                             <TableCell>Restriction</TableCell>
                             <TableCell>Student</TableCell>

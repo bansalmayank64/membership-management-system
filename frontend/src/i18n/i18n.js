@@ -83,10 +83,7 @@ const resources = {
         refund: "Refund",
         modes: {
           cash: "Cash",
-          online: "Online",
-          card: "Card",
-          upi: "UPI",
-          bankTransfer: "Bank Transfer"
+          online: "Online"
         }
       },
       // Edit student

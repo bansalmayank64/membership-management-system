@@ -1,6 +1,14 @@
 // API Base URL - Update this to your backend URL when deployed
 const API_BASE_URL = '/api';
 
+// Global token expiration handler
+let onTokenExpired = null;
+
+// Set the token expiration callback
+export function setTokenExpirationHandler(callback) {
+  onTokenExpired = callback;
+}
+
 // Helper function to get auth headers
 function getAuthHeaders() {
   const token = localStorage.getItem('authToken');
@@ -10,6 +18,39 @@ function getAuthHeaders() {
   };
 }
 
+// Global response handler for authentication errors
+async function handleResponse(response) {
+  // Check for authentication errors
+  if (response.status === 401 || response.status === 403) {
+    const errorData = await response.json().catch(() => ({}));
+    
+    // Check if it's a token expiration error
+    if (errorData.error?.includes('expired') || 
+        errorData.error?.includes('Invalid or expired token') ||
+        errorData.error?.includes('TokenExpiredError') ||
+        response.status === 401) {
+      
+      console.warn('🔐 Token expired or invalid, triggering logout...');
+      
+      // Trigger logout through the callback if set
+      if (onTokenExpired) {
+        onTokenExpired();
+      }
+      
+      throw new Error('TOKEN_EXPIRED');
+    }
+    
+    throw new Error(errorData.error || 'Authentication failed');
+  }
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+  }
+  
+  return response;
+}
+
 // Fetch seat chart data from PostgreSQL backend
 export async function getSeatChartData() {
   try {
@@ -17,82 +58,27 @@ export async function getSeatChartData() {
       headers: getAuthHeaders()
     });
     
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Authentication required');
-      }
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    // Use the global response handler
+    await handleResponse(response);
     
     const seats = await response.json();
     return seats;
   } catch (error) {
     console.error('Error fetching seat chart data:', error);
     
+    // If token expired, re-throw the error to be handled by the auth context
+    if (error.message === 'TOKEN_EXPIRED') {
+      throw error;
+    }
+    
     // If authentication is required, throw the error
     if (error.message === 'Authentication required') {
       throw error;
     }
     
-    // Fallback to mock data if backend is not available
-    return getMockSeatData();
+    // Throw the error instead of falling back to mock data
+    throw error;
   }
-}
-
-// Mock data fallback function
-function getMockSeatData() {
-  const seats = [];
-  const totalSeats = 48;
-  
-  const studentNames = [
-    { name: 'Amit Kumar', gender: 'male' },
-    { name: 'Priya Sharma', gender: 'female' },
-    { name: 'Rahul Singh', gender: 'male' },
-    { name: 'Sara Khan', gender: 'female' },
-    { name: 'Vikas Gupta', gender: 'male' },
-    { name: 'Neha Patel', gender: 'female' },
-    { name: 'Ravi Yadav', gender: 'male' },
-    { name: 'Pooja Jain', gender: 'female' },
-    { name: 'Suresh Kumar', gender: 'male' },
-    { name: 'Kavya Nair', gender: 'female' },
-    { name: 'Arjun Mehta', gender: 'male' },
-    { name: 'Divya Agarwal', gender: 'female' },
-    { name: 'Kiran Verma', gender: 'male' },
-    { name: 'Sneha Reddy', gender: 'female' },
-    { name: 'Vijay Shah', gender: 'male' },
-    { name: 'Meera Joshi', gender: 'female' },
-    { name: 'Deepak Tiwari', gender: 'male' },
-    { name: 'Ritika Malhotra', gender: 'female' },
-    { name: 'Ankit Saxena', gender: 'male' },
-    { name: 'Preeti Mishra', gender: 'female' },
-    { name: 'Rohit Pandey', gender: 'male' },
-    { name: 'Shweta Kapoor', gender: 'female' },
-    { name: 'Manoj Sinha', gender: 'male' },
-    { name: 'Anjali Thakur', gender: 'female' },
-    { name: 'Sanjay Dubey', gender: 'male' }
-  ];
-
-  for (let seatNum = 1; seatNum <= totalSeats; seatNum++) {
-    const isOccupied = Math.random() > 0.3;
-    const isExpiring = isOccupied && Math.random() > 0.8;
-    const isRemoved = Math.random() > 0.95;
-    const selectedStudent = isOccupied && !isRemoved ? studentNames[Math.floor(Math.random() * studentNames.length)] : null;
-    
-    seats.push({
-      seatNumber: seatNum,
-      occupied: isOccupied && !isRemoved,
-      studentName: selectedStudent ? selectedStudent.name : null,
-      gender: selectedStudent ? selectedStudent.gender : null,
-      expiring: isExpiring && !isRemoved,
-      removed: isRemoved,
-      studentId: isOccupied && !isRemoved ? `STU${seatNum.toString().padStart(3, '0')}` : null,
-      membershipExpiry: isOccupied && !isRemoved ? new Date(Date.now() + (isExpiring ? 7 : 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : null,
-      contactNumber: isOccupied && !isRemoved ? `+91 ${Math.floor(Math.random() * 900000000) + 100000000}` : null,
-      lastPayment: isOccupied && !isRemoved ? new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : null
-    });
-  }
-
-  return seats;
 }
 
 // Seat management functions
@@ -104,10 +90,7 @@ export async function addSeat(seatData) {
       body: JSON.stringify(seatData),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error adding seat:', error);
@@ -123,10 +106,7 @@ export async function updateSeat(seatNumber, updateData) {
       body: JSON.stringify(updateData),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error updating seat:', error);
@@ -142,10 +122,7 @@ export async function removeSeat(seatNumber, modifiedBy) {
       body: JSON.stringify({ modified_by: modifiedBy }),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error removing seat:', error);
@@ -160,10 +137,7 @@ export async function getStudents() {
       headers: getAuthHeaders()
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error fetching students:', error);
@@ -179,10 +153,7 @@ export async function addStudent(studentData) {
       body: JSON.stringify(studentData),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error adding student:', error);
@@ -197,10 +168,7 @@ export async function getPayments() {
       headers: getAuthHeaders()
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error fetching payments:', error);
@@ -216,10 +184,7 @@ export async function addPayment(paymentData) {
       body: JSON.stringify(paymentData),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error adding payment:', error);
@@ -234,10 +199,7 @@ export async function getExpenses() {
       headers: getAuthHeaders()
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error fetching expenses:', error);
@@ -253,10 +215,7 @@ export async function addExpense(expenseData) {
       body: JSON.stringify(expenseData),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error adding expense:', error);
@@ -275,11 +234,7 @@ export async function markSeatAsVacant(seatNumber) {
       }),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-    }
-
+    await handleResponse(response);
     return await response.json();
   } catch (error) {
     console.error('Error marking seat as vacant:', error);

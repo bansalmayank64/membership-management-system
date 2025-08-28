@@ -131,7 +131,7 @@ router.post('/register', async (req, res) => {
     const { username, password, role = 'user', permissions = {} } = req.body;
     console.log(`📊 Registration attempt: username="${username}", role="${role}"`);
     
-    console.log(`🔍 Step 1: Validating input parameters...`);
+    console.log(`🔍 Step 1: Validating input parameters with security constraints...`);
     if (!username || !password) {
       console.log(`❌ Validation failed: Username or password missing`);
       const totalTime = Date.now() - startTime;
@@ -144,13 +144,47 @@ router.post('/register', async (req, res) => {
       });
     }
     
-    if (password.length < 6) {
-      console.log(`❌ Validation failed: Password too short (${password.length} characters)`);
+    // Enhanced validation with database constraints
+    const validationErrors = [];
+
+    // Username validation - VARCHAR(50) UNIQUE NOT NULL
+    if (typeof username !== 'string' || username.trim().length === 0) {
+      validationErrors.push('Username must be a non-empty string');
+    } else if (username.trim().length < 3) {
+      validationErrors.push('Username must be at least 3 characters long');
+    } else if (username.trim().length > 50) {
+      validationErrors.push('Username must not exceed 50 characters (database constraint)');
+    } else if (!/^[a-zA-Z0-9_-]+$/.test(username.trim())) {
+      validationErrors.push('Username can only contain letters, numbers, underscores, and hyphens');
+    }
+
+    // Password validation
+    if (typeof password !== 'string') {
+      validationErrors.push('Password must be a string');
+    } else if (password.length < 6) {
+      validationErrors.push('Password must be at least 6 characters long');
+    } else if (password.length > 255) {
+      validationErrors.push('Password is too long (maximum 255 characters)');
+    }
+
+    // Role validation - CHECK (role IN ('user', 'admin'))
+    if (role && !['user', 'admin'].includes(role)) {
+      validationErrors.push('Role must be either "user" or "admin" (database constraint)');
+    }
+
+    // Permissions validation - JSONB
+    if (permissions && (typeof permissions !== 'object' || permissions === null || Array.isArray(permissions))) {
+      validationErrors.push('Permissions must be a valid JSON object');
+    }
+
+    if (validationErrors.length > 0) {
+      console.log(`❌ Validation failed:`, validationErrors);
       const totalTime = Date.now() - startTime;
       console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/register completed with 400 in ${totalTime}ms [${requestId}]`);
       
       return res.status(400).json({ 
-        error: 'Password must be at least 6 characters long',
+        error: 'Validation failed',
+        details: validationErrors,
         requestId: requestId,
         timestamp: new Date().toISOString()
       });
@@ -186,8 +220,8 @@ router.post('/register', async (req, res) => {
     
     console.log(`📝 Step 4: Creating user in database...`);
     const createUserQuery = `
-      INSERT INTO users (username, password_hash, role, permissions)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO users (username, password_hash, role, permissions, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id, username, role, permissions, created_at
     `;
     

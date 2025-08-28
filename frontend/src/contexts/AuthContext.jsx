@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { setTokenExpirationHandler } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -16,6 +17,12 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Set up the token expiration handler
+    setTokenExpirationHandler(() => {
+      console.warn('🔐 Token expired, logging out user...');
+      logout(true); // Show message when token expires during API calls
+    });
+
     if (token) {
       verifyToken();
     } else {
@@ -25,7 +32,7 @@ export const AuthProvider = ({ children }) => {
 
   const verifyToken = async () => {
     try {
-  const response = await fetch(`/api/auth/verify`, {
+      const response = await fetch(`/api/auth/verify`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -35,7 +42,18 @@ export const AuthProvider = ({ children }) => {
         const data = await response.json();
         setUser(data.user);
       } else {
-        // Token is invalid
+        const errorData = await response.json().catch(() => ({}));
+        console.warn('🔐 Token verification failed:', errorData);
+        
+        // Check if it's a token expiration error
+        if (errorData.error?.includes('expired') || 
+            errorData.error?.includes('Invalid or expired token') ||
+            errorData.error?.includes('TokenExpiredError') ||
+            response.status === 401) {
+          console.warn('🔐 Token expired during verification, logging out...');
+        }
+        
+        // Token is invalid - logout
         logout();
       }
     } catch (error) {
@@ -72,10 +90,20 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = (showMessage = false) => {
     setToken(null);
     setUser(null);
     localStorage.removeItem('authToken');
+    
+    if (showMessage) {
+      // You can use a toast notification here if you have one set up
+      console.warn('🔐 Session expired. Please login again.');
+      
+      // Optional: Show an alert (can be replaced with better notification)
+      if (window.confirm('Your session has expired. Click OK to continue to login.')) {
+        // User acknowledged the message
+      }
+    }
   };
 
   const value = {

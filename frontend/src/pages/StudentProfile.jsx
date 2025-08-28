@@ -52,15 +52,15 @@ function StudentProfile() {
         <Grid container spacing={3}>
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle1">Name: {student.name}</Typography>
-            <Typography variant="subtitle1">Seat Number: {student.seatNumber}</Typography>
-            <Typography variant="subtitle1">Contact: {student.contact}</Typography>
-            <Typography variant="subtitle1">Father's Name: {student.fatherName}</Typography>
+            <Typography variant="subtitle1">Seat Number: {student.seat_number}</Typography>
+            <Typography variant="subtitle1">Contact: {student.contact_number}</Typography>
+            <Typography variant="subtitle1">Father's Name: {student.father_name}</Typography>
           </Grid>
           <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1">Start Date: {student.startDate}</Typography>
-            <Typography variant="subtitle1">Membership Till: {student.membershipTill}</Typography>
-            <Typography variant="subtitle1">Total Paid: ₹{student.totalPaid}</Typography>
-            <Typography variant="subtitle1">Last Payment: {student.lastPaymentDate}</Typography>
+            <Typography variant="subtitle1">Start Date: {student.membership_date}</Typography>
+            <Typography variant="subtitle1">Membership Till: {student.membership_till}</Typography>
+            <Typography variant="subtitle1">Total Paid: ₹{student.total_paid}</Typography>
+            <Typography variant="subtitle1">Last Payment: {student.last_payment_date}</Typography>
           </Grid>
         </Grid>
       </Paper>
@@ -117,8 +117,7 @@ function StudentProfile() {
               onChange={(e) => setNewPayment({ ...newPayment, paymentMode: e.target.value })}
             >
               <MenuItem value="cash">Cash</MenuItem>
-              <MenuItem value="upi">UPI</MenuItem>
-              <MenuItem value="bank">Bank Transfer</MenuItem>
+              <MenuItem value="online">Online</MenuItem>
             </Select>
           </FormControl>
         </DialogContent>

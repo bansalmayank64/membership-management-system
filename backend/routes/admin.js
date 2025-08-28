@@ -113,50 +113,71 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
       try {
         console.log(`👤 Processing member ${i + 1}/${membersData.length}: ${member.Name_Student || member.name}`);
         
-        // Insert student
+        // Insert student with enhanced data validation and proper constraint handling
         const studentResult = await client.query(`
           INSERT INTO students (
             id, name, father_name, contact_number, sex, 
-            membership_date, membership_till, membership_status,
-            total_paid, last_payment_date
+            seat_number, membership_date, membership_till, membership_status,
+            modified_by
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           ON CONFLICT (id) DO UPDATE SET
             name = EXCLUDED.name,
             father_name = EXCLUDED.father_name,
             contact_number = EXCLUDED.contact_number,
-            sex = EXCLUDED.sex,
+            sex = CASE 
+              WHEN EXCLUDED.sex IN ('male', 'female') THEN EXCLUDED.sex 
+              ELSE students.sex 
+            END,
+            seat_number = EXCLUDED.seat_number,
             membership_date = EXCLUDED.membership_date,
             membership_till = EXCLUDED.membership_till,
-            membership_status = EXCLUDED.membership_status,
-            total_paid = EXCLUDED.total_paid,
-            last_payment_date = EXCLUDED.last_payment_date,
+            membership_status = CASE 
+              WHEN EXCLUDED.membership_status IN ('active', 'expired', 'suspended') THEN EXCLUDED.membership_status 
+              ELSE students.membership_status 
+            END,
+            modified_by = EXCLUDED.modified_by,
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `, [
           member.ID || member.id,
-          member.Name_Student || member.name,
-          member.Father_Name || member.father_name,
-          member['Contact Number'] || member.contact_number,
-          member.Sex || member.sex,
+          (member.Name_Student || member.name || '').substring(0, 100), // Respect VARCHAR(100) constraint
+          (member.Father_Name || member.father_name || '').substring(0, 100), // Respect VARCHAR(100) constraint
+          (member['Contact Number'] || member.contact_number || '').substring(0, 20), // Respect VARCHAR(20) constraint
+          (member.Sex || member.sex || '').toLowerCase() === 'male' ? 'male' : 'female', // Ensure valid enum
+          (member['Seat Number'] || member.seat_number || '').substring(0, 20), // Respect VARCHAR(20) constraint
           member.Membership_Date || member.membership_date,
           member.Membership_Till || member.membership_till,
-          member.Membership_Status || member.membership_status || 'active',
-          parseFloat(member.Total_Paid || member.total_paid || 0),
-          member.Last_Payment_date || member.last_payment_date
+          ['active', 'expired', 'suspended'].includes(member.Membership_Status || member.membership_status) 
+            ? (member.Membership_Status || member.membership_status) 
+            : 'active', // Default to 'active' if invalid
+          req.user.userId || req.user.id
         ]);
 
-        // Assign seat if specified
-        if (member['Seat Number'] || member.seat_number) {
-          const seatNumber = member['Seat Number'] || member.seat_number;
+        // Assign seat if specified with enhanced validation
+        if ((member['Seat Number'] || member.seat_number) && studentResult.rows[0]) {
+          const seatNumber = (member['Seat Number'] || member.seat_number).substring(0, 20);
           console.log(`🪑 Assigning seat ${seatNumber} to student ${studentResult.rows[0].id}`);
           
-          await client.query(`
-            UPDATE seats 
-            SET student_id = $1, 
-                status = 'occupied',
+          // Check if seat exists and update seat assignment properly
+          const seatUpdateResult = await client.query(`
+            UPDATE students 
+            SET seat_number = $1,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE seat_number = $2
-          `, [studentResult.rows[0].id, seatNumber]);
+            WHERE id = $2
+            AND EXISTS (
+              SELECT 1 FROM seats 
+              WHERE seat_number = $1 
+                AND status IN ('available', 'occupied')
+                AND (occupant_sex IS NULL OR occupant_sex = $3)
+            )
+            RETURNING seat_number
+          `, [seatNumber, studentResult.rows[0].id, (member.Sex || member.sex || '').toLowerCase()]);
+          
+          if (seatUpdateResult.rows.length > 0) {
+            console.log(`✅ Seat ${seatNumber} assigned successfully`);
+          } else {
+            console.log(`⚠️ Seat ${seatNumber} assignment failed - seat may not exist or gender mismatch`);
+          }
         }
 
         importedCount++;
@@ -191,16 +212,21 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
       try {
         console.log(`💳 Processing renewal ${i + 1}/${renewalsData.length}: Student ID ${renewal.ID || renewal.id}`);
         
+        // Insert payment with enhanced validation
         await client.query(`
           INSERT INTO payments (
-            student_id, amount, payment_date, payment_mode, description
-          ) VALUES ($1, $2, $3, $4, $5)
+            student_id, amount, payment_date, payment_mode, description, modified_by,
+            created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `, [
           renewal.ID || renewal.id || renewal.student_id,
-          parseFloat(renewal.Amount_paid || renewal.amount || 0),
+          Math.max(0, parseFloat(renewal.Amount_paid || renewal.amount || 0)), // Ensure positive amount
           renewal.Payment_date || renewal.payment_date || new Date(),
-          renewal.Payment_mode || renewal.payment_mode || 'cash',
-          `Renewal payment - Seat ${renewal.Seat_Number || renewal.seat_number || 'N/A'}`
+          ['cash', 'online'].includes((renewal.Payment_mode || renewal.payment_mode || 'cash').toLowerCase()) 
+            ? (renewal.Payment_mode || renewal.payment_mode || 'cash').toLowerCase() 
+            : 'cash', // Ensure valid payment mode
+          `Renewal payment - Seat ${(renewal.Seat_Number || renewal.seat_number || 'N/A').substring(0, 100)}`, // Limit description length
+          req.user.userId || req.user.id
         ]);
 
         importedCount++;
@@ -283,11 +309,19 @@ router.get('/export-excel', auth, requireAdmin, async (req, res) => {
         s.membership_date as "Membership_Date",
         s.membership_till as "Membership_Till",
         s.membership_status as "Membership_Status",
-        s.total_paid as "Total_Paid",
-        s.last_payment_date as "Last_Payment_date",
+        COALESCE(payment_summary.total_paid, 0) as "Total_Paid",
+        payment_summary.last_payment_date as "Last_Payment_date",
         se.seat_number as "Seat Number"
       FROM students s
       LEFT JOIN seats se ON s.id = se.student_id
+      LEFT JOIN (
+        SELECT 
+          student_id,
+          SUM(amount) as total_paid,
+          MAX(payment_date) as last_payment_date
+        FROM payments 
+        GROUP BY student_id
+      ) payment_summary ON s.id = payment_summary.student_id
       ORDER BY s.id
     `);
 
@@ -299,7 +333,8 @@ router.get('/export-excel', auth, requireAdmin, async (req, res) => {
         p.payment_date as "Payment_date",
         p.payment_mode as "Payment_mode"
       FROM payments p
-      LEFT JOIN seats se ON p.student_id = se.student_id
+      LEFT JOIN students st ON p.student_id = st.id
+      LEFT JOIN seats se ON st.seat_number = se.seat_number
       ORDER BY p.payment_date DESC
     `);
 
@@ -416,7 +451,7 @@ router.post('/clean-database', auth, requireAdmin, async (req, res) => {
     await client.query('DELETE FROM payments');
     await client.query('DELETE FROM expenses');
     await client.query('DELETE FROM students');
-    await client.query('UPDATE seats SET student_id = NULL, status = \'available\', updated_at = CURRENT_TIMESTAMP');
+    await client.query('UPDATE seats SET occupant_sex = NULL, updated_at = CURRENT_TIMESTAMP');
 
     // Reset auto-increment sequences
     await client.query('ALTER SEQUENCE students_id_seq RESTART WITH 1');
@@ -440,7 +475,7 @@ router.get('/stats', auth, requireAdmin, async (req, res) => {
   try {
     const stats = await Promise.all([
       pool.query('SELECT COUNT(*) as total FROM students'),
-      pool.query('SELECT COUNT(*) as total FROM seats WHERE status = \'occupied\''),
+      pool.query('SELECT COUNT(*) as total FROM seats WHERE EXISTS (SELECT 1 FROM students WHERE students.seat_number = seats.seat_number)'),
       pool.query('SELECT COUNT(*) as total FROM payments'),
       pool.query('SELECT COUNT(*) as total FROM expenses'),
       pool.query('SELECT COUNT(*) as total FROM users'),
@@ -473,10 +508,10 @@ router.post('/seats', auth, requireAdmin, async (req, res) => {
     }
 
     const result = await pool.query(`
-      INSERT INTO seats (seat_number, occupant_sex, status, modified_by)
-      VALUES ($1, $2, 'available', $3)
+      INSERT INTO seats (seat_number, occupant_sex, status, modified_by, created_at, updated_at)
+      VALUES ($1, $2, 'available', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING *
-    `, [seatNumber.trim(), occupantSex || null, req.user.userId]);
+    `, [seatNumber.trim(), occupantSex || null, req.user.userId || req.user.id || 1]);
 
     res.json(result.rows[0]);
   } catch (error) {
@@ -496,10 +531,10 @@ router.put('/seats/:seatNumber', auth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
       UPDATE seats 
-      SET occupant_sex = $1, status = $2, modified_by = $3, updated_at = CURRENT_TIMESTAMP
-      WHERE seat_number = $4
+      SET occupant_sex = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE seat_number = $3
       RETURNING *
-    `, [occupantSex || null, status || 'available', req.user.userId, seatNumber]);
+    `, [occupantSex || null, req.user.userId || req.user.id || 1, seatNumber]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Seat not found' });
@@ -517,9 +552,9 @@ router.delete('/seats/:seatNumber', auth, requireAdmin, async (req, res) => {
   const { seatNumber } = req.params;
 
   try {
-    // Check if seat is occupied
+    // Check if seat exists and if it's occupied
     const seatCheck = await pool.query(
-      'SELECT student_id FROM seats WHERE seat_number = $1',
+      'SELECT seat_number, (SELECT id FROM students WHERE seat_number = $1) as student_id FROM seats WHERE seat_number = $1',
       [seatNumber]
     );
 
@@ -571,8 +606,8 @@ router.post('/change-seat', auth, requireAdmin, async (req, res) => {
 
     // Check if new seat exists and is available
     const newSeatResult = await client.query(
-      'SELECT * FROM seats WHERE seat_number = $1',
-      [newSeatNumber]
+      'SELECT *, (SELECT id FROM students WHERE seat_number = $1 AND id != $2) as occupying_student_id FROM seats WHERE seat_number = $1',
+      [newSeatNumber, studentId]
     );
 
     if (newSeatResult.rows.length === 0) {
@@ -581,7 +616,7 @@ router.post('/change-seat', auth, requireAdmin, async (req, res) => {
 
     const newSeat = newSeatResult.rows[0];
 
-    if (newSeat.student_id && newSeat.student_id !== studentId) {
+    if (newSeat.occupying_student_id) {
       throw new Error('New seat is already occupied');
     }
 
@@ -590,19 +625,26 @@ router.post('/change-seat', auth, requireAdmin, async (req, res) => {
       throw new Error(`Seat ${newSeatNumber} is restricted to ${newSeat.occupant_sex} students`);
     }
 
-    // Free up old seat
+    // Free up old seat by finding the student's current seat
     await client.query(`
       UPDATE seats 
-      SET student_id = NULL, status = 'available', updated_at = CURRENT_TIMESTAMP, modified_by = $1
-      WHERE student_id = $2
-    `, [req.user.userId, studentId]);
+      SET occupant_sex = NULL, updated_at = CURRENT_TIMESTAMP, modified_by = $1
+      WHERE seat_number = (SELECT seat_number FROM students WHERE id = $2)
+    `, [req.user.userId || req.user.id || 1, studentId]);
+
+    // Update student's seat assignment
+    await client.query(`
+      UPDATE students 
+      SET seat_number = $1, updated_at = CURRENT_TIMESTAMP, modified_by = $2
+      WHERE id = $3
+    `, [newSeatNumber, req.user.userId || req.user.id || 1, studentId]);
 
     // Assign new seat
     await client.query(`
       UPDATE seats 
-      SET student_id = $1, status = 'occupied', updated_at = CURRENT_TIMESTAMP, modified_by = $2
+      SET occupant_sex = (SELECT sex FROM students WHERE id = $1), updated_at = CURRENT_TIMESTAMP, modified_by = $2
       WHERE seat_number = $3
-    `, [studentId, req.user.userId, newSeatNumber]);
+    `, [studentId, req.user.userId || req.user.id || 1, newSeatNumber]);
 
     await client.query('COMMIT');
 
@@ -638,7 +680,7 @@ router.get('/seats', auth, requireAdmin, async (req, res) => {
         s.created_at,
         s.updated_at
       FROM seats s
-      LEFT JOIN students st ON s.student_id = st.id
+      LEFT JOIN students st ON s.seat_number = st.seat_number
       ORDER BY 
         CASE 
           WHEN s.seat_number ~ '^[0-9]+$' THEN CAST(s.seat_number AS INTEGER)

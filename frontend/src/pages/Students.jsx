@@ -1,16 +1,14 @@
 import { useState, useEffect } from 'react';
 import {
-  Container,
+  Box,
   Typography,
   Alert,
   CircularProgress,
   TextField,
-  Box,
   Card,
   CardContent,
   Grid,
   IconButton,
-  Tooltip,
   Button,
   Dialog,
   DialogTitle,
@@ -21,8 +19,6 @@ import {
   Select,
   useTheme,
   useMediaQuery,
-  Switch,
-  FormControlLabel,
   Tabs,
   Tab,
   Snackbar,
@@ -37,76 +33,75 @@ import {
   TableCell,
   Badge,
   Avatar,
-  Divider
+  Stack,
+  Divider,
+  Menu,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
+import MobileFilters from '../components/MobileFilters';
 import {
-  TrendingUp as TrendingUpIcon,
-  Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon,
   Refresh as RefreshIcon,
   Search as SearchIcon,
-  Clear as ClearIcon,
-  Edit as EditIcon,
+  FilterAlt as FilterIcon,
   Add as AddIcon,
+  Edit as EditIcon,
   Payment as PaymentIcon,
-  History as HistoryIcon,
   Delete as DeleteIcon,
   Male as MaleIcon,
   Female as FemaleIcon,
+  Man as ManIcon,
+  Woman as WomanIcon,
   Phone as PhoneIcon,
   EventSeat as EventSeatIcon,
-  TableView as TableViewIcon,
+  Person as PersonIcon,
   Close as CloseIcon,
-  PersonOutline as PersonOutlineIcon,
   AccessTime as AccessTimeIcon,
-  CalendarMonth as CalendarMonthIcon
+  CalendarMonth as CalendarMonthIcon,
+  Clear as ClearIcon,
+  History as HistoryIcon,
+  AssignmentInd as AssignmentIcon,
+  MoreVert as MoreVertIcon,
+  PersonAdd as PersonAddIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
-import { pageStyles, cardStyles } from '../styles/commonStyles';
-import { useTranslation } from 'react-i18next';
 import { getSeatChartData, markSeatAsVacant } from '../services/api';
 
-// Seat colors for the chart
-const seatColors = {
-  occupied: {
-    male: {
-      primary: '#1976d2',
-      secondary: '#42a5f5',
-      gradient: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)'
-    },
-    female: {
-      primary: '#e91e63',
-      secondary: '#f06292',
-      gradient: 'linear-gradient(135deg, #e91e63 0%, #f06292 100%)'
-    }
-  },
-  vacant: {
-    primary: '#f5f5f5',
-    secondary: '#e0e0e0',
-    gradient: 'linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%)'
-  },
-  expiring: {
-    male: {
-      primary: '#ff9800',
-      secondary: '#ffb74d',
-      gradient: 'linear-gradient(135deg, #ff9800 0%, #ffb74d 100%)'
-    },
-    female: {
-      primary: '#ff5722',
-      secondary: '#ff8a65',
-      gradient: 'linear-gradient(135deg, #ff5722 0%, #ff8a65 100%)'
-    }
-  },
-  removed: {
-    primary: '#bdbdbd',
-    secondary: '#9e9e9e',
-    gradient: 'linear-gradient(135deg, #bdbdbd 0%, #9e9e9e 100%)'
+// Helper function to format dates consistently in DD-MMM-YYYY format
+const formatDateForDisplay = (dateString) => {
+  if (!dateString) return 'N/A';
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'N/A';
+    
+    return date.toLocaleDateString('en-GB', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric' 
+    }).replace(/ /g, '-');
+  } catch (error) {
+    return 'N/A';
   }
 };
 
 function Students() {
-  const { t } = useTranslation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  
+  // Helper function to handle API errors, especially token expiration
+  const handleApiError = (error, defaultMessage = 'An error occurred') => {
+    if (error.message === 'TOKEN_EXPIRED') {
+      // Token expiration is handled globally by the AuthContext
+      // Don't show additional error messages as user will be redirected to login
+      return;
+    }
+    
+    console.error('API Error:', error);
+    setSnackbarMessage(error.message || defaultMessage);
+    setSnackbarSeverity('error');
+    setSnackbarOpen(true);
+  };
   
   const [students, setStudents] = useState([]);
   const [unassignedSeats, setUnassignedSeats] = useState([]);
@@ -114,37 +109,45 @@ function Students() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // View mode state
-  const [viewMode, setViewMode] = useState('chart'); // 'chart' or 'table'
-  const [showUnassignedSeats, setShowUnassignedSeats] = useState(true);
+  // View modes: 0=Seats, 1=Students (removed Available Seats)
+  const [currentTab, setCurrentTab] = useState(0);
   
-  // Separate search filters
-  const [nameSearch, setNameSearch] = useState('');
-  const [seatSearch, setSeatSearch] = useState('');
-  const [contactSearch, setContactSearch] = useState('');
+  // Filters
+  const [seatNumberFilter, setSeatNumberFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [genderFilter, setGenderFilter] = useState('');
+  const [studentNameFilter, setStudentNameFilter] = useState('');
+  const [contactFilter, setContactFilter] = useState('');
   
-  // Filter states
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [showMale, setShowMale] = useState(true);
-  const [showFemale, setShowFemale] = useState(true);
+  // Active stat filter
+  const [activeStatFilter, setActiveStatFilter] = useState(null);
   
   // Dialog states
-  const [selectedSeat, setSelectedSeat] = useState(null);
-  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [seatHistoryOpen, setSeatHistoryOpen] = useState(false);
-  const [seatHistoryData, setSeatHistoryData] = useState([]);
-  const [seatHistoryLoading, setSeatHistoryLoading] = useState(false);
+  const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
+  const [assignSeatOpen, setAssignSeatOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
   
-  // Add student form state
+  // Menu states
+  const [actionMenuAnchor, setActionMenuAnchor] = useState(null);
+  const [selectedItemForAction, setSelectedItemForAction] = useState(null);
+  
+  // History data
+  const [seatHistoryData, setSeatHistoryData] = useState([]);
+  const [paymentHistoryData, setPaymentHistoryData] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  
+  // Form states
   const [addStudentLoading, setAddStudentLoading] = useState(false);
-  const [addStudentError, setAddStudentError] = useState('');
+  const [availableSeats, setAvailableSeats] = useState([]);
+  const [seatLoading, setSeatLoading] = useState(false);
   const [newStudent, setNewStudent] = useState({
     name: '',
     seatNumber: '',
@@ -153,9 +156,144 @@ function Students() {
     fatherName: '',
   });
 
-  // Payment form state
+  // Fetch available seats when gender is selected
+  const fetchAvailableSeats = async (gender) => {
+    if (!gender) {
+      setAvailableSeats([]);
+      return;
+    }
+    
+    setSeatLoading(true);
+    try {
+      const response = await fetch(`/api/students/available-seats/${gender}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch available seats');
+      
+      const data = await response.json();
+      setAvailableSeats(data.availableSeats || []);
+    } catch (err) {
+      handleApiError(err, 'Failed to load available seats');
+      setAvailableSeats([]);
+    } finally {
+      setSeatLoading(false);
+    }
+  };
+
+  // Handle gender change in add student form
+  const handleGenderChange = (gender) => {
+    setNewStudent({ 
+      ...newStudent, 
+      sex: gender,
+      seatNumber: '' // Reset seat selection when gender changes
+    });
+    fetchAvailableSeats(gender);
+  };
+
+  // Fetch available seats for edit student when gender is selected
+  const fetchEditAvailableSeats = async (gender, currentSeatNumber = null) => {
+    if (!gender) {
+      setEditAvailableSeats([]);
+      return;
+    }
+    
+    setEditSeatLoading(true);
+    try {
+      const response = await fetch(`/api/students/available-seats/${gender}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch available seats');
+      
+      const data = await response.json();
+      let availableSeats = data.availableSeats || [];
+      
+      // If editing and student has a current seat, include it in the options
+      if (currentSeatNumber) {
+        const currentSeatExists = availableSeats.some(seat => seat.seat_number === currentSeatNumber);
+        if (!currentSeatExists) {
+          // Add current seat to the list
+          availableSeats.unshift({
+            seat_number: currentSeatNumber,
+            status: 'occupied', // Current seat
+            is_current: true
+          });
+        } else {
+          // Mark existing seat as current
+          availableSeats = availableSeats.map(seat => 
+            seat.seat_number === currentSeatNumber 
+              ? { ...seat, is_current: true }
+              : seat
+          );
+        }
+      }
+      
+      setEditAvailableSeats(availableSeats);
+    } catch (err) {
+      handleApiError(err, 'Failed to load available seats');
+      setEditAvailableSeats([]);
+    } finally {
+      setEditSeatLoading(false);
+    }
+  };
+
+  // Handle gender change in edit student form
+  const handleEditGenderChange = (gender) => {
+    setEditStudent({ 
+      ...editStudent, 
+      sex: gender,
+      seatNumber: '' // Reset seat selection when gender changes
+    });
+    fetchEditAvailableSeats(gender);
+  };
+
+  const [editStudent, setEditStudent] = useState({
+    id: '',
+    name: '',
+    seatNumber: '',
+    contact: '',
+    sex: '',
+    fatherName: '',
+    membershipDate: '',
+    membershipTill: '',
+  });
+
+  // Additional states for edit student seat management
+  const [editAvailableSeats, setEditAvailableSeats] = useState([]);
+  const [editSeatLoading, setEditSeatLoading] = useState(false);
+
+  const [assignSeatData, setAssignSeatData] = useState({
+    seatNumber: '',
+    studentId: ''
+  });
+
+  // Additional dialog states
+  const [addPaymentOpen, setAddPaymentOpen] = useState(false);
+  const [editStudentOpen, setEditStudentOpen] = useState(false);
+  const [viewStudentOpen, setViewStudentOpen] = useState(false);
+  const [viewStudentData, setViewStudentData] = useState(null); // Store student data for view dialog
+  const [viewStudentTotalPaid, setViewStudentTotalPaid] = useState(0); // Store total paid amount for view dialog
+  const [seatHistoryContext, setSeatHistoryContext] = useState(null); // Store context data for seat history dialog
+  
+  // Data states
+  const [seatHistory, setSeatHistory] = useState([]);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [paymentData, setPaymentData] = useState({
+    amount: '',
+    method: 'cash',
+    type: 'monthly_fee',
+    date: new Date().toISOString().split('T')[0],
+    notes: ''
+  });
+
   const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentError, setPaymentError] = useState('');
   const [newPayment, setNewPayment] = useState({
     amount: '',
     paymentMode: 'cash',
@@ -168,17 +306,13 @@ function Students() {
   }, []);
 
   const fetchData = async () => {
-    console.log('🔄 === FETCH DATA START ===');
-    console.log('📅 Timestamp:', new Date().toISOString());
-    
+    console.log('🔄 [fetchData] Starting data fetch...');
     setLoading(true);
     setError(null);
     try {
-      console.log('🚀 Step 1: Fetching students, unassigned seats, and seat chart data...');
-      
-      // Fetch students with unassigned seats and seat chart data
-      const [studentsWithSeatsResponse, seatChartData] = await Promise.all([
-  fetch(`/api/students/with-unassigned-seats`, {
+      console.log('📡 [fetchData] Making API calls...');
+      const [studentsResponse, seatChartData] = await Promise.all([
+        fetch(`/api/students/with-unassigned-seats`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'
@@ -187,281 +321,1670 @@ function Students() {
         getSeatChartData()
       ]);
       
-      console.log('📡 Students with seats API response status:', studentsWithSeatsResponse.status);
+      console.log('📡 [fetchData] Students response status:', studentsResponse.status);
       
-      if (!studentsWithSeatsResponse.ok) {
-        const errorText = await studentsWithSeatsResponse.text();
-        console.error('❌ Students with seats API error response:', errorText);
-        throw new Error(`Students API error! status: ${studentsWithSeatsResponse.status} - ${errorText}`);
+      if (!studentsResponse.ok) {
+        throw new Error(`API error! status: ${studentsResponse.status}`);
       }
       
-      const studentsWithSeatsData = await studentsWithSeatsResponse.json();
-      console.log('✅ Step 2: Students with seats data received:', studentsWithSeatsData);
-      console.log('✅ Step 3: Seat chart data received:', seatChartData.length, 'seats');
+      const studentsData = await studentsResponse.json();
+      console.log('📋 [fetchData] Raw students data received:', studentsData);
+      console.log('📋 [fetchData] Students array:', studentsData.students);
+      console.log('📋 [fetchData] Unassigned seats:', studentsData.unassignedSeats);
+      console.log('🪑 [fetchData] Seat chart data:', seatChartData);
       
-      setStudents(studentsWithSeatsData.students || []);
-      setUnassignedSeats(studentsWithSeatsData.unassignedSeats || []);
+      // Validate and clean data
+      const cleanStudents = (studentsData.students || []).filter(student => student && typeof student === 'object');
+      const cleanUnassignedSeats = studentsData.unassignedSeats || [];
+      
+      console.log('✅ [fetchData] Cleaned students:', cleanStudents.length);
+      console.log('✅ [fetchData] Cleaned unassigned seats:', cleanUnassignedSeats.length);
+      
+      setStudents(cleanStudents);
+      setUnassignedSeats(cleanUnassignedSeats);
       setSeatData(seatChartData);
       
-      console.log('📊 Data summary:', {
-        students: studentsWithSeatsData.students?.length || 0,
-        unassignedSeats: studentsWithSeatsData.unassignedSeats?.length || 0,
-        seatChartData: seatChartData.length
-      });
-      
-      console.log('🎉 === FETCH DATA SUCCESS ===');
-    } catch (error) {
-      console.error('💥 === FETCH DATA ERROR ===');
-      console.error('🔍 Error type:', error.constructor.name);
-      console.error('📄 Error message:', error.message);
-      console.error('📍 Error stack:', error.stack);
-      console.error('🌐 Network error details:', {
-  url: `/api/students/with-unassigned-seats`,
-        headers: {
-          'Authorization': localStorage.getItem('authToken') ? 'Bearer [TOKEN_PRESENT]' : '[NO_TOKEN]',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      setError(`Failed to load data: ${error.message}`);
+      console.log('✅ [fetchData] Data fetch completed successfully');
+    } catch (err) {
+      console.error('❌ [fetchData] Error occurred:', err);
+      console.error('❌ [fetchData] Error stack:', err.stack);
+      handleApiError(err, 'Failed to load data. Please try again.');
     } finally {
       setLoading(false);
-      console.log('🏁 Fetch data operation completed');
+      console.log('🔄 [fetchData] Loading state set to false');
     }
   };
 
-  // Function to fetch seat history
-  const fetchSeatHistory = async (seatNumber) => {
-    console.log('🔄 === FETCH SEAT HISTORY START ===');
-    console.log('🪑 Seat Number:', seatNumber);
-    console.log('📅 Timestamp:', new Date().toISOString());
+  // Calculate statistics
+  const getStats = () => {
+    console.log('📊 [getStats] Calculating statistics...');
+    console.log('Raw students data:', students);
+    console.log('Raw seatData:', seatData);
     
-    setSeatHistoryLoading(true);
-    try {
-      console.log('🚀 Making API request to fetch seat history...');
+    // Filter out null/undefined students
+    const validStudents = students.filter(student => student && typeof student === 'object');
+    console.log('Valid students after null check:', validStudents.length);
+    
+    const totalStudents = validStudents.length;
+    const assignedSeats = validStudents.filter(s => s.seat_number).length;
+    const availableSeats = unassignedSeats.length;
+    
+    // Calculate expiring students based on membership_till within 7 days
+    const today = new Date();
+    const sevenDaysFromNow = new Date();
+    sevenDaysFromNow.setDate(today.getDate() + 7);
+    
+    const expiringSeats = validStudents.filter(student => {
+      if (!student.membership_till) {
+        return false;
+      }
       
-  const response = await fetch(`/api/seats/${seatNumber}/history`, {
+      const expiryDate = new Date(student.membership_till);
+      return expiryDate >= today && expiryDate <= sevenDaysFromNow;
+    }).length;
+    
+    const unassignedStudents = validStudents.filter(s => !s.seat_number).length;
+    const totalSeats = seatData.length;
+    
+    // Calculate male and female seat counts
+    console.log('Processing seat data for gender counts...');
+    const maleSeats = seatData.filter(s => s && s.occupantSexRestriction === 'male').length;
+    const femaleSeats = seatData.filter(s => s && s.occupantSexRestriction === 'female').length;
+    const neutralSeats = totalSeats - maleSeats - femaleSeats; // Seats with no gender restriction
+
+    console.log('📈 [getStats] Statistics calculated:');
+    console.log('- Total Students:', totalStudents);
+    console.log('- Assigned Seats:', assignedSeats);
+    console.log('- Available Seats:', availableSeats);
+    console.log('- Expiring Seats:', expiringSeats);
+    console.log('- Unassigned Students:', unassignedStudents);
+    console.log('- Total Seats:', totalSeats);
+    console.log('- Male Seats:', maleSeats);
+    console.log('- Female Seats:', femaleSeats);
+    console.log('- Neutral Seats:', neutralSeats);
+
+    return {
+      totalStudents,
+      assignedSeats,
+      availableSeats,
+      expiringSeats,
+      unassignedStudents,
+      totalSeats,
+      maleSeats,
+      femaleSeats,
+      neutralSeats
+    };
+  };
+
+  const stats = getStats();
+
+  // Handle stat clicks for filtering
+  const handleStatClick = (statType) => {
+    setActiveStatFilter(statType);
+    clearAllFilters();
+    
+    switch (statType) {
+      case 'total':
+        setCurrentTab(0); // Seats view
+        clearAllFilters();
+        break;
+      case 'totalStudents':
+        setCurrentTab(1); // Students view
+        clearAllFilters();
+        break;
+      case 'available':
+        setCurrentTab(0); // Seats view
+        setStatusFilter('available');
+        break;
+      case 'expiring':
+        setCurrentTab(0); // Seats view
+        setStatusFilter('expiring');
+        break;
+      case 'assigned':
+        setCurrentTab(1); // Students view
+        setStatusFilter('assigned');
+        break;
+      case 'unassigned':
+        setCurrentTab(1); // Students view
+        setStatusFilter('unassigned');
+        break;
+      case 'male':
+        setGenderFilter('male');
+        break;
+      case 'female':
+        setGenderFilter('female');
+        break;
+      default:
+        break;
+    }
+  };
+
+  const clearAllFilters = () => {
+    setSeatNumberFilter('');
+    setStatusFilter('');
+    setGenderFilter('');
+    setStudentNameFilter('');
+    setContactFilter('');
+    setActiveStatFilter(null);
+  };
+
+  // Filter data based on current tab and filters
+  const getFilteredData = () => {
+    let data = [];
+    
+    if (currentTab === 0) { // Seats View
+      console.log('🔍 DEBUG: Processing seat data for display');
+      console.log('Seat data received from backend:', seatData.slice(0, 3));
+      console.log('Students data:', students.slice(0, 3));
+      
+      data = seatData.map(seat => {
+        const student = students.find(s => s.seat_number === seat.seatNumber);
+        const processedSeat = {
+          ...seat,
+          // Preserve backend data when available, fallback to student lookup
+          studentName: seat.studentName || student?.name || '',
+          studentId: seat.studentId || student?.id || '',
+          contact: seat.contactNumber || student?.contact_number || '',
+          gender: seat.gender || student?.sex || '',
+          // Fix: Determine if seat is occupied based on whether there's a student assigned
+          occupied: !!(seat.studentName || student?.name)
+        };
+        
+        // Log occupied seats for debugging
+        if (processedSeat.occupied && processedSeat.studentName) {
+          console.log(`✅ Occupied seat ${seat.seatNumber}: ${processedSeat.studentName} (backend data preserved)`);
+        } else if (processedSeat.occupied && !processedSeat.studentName && student) {
+          console.log(`🔄 Occupied seat ${seat.seatNumber}: ${student.name} (from student lookup)`);
+        } else if (!processedSeat.occupied) {
+          console.log(`🔓 Available seat ${seat.seatNumber}: No student assigned`);
+        }
+        
+        return processedSeat;
+      });
+      
+      console.log('Processed data sample:', data.filter(d => d.occupied).slice(0, 3));
+    } else if (currentTab === 1) { // Students View
+      console.log('🔍 DEBUG: Processing students data for Students View');
+      console.log('Students data received:', students.slice(0, 3));
+      
+      data = students.map(student => {
+        const processedStudent = {
+          ...student,
+          status: student.seat_number ? 'assigned' : 'unassigned',
+          gender: student.sex,
+          // Add consistent property for easier access
+          seatNumber: student.seat_number
+        };
+        
+        // Log student processing
+        console.log(`👤 Processing student: ID=${student.id}, Name=${student.name}, Seat=${student.seat_number || 'UNASSIGNED'}`);
+        
+        return processedStudent;
+      });
+      
+      console.log('Processed students data sample:', data.slice(0, 3));
+    }
+
+    // Apply filters
+    if (seatNumberFilter) {
+      data = data.filter(item => 
+        (item.seatNumber || '').toString() === seatNumberFilter
+      );
+    }
+    
+    if (statusFilter) {
+      if (statusFilter === 'expiring') {
+        data = data.filter(item => item.expiring);
+      } else if (statusFilter === 'assigned') {
+        data = data.filter(item => item.seatNumber);
+      } else if (statusFilter === 'unassigned') {
+        data = data.filter(item => !item.seatNumber);
+      } else if (statusFilter === 'available') {
+        data = data.filter(item => !item.occupied);
+      } else if (statusFilter === 'occupied') {
+        data = data.filter(item => item.occupied);
+      }
+    }
+    
+    if (genderFilter) {
+      data = data.filter(item => item.gender === genderFilter);
+    }
+    
+    if (studentNameFilter) {
+      data = data.filter(item => 
+        (item.name || item.studentName || '').toLowerCase().startsWith(studentNameFilter.toLowerCase())
+      );
+    }
+    
+    if (contactFilter) {
+      data = data.filter(item => 
+        (item.contact || item.contactNumber || '').startsWith(contactFilter)
+      );
+    }
+
+    return data;
+  };
+
+  const filteredData = getFilteredData();
+
+  // Add student handler
+  const handleAddStudent = async () => {
+    // Basic frontend validation for required fields
+    if (!newStudent.name.trim()) {
+      setSnackbarMessage('*Student name is required');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+
+    if (!newStudent.sex) {
+      setSnackbarMessage('*Gender is required');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+
+    setAddStudentLoading(true);
+    try {
+      // Map frontend field names to backend expected names
+      const studentData = {
+        name: newStudent.name.trim(),
+        sex: newStudent.sex,
+        father_name: newStudent.fatherName?.trim() || null,
+        contact_number: newStudent.contact?.trim() || null,
+        seat_number: newStudent.seat_number || null
+      };
+
+      const response = await fetch(`/api/students`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(studentData)
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        // Handle validation errors from backend
+        if (responseData.details && Array.isArray(responseData.details)) {
+          setSnackbarMessage(responseData.details.join(', '));
+        } else {
+          setSnackbarMessage(responseData.error || 'Failed to add student');
+        }
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        return;
+      }
+
+      setSnackbarMessage('Student added successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setAddDialogOpen(false);
+      setNewStudent({ name: '', seatNumber: '', contact: '', sex: '', fatherName: '' });
+      setAvailableSeats([]);
+      fetchData();
+    } catch (err) {
+      console.error('Error adding student:', err);
+      handleApiError(err, 'Failed to add student: ' + err.message);
+    } finally {
+      setAddStudentLoading(false);
+    }
+  };
+
+  // Action menu handlers
+  const handleActionClick = (event, item) => {
+    event.stopPropagation();
+    setActionMenuAnchor(event.currentTarget);
+    setSelectedItemForAction(item);
+  };
+
+  const handleActionClose = () => {
+    console.log('🔒 [handleActionClose] Closing action menu and clearing selectedItemForAction');
+    console.log('📋 [handleActionClose] Current selectedItemForAction:', selectedItemForAction);
+    setActionMenuAnchor(null);
+    setSelectedItemForAction(null);
+  };
+
+  // Seat history handler
+  const handleSeatHistory = async () => {
+    console.log('🔍 [History] Starting context-aware history...');
+    console.log('🔍 Current tab:', currentTab);
+    console.log('🔍 Selected item:', selectedItemForAction);
+    console.log('🔍 Selected item keys:', selectedItemForAction ? Object.keys(selectedItemForAction) : 'null');
+    
+    // Store context data for seat history dialog (similar to view dialog pattern)
+    setSeatHistoryContext({ 
+      ...selectedItemForAction,
+      contextTab: currentTab // Store which tab we're coming from
+    });
+    
+    setHistoryLoading(true);
+    try {
+      let response;
+      
+      if (currentTab === 0) {
+        // For seats tab (currentTab = 0), show all students who have used this seat
+        const seatNumber = selectedItemForAction?.seat_number || selectedItemForAction?.seatNumber;
+        console.log('🪑 [Seat History] Fetching seat history for seat:', seatNumber);
+        if (!seatNumber) {
+          console.error('❌ [Seat History] No seat number available in selectedItemForAction:', selectedItemForAction);
+          throw new Error('No seat number available');
+        }
+        response = await fetch(`/api/seats/${seatNumber}/history`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          }
+        });
+      } else {
+        // For students tab (currentTab = 1), show all seats this student has occupied
+        const studentId = selectedItemForAction?.id;
+        console.log('👤 [Student History] Fetching student history for ID:', studentId);
+        console.log('👤 [Student History] Student name:', selectedItemForAction?.name);
+        if (!studentId) {
+          console.error('❌ [Student History] No student ID available in selectedItemForAction:', selectedItemForAction);
+          throw new Error('No student ID available');
+        }
+        response = await fetch(`/api/students/${studentId}/history`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          }
+        });
+      }
+      
+      if (!response.ok) throw new Error('Failed to fetch history');
+      
+      const historyData = await response.json();
+      console.log('📊 [History] Received data:', historyData);
+      
+      setSeatHistory(historyData);
+      setSeatHistoryOpen(true);
+    } catch (err) {
+      handleApiError(err, 'Failed to load history');
+    } finally {
+      setHistoryLoading(false);
+    }
+    handleActionClose();
+  };
+
+  // Assign seat handler
+  const handleAssignSeat = () => {
+    setAssignSeatData({ 
+      seatNumber: selectedItemForAction?.seat_number || '', 
+      studentId: '' 
+    });
+    setAssignSeatOpen(true);
+    handleActionClose();
+  };
+
+  // Payment history handler
+  const handlePaymentHistory = async () => {
+    console.log('💰📚 [handlePaymentHistory] Payment history action initiated');
+    console.log('📋 Selected item for action:', selectedItemForAction);
+    
+    if (!selectedItemForAction?.id) {
+      console.warn('⚠️ [handlePaymentHistory] No student ID available, aborting payment history fetch');
+      return;
+    }
+    
+    console.log(`👤 [handlePaymentHistory] Fetching payment history for student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
+    
+    setHistoryLoading(true);
+    try {
+      console.log('🌐 [handlePaymentHistory] Sending GET request to /api/payments/student/:studentId...');
+      const response = await fetch(`/api/payments/student/${selectedItemForAction.id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      
+      console.log(`📡 [handlePaymentHistory] API Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        console.error('❌ [handlePaymentHistory] API request failed');
+        throw new Error('Failed to fetch payment history');
+      }
+      
+      const historyData = await response.json();
+      console.log('✅ [handlePaymentHistory] Payment history received:', historyData);
+      console.log(`📊 [handlePaymentHistory] Number of payment records: ${historyData.length}`);
+      
+      setPaymentHistory(historyData || []);
+      setPaymentHistoryOpen(true);
+      console.log('✅ [handlePaymentHistory] Payment history dialog opened successfully');
+    } catch (err) {
+      console.error('❌ [handlePaymentHistory] Error occurred during payment history fetch:', err);
+      console.error('🔍 [handlePaymentHistory] Error details:', {
+        message: err.message,
+        studentId: selectedItemForAction?.id,
+        studentName: selectedItemForAction?.name
+      });
+      handleApiError(err, 'Failed to load payment history');
+    } finally {
+      setHistoryLoading(false);
+      console.log('🔄 [handlePaymentHistory] History loading state set to false');
+    }
+    handleActionClose();
+  };
+
+  // Edit student handler
+  const handleEditStudent = () => {
+    console.log('🖊️ [handleEditStudent] Edit student action initiated');
+    console.log('📋 Selected item for action:', selectedItemForAction);
+    
+    if (!selectedItemForAction) {
+      console.warn('⚠️ [handleEditStudent] No selected item for action, aborting edit');
+      return;
+    }
+    
+    console.log(`👤 [handleEditStudent] Editing student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
+    console.log(`📞 [handleEditStudent] Current contact: ${selectedItemForAction.contact_number || 'Not provided'}`);
+    console.log(`👫 [handleEditStudent] Current gender: ${selectedItemForAction.sex || 'Not specified'}`);
+    console.log(`🪑 [handleEditStudent] Current seat: ${selectedItemForAction.seat_number || 'Unassigned'}`);
+    console.log(`📅 [handleEditStudent] Current membership: ${selectedItemForAction.membership_date || 'No start date'} to ${selectedItemForAction.membership_till || 'No end date'}`);
+    
+    const editData = {
+      id: selectedItemForAction.id,
+      name: selectedItemForAction.name,
+      contactNumber: selectedItemForAction.contact_number,
+      sex: selectedItemForAction.sex,
+      seatNumber: selectedItemForAction.seat_number || '',
+      membershipDate: selectedItemForAction.membership_date ? selectedItemForAction.membership_date.split('T')[0] : '',
+      membershipTill: selectedItemForAction.membership_till ? selectedItemForAction.membership_till.split('T')[0] : ''
+    };
+    
+    console.log('📝 [handleEditStudent] Setting edit form data:', editData);
+    console.log(`🆔 [handleEditStudent] Student ID being preserved: ${editData.id}`);
+    console.log(`📅 [handleEditStudent] Membership dates being set: ${editData.membershipDate || 'No start'} to ${editData.membershipTill || 'No end'}`);
+    setEditStudent(editData);
+    
+    // Fetch available seats if gender is available
+    if (editData.sex) {
+      fetchEditAvailableSeats(editData.sex, editData.seatNumber);
+    }
+    
+    setEditStudentOpen(true);
+    console.log('✅ [handleEditStudent] Edit dialog opened successfully');
+    handleActionClose();
+  };
+
+  // Add payment handler
+  const handleAddPayment = () => {
+    console.log('💰 [handleAddPayment] Add payment action initiated');
+    console.log('📋 Selected item for action:', selectedItemForAction);
+    
+    if (!selectedItemForAction) {
+      console.warn('⚠️ [handleAddPayment] No selected item for action, aborting payment addition');
+      return;
+    }
+    
+    console.log(`👤 [handleAddPayment] Adding payment for student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
+    console.log(`📊 [handleAddPayment] Student details:`, {
+      id: selectedItemForAction.id,
+      name: selectedItemForAction.name,
+      contact: selectedItemForAction.contact_number,
+      seat: selectedItemForAction.seat_number,
+      membership_till: selectedItemForAction.membership_till
+    });
+    
+    const initialPaymentData = {
+      amount: '',
+      method: 'cash',
+      type: 'monthly_fee',
+      date: new Date().toISOString().split('T')[0],
+      notes: ''
+    };
+    
+    console.log('💳 [handleAddPayment] Setting initial payment form data:', initialPaymentData);
+    setPaymentData(initialPaymentData);
+    setAddPaymentOpen(true);
+    console.log('✅ [handleAddPayment] Add payment dialog opened successfully');
+    // Note: handleActionClose() will be called after payment is confirmed or cancelled
+  };
+
+  // Remove student handler
+  const handleRemoveStudent = () => {
+    setDeleteConfirmOpen(true);
+    handleActionClose();
+  };
+
+  // View student details handler
+  const handleViewStudent = async () => {
+    console.log('👀 [handleViewStudent] View student action initiated');
+    console.log('📋 Selected item for action:', selectedItemForAction);
+    
+    if (!selectedItemForAction) {
+      console.warn('⚠️ [handleViewStudent] No selected item for action, aborting view');
+      return;
+    }
+    
+    console.log(`👤 [handleViewStudent] Viewing student details: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
+    console.log(`📞 [handleViewStudent] Contact: ${selectedItemForAction.contact_number || 'Not provided'}`);
+    console.log(`👫 [handleViewStudent] Gender: ${selectedItemForAction.sex || 'Not specified'}`);
+    console.log(`🪑 [handleViewStudent] Seat assignment: ${selectedItemForAction.seat_number || 'Unassigned'}`);
+    console.log(`📅 [handleViewStudent] Membership until: ${selectedItemForAction.membership_till || 'Not set'}`);
+    
+    // Store student data for the view dialog
+    setViewStudentData({ ...selectedItemForAction });
+    
+    // Fetch total paid amount for this student
+    try {
+      console.log('🌐 [handleViewStudent] Fetching payment data for total calculation...');
+      const response = await fetch(`/api/payments/student/${selectedItemForAction.id}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
         }
       });
       
-      console.log('📡 Seat history API response status:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Seat history API error response:', errorText);
-        throw new Error(`Seat history API error! status: ${response.status} - ${errorText}`);
+      if (response.ok) {
+        const payments = await response.json();
+        console.log('💰 [handleViewStudent] Raw payment data received:', payments);
+        console.log('💰 [handleViewStudent] Sample payment structure:', payments[0]);
+        
+        // Calculate total with proper number conversion and logging
+        let totalPaid = 0;
+        payments.forEach((payment, index) => {
+          const rawAmount = payment.amount;
+          const parsedAmount = parseFloat(rawAmount);
+          const safeAmount = isNaN(parsedAmount) ? 0 : parsedAmount;
+          
+          console.log(`💰 [handleViewStudent] Payment ${index + 1}:`, {
+            raw: rawAmount,
+            parsed: parsedAmount,
+            safe: safeAmount,
+            type: typeof rawAmount
+          });
+          
+          totalPaid += safeAmount;
+        });
+        
+        console.log(`💰 [handleViewStudent] Final total calculated: ₹${totalPaid} from ${payments.length} payments`);
+        setViewStudentTotalPaid(totalPaid);
+      } else {
+        console.warn('⚠️ [handleViewStudent] Failed to fetch payment data, setting total paid to 0');
+        setViewStudentTotalPaid(0);
       }
-      
-      const historyData = await response.json();
-      console.log('✅ Seat history data received:', historyData.length, 'records');
-      console.log('📊 History data:', historyData);
-      
-      setSeatHistoryData(historyData);
-      console.log('🎉 === FETCH SEAT HISTORY SUCCESS ===');
     } catch (error) {
-      console.error('💥 === FETCH SEAT HISTORY ERROR ===');
-      console.error('🔍 Error type:', error.constructor.name);
-      console.error('📄 Error message:', error.message);
-      console.error('📍 Error stack:', error.stack);
-      console.error('🌐 Request details:', {
-  url: `/api/seats/${seatNumber}/history`,
-        seatNumber: seatNumber
-      });
-      
-      setSnackbarMessage(`Error fetching seat history: ${error.message}`);
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    } finally {
-      setSeatHistoryLoading(false);
-      console.log('🏁 Fetch seat history operation completed');
-    }
-  };
-
-  // Utility functions
-  const normalizeGender = (value) => {
-    if (!value) return '';
-    const normalized = value.toString().toLowerCase();
-    if (normalized === 'f' || normalized === 'female') return 'Female';
-    if (normalized === 'm' || normalized === 'male') return 'Male';
-    return 'Unknown'; // Changed from 'Other' to 'Unknown'
-  };
-
-  const isMembershipActive = (membershipTill) => {
-    const today = new Date();
-    const expiryDate = new Date(membershipTill);
-    return today <= expiryDate;
-  };
-
-  const isMembershipExpiring = (membershipTill) => {
-    const today = new Date();
-    const oneWeekFromNow = new Date();
-    oneWeekFromNow.setDate(today.getDate() + 7);
-    const expiryDate = new Date(membershipTill);
-    return expiryDate <= oneWeekFromNow && expiryDate > today;
-  };
-
-  // Filter functions
-  const getFilteredSeatData = () => {
-    return seatData.filter(seat => {
-      // Name filter
-      if (nameSearch.trim() && seat.studentName) {
-        if (!seat.studentName.toLowerCase().includes(nameSearch.toLowerCase().trim())) {
-          return false;
-        }
-      } else if (nameSearch.trim() && !seat.studentName) {
-        return false;
-      }
-
-      // Seat number filter
-      if (seatSearch.trim()) {
-        if (!seat.seatNumber.toLowerCase().includes(seatSearch.toLowerCase().trim())) {
-          return false;
-        }
-      }
-
-      // Contact filter
-      if (contactSearch.trim() && seat.contactNumber) {
-        if (!seat.contactNumber.toLowerCase().includes(contactSearch.toLowerCase().trim())) {
-          return false;
-        }
-      } else if (contactSearch.trim() && !seat.contactNumber) {
-        return false;
-      }
-
-      // Status filter
-      if (statusFilter !== 'all') {
-        switch (statusFilter) {
-          case 'active':
-            if (!seat.occupied || !isMembershipActive(seat.membershipExpiry)) return false;
-            break;
-          case 'expiring':
-            if (!seat.occupied || !isMembershipExpiring(seat.membershipExpiry)) return false;
-            break;
-          case 'expired':
-            if (!seat.occupied || isMembershipActive(seat.membershipExpiry)) return false;
-            break;
-          case 'vacant':
-            if (seat.occupied) return false;
-            break;
-        }
-      }
-
-      // Gender filter
-      if (seat.occupied && seat.gender) {
-        const gender = normalizeGender(seat.gender);
-        if (gender === 'Male' && !showMale) return false;
-        if (gender === 'Female' && !showFemale) return false;
-      }
-
-      return true;
-    });
-  };
-
-  const getSeatColor = (seat) => {
-    if (seat.removed) {
-      return seatColors.removed.gradient;
+      console.error('❌ [handleViewStudent] Error fetching payment data:', error);
+      setViewStudentTotalPaid(0);
     }
     
-    if (!seat.occupied) {
-      return seatColors.vacant.gradient;
+    setViewStudentOpen(true);
+    console.log('✅ [handleViewStudent] View dialog opened successfully');
+    handleActionClose(); // Close the action menu
+  };
+
+  // Edit student from view dialog
+  const handleEditFromView = () => {
+    console.log('🔄 [handleEditFromView] Edit from view action initiated');
+    console.log('📋 View student data:', viewStudentData);
+    
+    if (!viewStudentData) {
+      console.warn('⚠️ [handleEditFromView] No view student data available, aborting edit from view');
+      return;
     }
     
-    const gender = normalizeGender(seat.gender);
-    const isExpiring = seat.expiring;
+    console.log(`👤 [handleEditFromView] Transitioning to edit mode for student: ID=${viewStudentData.id}, Name="${viewStudentData.name}"`);
+    console.log('🔚 [handleEditFromView] Closing view dialog');
+    setViewStudentOpen(false);
     
-    if (isExpiring) {
-      return gender === 'Male' ? seatColors.expiring.male.gradient : seatColors.expiring.female.gradient;
+    const editData = {
+      id: viewStudentData.id,
+      name: viewStudentData.name,
+      contactNumber: viewStudentData.contact_number,
+      sex: viewStudentData.sex,
+      seatNumber: viewStudentData.seat_number || '',
+      membershipDate: viewStudentData.membership_date ? viewStudentData.membership_date.split('T')[0] : '',
+      membershipTill: viewStudentData.membership_till ? viewStudentData.membership_till.split('T')[0] : ''
+    };
+    
+    console.log('📝 [handleEditFromView] Setting edit form data:', editData);
+    console.log(`📞 [handleEditFromView] Contact being set: ${viewStudentData.contact_number || 'Not provided'}`);
+    console.log(`👫 [handleEditFromView] Gender being set: ${viewStudentData.sex || 'Not specified'}`);
+    console.log(`🪑 [handleEditFromView] Seat being set: ${viewStudentData.seat_number || 'Unassigned'}`);
+    
+    // Set selectedItemForAction for the edit functions to work
+    setSelectedItemForAction({ ...viewStudentData });
+    setEditStudent(editData);
+    
+    // Fetch available seats if gender is available
+    if (editData.sex) {
+      fetchEditAvailableSeats(editData.sex, editData.seatNumber);
     }
     
-    return gender === 'Male' ? seatColors.occupied.male.gradient : seatColors.occupied.female.gradient;
+    setEditStudentOpen(true);
+    console.log('✅ [handleEditFromView] Successfully transitioned from view to edit mode');
   };
 
-  const handleSeatClick = (seat) => {
-    setSelectedSeat(seat);
-    if (seat.occupied && seat.studentName) {
-      // Find the full student data
-      const studentData = students.find(s => s.name === seat.studentName);
-      setSelectedStudent(studentData);
-    }
-  };
-
-  const handleSeatHistoryClick = (seat) => {
-    fetchSeatHistory(seat.seatNumber);
-    setSeatHistoryOpen(true);
-  };
-
-  const clearAllFilters = () => {
-    setNameSearch('');
-    setSeatSearch('');
-    setContactSearch('');
-    setStatusFilter('all');
-    setShowMale(true);
-    setShowFemale(true);
-  };
-
-  // Handle marking expired seat as vacant
-  const handleMarkVacant = async () => {
-    if (!selectedSeat || !selectedStudent) return;
+  // Confirm delete student
+  const confirmDeleteStudent = async () => {
+    if (!selectedItemForAction) return;
     
     try {
-      setLoading(true);
-      console.log('🔄 Marking seat as vacant:', selectedSeat.seatNumber);
-      
-      await markSeatAsVacant(selectedSeat.seatNumber);
-      
-      // Refresh data to show updated status
-      await fetchData();
-      
-      // Close dialogs and clear selections
-      setSelectedSeat(null);
-      setSelectedStudent(null);
-      
-      // Show success notification
-      setSnackbarMessage(`Seat ${selectedSeat.seatNumber} marked as vacant successfully`);
+      const response = await fetch(`/api/students/${selectedItemForAction.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to delete student');
+
+      setSnackbarMessage('Student removed successfully');
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
-      
-      console.log('✅ Seat marked as vacant successfully');
-    } catch (error) {
-      console.error('❌ Error marking seat as vacant:', error);
-      setSnackbarMessage(`Failed to mark seat as vacant: ${error.message}`);
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    } finally {
-      setLoading(false);
+      setDeleteConfirmOpen(false);
+      fetchData();
+    } catch (err) {
+      handleApiError(err, 'Failed to remove student');
     }
   };
 
-  // Statistics calculation
-  const calculateStats = () => {
-    const total = seatData.length;
-    const occupied = seatData.filter(seat => seat.occupied).length;
-    const vacant = total - occupied;
-    const expiring = seatData.filter(seat => seat.occupied && seat.expiring).length;
-    const male = seatData.filter(seat => seat.occupied && normalizeGender(seat.gender) === 'Male').length;
-    const female = seatData.filter(seat => seat.occupied && normalizeGender(seat.gender) === 'Female').length;
-    const studentsWithoutSeats = students.filter(student => !student.assigned_seat || student.assigned_seat === 'UNASSIGNED').length;
-    const availableSeats = unassignedSeats.length;
-    
-    return { 
-      total, 
-      occupied, 
-      vacant, 
-      expiring, 
-      male, 
-      female, 
-      studentsWithoutSeats,
-      availableSeats,
-      totalStudents: students.length
-    };
+  // Confirm assign seat
+  const handleConfirmAssignSeat = async () => {
+    try {
+      const response = await fetch('/api/seats/assign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          seatNumber: selectedItemForAction.seat_number,
+          studentId: assignSeatData.studentId
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to assign seat');
+
+      setSnackbarMessage('Seat assigned successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setAssignSeatOpen(false);
+      setAssignSeatData({ seatNumber: '', studentId: '' });
+      fetchData();
+    } catch (err) {
+      handleApiError(err, 'Failed to assign seat');
+    }
   };
+
+  // Confirm add payment
+  const handleConfirmAddPayment = async () => {
+    console.log('💰✅ [handleConfirmAddPayment] Starting payment creation process');
+    console.log('📋 Selected item for action:', selectedItemForAction);
+    console.log('💳 Payment form data:', paymentData);
+    
+    if (!selectedItemForAction) {
+      console.warn('⚠️ [handleConfirmAddPayment] No selected item for action, aborting payment creation');
+      return;
+    }
+    
+    console.log(`👤 [handleConfirmAddPayment] Creating payment for student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
+    
+    // Frontend validation
+    const validationErrors = [];
+    if (!paymentData.amount || isNaN(paymentData.amount) || parseFloat(paymentData.amount) <= 0) {
+      validationErrors.push('Valid payment amount is required');
+    }
+    if (!paymentData.method) {
+      validationErrors.push('Payment method is required');
+    }
+    if (!paymentData.type) {
+      validationErrors.push('Payment type is required');
+    }
+    if (!paymentData.date) {
+      validationErrors.push('Payment date is required');
+    }
+    
+    if (validationErrors.length > 0) {
+      console.error('❌ [handleConfirmAddPayment] Frontend validation failed:', validationErrors);
+      setSnackbarMessage('Please fill in all required fields: ' + validationErrors.join(', '));
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    // Map frontend fields to backend fields
+    const paymentPayload = {
+      student_id: selectedItemForAction.id,
+      amount: parseFloat(paymentData.amount),
+      payment_date: paymentData.date,
+      payment_mode: paymentData.method, // Map method to payment_mode
+      payment_type: paymentData.type, // Map type to payment_type
+      remarks: paymentData.notes || `Payment for ${selectedItemForAction.name}`,
+      modified_by: 1 // Will be set by auth middleware but including for completeness
+    };
+    
+    console.log('📤 [handleConfirmAddPayment] Payment payload to send:', paymentPayload);
+    console.log(`💰 [handleConfirmAddPayment] Amount: ₹${paymentPayload.amount}, Method: ${paymentPayload.payment_mode}, Type: ${paymentPayload.payment_type}, Date: ${paymentPayload.payment_date}`);
+    
+    try {
+      setPaymentLoading(true);
+      console.log('🌐 [handleConfirmAddPayment] Sending POST request to /api/payments...');
+      
+      const response = await fetch('/api/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(paymentPayload)
+      });
+
+      console.log(`📡 [handleConfirmAddPayment] API Response status: ${response.status}`);
+      console.log(`📡 [handleConfirmAddPayment] Response headers:`, Object.fromEntries(response.headers.entries()));
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [handleConfirmAddPayment] API request failed:', errorData);
+        throw new Error(errorData.error || `Failed to add payment (Status: ${response.status})`);
+      }
+
+      const responseData = await response.json();
+      console.log('✅ [handleConfirmAddPayment] API Response data:', responseData);
+      console.log('🎉 [handleConfirmAddPayment] Payment created successfully');
+
+      setSnackbarMessage('Payment added successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setAddPaymentOpen(false);
+      
+      // Reset form data
+      const resetData = {
+        amount: '',
+        method: 'cash',
+        type: 'monthly_fee',
+        date: new Date().toISOString().split('T')[0],
+        notes: ''
+      };
+      console.log('🔄 [handleConfirmAddPayment] Resetting payment form data:', resetData);
+      setPaymentData(resetData);
+      
+      // Close action menu after successful payment
+      handleActionClose();
+      
+      console.log('🔄 [handleConfirmAddPayment] Refreshing data...');
+      fetchData();
+    } catch (err) {
+      console.error('❌ [handleConfirmAddPayment] Error occurred during payment creation:', err);
+      console.error('🔍 [handleConfirmAddPayment] Error details:', {
+        message: err.message,
+        stack: err.stack,
+        studentId: selectedItemForAction?.id,
+        paymentData: paymentData,
+        paymentPayload: paymentPayload
+      });
+      handleApiError(err, 'Failed to add payment');
+    } finally {
+      setPaymentLoading(false);
+      console.log('🔄 [handleConfirmAddPayment] Payment loading state set to false');
+    }
+  };
+
+  // Confirm edit student
+  const handleConfirmEditStudent = async () => {
+    console.log('✅ [handleConfirmEditStudent] Starting student update process');
+    console.log('📋 Selected item for action:', selectedItemForAction);
+    console.log('📝 Edit student form data:', editStudent);
+    
+    // Use editStudent.id if selectedItemForAction is null but editStudent has an ID
+    const studentId = selectedItemForAction?.id || editStudent?.id;
+    
+    if (!studentId) {
+      console.warn('⚠️ [handleConfirmEditStudent] No student ID available, aborting update');
+      console.error('🔍 [handleConfirmEditStudent] Debug info:', {
+        selectedItemForAction,
+        editStudent,
+        extractedId: studentId
+      });
+      return;
+    }
+    
+    console.log(`👤 [handleConfirmEditStudent] Using student ID: ${studentId} (source: ${selectedItemForAction?.id ? 'selectedItemForAction' : 'editStudent'})`);
+    
+    const updateData = {
+      name: editStudent.name,
+      contact_number: editStudent.contactNumber,
+      sex: editStudent.sex,
+      seat_number: editStudent.seatNumber || null,
+      membership_date: editStudent.membershipDate || null,
+      membership_till: editStudent.membershipTill || null
+    };
+    
+    console.log('📊 [handleConfirmEditStudent] Update payload:', updateData);
+    console.log(`🪑 [handleConfirmEditStudent] Seat assignment: ${editStudent.seatNumber ? `Seat #${editStudent.seatNumber}` : 'No seat assigned'}`);
+    console.log(`📅 [handleConfirmEditStudent] Membership period: ${editStudent.membershipDate ? `From ${editStudent.membershipDate}` : 'No start date'} ${editStudent.membershipTill ? `to ${editStudent.membershipTill}` : 'to no end date'}`);
+    
+    try {
+      console.log('🌐 [handleConfirmEditStudent] Sending PUT request to API...');
+      const response = await fetch(`/api/students/${studentId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(updateData)
+      });
+
+      console.log(`📡 [handleConfirmEditStudent] API Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        console.error('❌ [handleConfirmEditStudent] API request failed');
+        throw new Error('Failed to update student');
+      }
+
+      const responseData = await response.json();
+      console.log('✅ [handleConfirmEditStudent] API Response data:', responseData);
+      console.log('🎉 [handleConfirmEditStudent] Student updated successfully');
+
+      setSnackbarMessage('Student updated successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setEditStudentOpen(false);
+      setEditAvailableSeats([]);
+      
+      console.log('🔄 [handleConfirmEditStudent] Refreshing data...');
+      fetchData();
+    } catch (err) {
+      console.error('❌ [handleConfirmEditStudent] Error occurred during student update:', err);
+      console.error('🔍 [handleConfirmEditStudent] Error details:', {
+        message: err.message,
+        stack: err.stack,
+        studentId: studentId,
+        editData: editStudent
+      });
+      handleApiError(err, 'Failed to update student');
+    }
+  };
+
+  // Render Dashboard Stats - Mobile Optimized
+  const renderStats = () => {
+    if (isMobile) {
+      // Mobile layout: Horizontal scrollable with compact cards
+      return (
+        <Box sx={{ mb: 2 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              overflowX: 'auto',
+              gap: 1.5,
+              pb: 1,
+              '&::-webkit-scrollbar': {
+                height: '4px',
+              },
+              '&::-webkit-scrollbar-track': {
+                background: '#f1f1f1',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                background: '#c1c1c1',
+                borderRadius: '4px',
+              },
+            }}
+          >
+            {/* Total Students */}
+            <Card 
+              sx={{ 
+                minWidth: 100,
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
+                '&:hover': { bgcolor: 'primary.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('totalStudents')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <PersonIcon sx={{ color: 'primary.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="primary">
+                    {stats.totalStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Students</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Available Seats */}
+            <Card 
+              sx={{ 
+                minWidth: 100,
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
+                '&:hover': { bgcolor: 'info.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('available')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <EventSeatIcon sx={{ color: 'info.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="info.main">
+                    {stats.availableSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Available</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Expiring Soon */}
+            <Card 
+              sx={{ 
+                minWidth: 100,
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
+                '&:hover': { bgcolor: 'warning.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('expiring')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="warning.main">
+                    {stats.expiringSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Assigned Seats */}
+            <Card 
+              sx={{ 
+                minWidth: 100,
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
+                '&:hover': { bgcolor: 'success.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('assigned')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <EventSeatIcon sx={{ color: 'success.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="success.main">
+                    {stats.assignedSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assigned</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Unassigned */}
+            <Card 
+              sx={{ 
+                minWidth: 100,
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
+                '&:hover': { bgcolor: 'error.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('unassigned')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <PersonIcon sx={{ color: 'error.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="error.main">
+                    {stats.unassignedStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Total Seats */}
+            <Card 
+              sx={{ 
+                minWidth: 120, 
+                borderRadius: 2, 
+                boxShadow: 1,
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper',
+                '&:hover': { bgcolor: 'grey.200' }
+              }}
+              onClick={() => handleStatClick('total')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <EventSeatIcon sx={{ color: 'text.secondary', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold">
+                    {stats.totalSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem', display: 'block' }}>Total Seats</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, mt: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.maleSeats}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.femaleSeats}</Typography>
+                  </Box>
+                  {stats.neutralSeats > 0 && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                      <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                        +{stats.neutralSeats}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+          
+          {/* Clear filter hint */}
+          {activeStatFilter && (
+            <Box sx={{ textAlign: 'center', mt: 1 }}>
+              <Chip
+                label={`Filtered by: ${activeStatFilter}`}
+                onDelete={() => handleStatClick(null)}
+                size="small"
+                color="primary"
+                variant="outlined"
+              />
+            </Box>
+          )}
+        </Box>
+      );
+    }
+
+    // Desktop layout: Grid with larger cards
+    return (
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={6} sm={4} md={2}>
+          <Card 
+            sx={{ 
+              cursor: 'pointer', 
+              bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                bgcolor: 'primary.light',
+                transform: 'translateY(-2px)',
+                boxShadow: 3
+              }
+            }}
+            onClick={() => handleStatClick('totalStudents')}
+          >
+            <CardContent sx={{ py: 2, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                <PersonIcon sx={{ color: 'primary.main', fontSize: 20, mr: 1 }} />
+                <Typography variant="h5" fontWeight="bold" color="primary">
+                  {stats.totalStudents}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Total Students</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={4} md={2}>
+          <Card 
+            sx={{ 
+              cursor: 'pointer', 
+              bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                bgcolor: 'info.light',
+                transform: 'translateY(-2px)',
+                boxShadow: 3
+              }
+            }}
+            onClick={() => handleStatClick('available')}
+          >
+            <CardContent sx={{ py: 2, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                <EventSeatIcon sx={{ color: 'info.main', fontSize: 20, mr: 1 }} />
+                <Typography variant="h5" fontWeight="bold" color="info.main">
+                  {stats.availableSeats}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Available Seats</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={4} md={2}>
+          <Card 
+            sx={{ 
+              cursor: 'pointer', 
+              bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                bgcolor: 'warning.light',
+                transform: 'translateY(-2px)',
+                boxShadow: 3
+              }
+            }}
+            onClick={() => handleStatClick('expiring')}
+          >
+            <CardContent sx={{ py: 2, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 20, mr: 1 }} />
+                <Typography variant="h5" fontWeight="bold" color="warning.main">
+                  {stats.expiringSeats}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Expiring Soon</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={4} md={2}>
+          <Card 
+            sx={{ 
+              cursor: 'pointer', 
+              bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                bgcolor: 'success.light',
+                transform: 'translateY(-2px)',
+                boxShadow: 3
+              }
+            }}
+            onClick={() => handleStatClick('assigned')}
+          >
+            <CardContent sx={{ py: 2, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                <EventSeatIcon sx={{ color: 'success.main', fontSize: 20, mr: 1 }} />
+                <Typography variant="h5" fontWeight="bold" color="success.main">
+                  {stats.assignedSeats}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Assigned Seats</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={4} md={2}>
+          <Card 
+            sx={{ 
+              cursor: 'pointer', 
+              bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                bgcolor: 'error.light',
+                transform: 'translateY(-2px)',
+                boxShadow: 3
+              }
+            }}
+            onClick={() => handleStatClick('unassigned')}
+          >
+            <CardContent sx={{ py: 2, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                <PersonIcon sx={{ color: 'error.main', fontSize: 20, mr: 1 }} />
+                <Typography variant="h5" fontWeight="bold" color="error.main">
+                  {stats.unassignedStudents}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Unassigned</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={4} md={2}>
+          <Card 
+            sx={{ 
+              cursor: 'pointer', 
+              bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                bgcolor: 'grey.200',
+                transform: 'translateY(-2px)',
+                boxShadow: 3
+              }
+            }}
+            onClick={() => handleStatClick('total')}
+          >
+            <CardContent sx={{ py: 2, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                <EventSeatIcon sx={{ color: 'text.secondary', fontSize: 20, mr: 1 }} />
+                <Typography variant="h5" fontWeight="bold">
+                  {stats.totalSeats}
+                </Typography>
+              </Box>
+              <Typography variant="body2" sx={{ mb: 1 }}>Total Seats</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
+                  <Typography variant="caption" color="primary.main" fontWeight="medium">
+                    {stats.maleSeats}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
+                  <Typography variant="caption" color="secondary.main" fontWeight="medium">
+                    {stats.femaleSeats}
+                  </Typography>
+                </Box>
+                {stats.neutralSeats > 0 && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="medium">
+                      +{stats.neutralSeats}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
+  // Render filters based on current tab
+  const renderFilters = () => {
+    const activeFilters = {};
+    const filterCount = Object.values({
+      seatNumber: seatNumberFilter,
+      status: statusFilter,
+      gender: genderFilter,
+      studentName: studentNameFilter,
+      contact: contactFilter
+    }).filter(value => value && value !== '').length;
+
+    // Build active filters object for chips
+    if (seatNumberFilter) activeFilters.seat = seatNumberFilter;
+    if (statusFilter) activeFilters.status = statusFilter;
+    if (genderFilter) activeFilters.gender = genderFilter;
+    if (studentNameFilter) activeFilters.name = studentNameFilter;
+    if (contactFilter) activeFilters.contact = contactFilter;
+
+    const handleFilterRemove = (filterKey) => {
+      switch (filterKey) {
+        case 'seat': setSeatNumberFilter(''); break;
+        case 'status': setStatusFilter(''); break;
+        case 'gender': setGenderFilter(''); break;
+        case 'name': setStudentNameFilter(''); break;
+        case 'contact': setContactFilter(''); break;
+      }
+    };
+
+    const filterContent = (
+      <>
+        {currentTab === 0 && (
+          <Stack spacing={2}>
+            <TextField
+              size="small"
+              label="Seat Number"
+              value={seatNumberFilter}
+              onChange={(e) => setSeatNumberFilter(e.target.value)}
+              fullWidth
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="occupied">Occupied</MenuItem>
+                <MenuItem value="available">Available</MenuItem>
+                <MenuItem value="expiring">Expiring</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Gender</InputLabel>
+              <Select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value)}
+                label="Gender"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        )}
+        
+        {currentTab === 1 && (
+          <Stack spacing={2}>
+            <TextField
+              size="small"
+              label="Student Name"
+              value={studentNameFilter}
+              onChange={(e) => setStudentNameFilter(e.target.value)}
+              fullWidth
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="assigned">Assigned</MenuItem>
+                <MenuItem value="unassigned">Unassigned</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Gender</InputLabel>
+              <Select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value)}
+                label="Gender"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="Contact"
+              value={contactFilter}
+              onChange={(e) => setContactFilter(e.target.value)}
+              fullWidth
+            />
+          </Stack>
+        )}
+      </>
+    );
+
+    return (
+      <MobileFilters
+        title={currentTab === 0 ? "Seat Filters" : "Student Filters"}
+        filterCount={filterCount}
+        onClearAll={clearAllFilters}
+        activeFilters={activeFilters}
+        onFilterRemove={handleFilterRemove}
+        variant={isMobile ? "drawer" : "collapse"}
+      >
+        {filterContent}
+      </MobileFilters>
+    );
+  };
+
+  // Render Seats View
+  const renderSeatsView = () => (
+    <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+      <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 600 : 'auto' }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ 
+              position: isMobile ? 'sticky' : 'static',
+              left: 0,
+              bgcolor: 'background.paper',
+              zIndex: isMobile ? 10 : 'auto',
+              minWidth: 120
+            }}>
+              <strong>Seat#</strong>
+            </TableCell>
+            <TableCell sx={{ 
+              position: isMobile ? 'sticky' : 'static',
+              left: isMobile ? 120 : 'auto',
+              bgcolor: 'background.paper',
+              zIndex: isMobile ? 10 : 'auto',
+              minWidth: 200,
+              borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
+            }}>
+              <strong>Student Details</strong>
+            </TableCell>
+            <TableCell sx={{ 
+              minWidth: 80,
+              position: 'sticky',
+              right: 0,
+              bgcolor: 'background.paper',
+              zIndex: isMobile ? 10 : 'auto',
+              borderLeft: '1px solid rgba(224, 224, 224, 1)'
+            }}>
+              <strong>Actions</strong>
+            </TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {filteredData.filter(seat => seat && seat.seatNumber).map((seat) => (
+            <TableRow key={seat.seatNumber}>
+              <TableCell sx={{ 
+                position: isMobile ? 'sticky' : 'static',
+                left: 0,
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 5 : 'auto'
+              }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <EventSeatIcon 
+                      sx={{ 
+                        color: seat.occupied 
+                          ? (seat.gender === 'female' ? 'secondary.main' : 'primary.main')
+                          : 'grey.500',
+                        fontSize: 20
+                      }} 
+                    />
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: 'medium',
+                        color: 'text.primary'
+                      }}
+                    >
+                      #{seat.seatNumber}
+                    </Typography>
+                  </Box>
+                  {seat.expiring ? (
+                    <Chip label="Expiring" color="warning" size="small" />
+                  ) : seat.occupied ? (
+                    <Chip label="Occupied" color="success" size="small" />
+                  ) : (
+                    <Chip label="Available" variant="outlined" size="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell sx={{ 
+                position: isMobile ? 'sticky' : 'static',
+                left: isMobile ? 120 : 'auto',
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 5 : 'auto',
+                borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
+              }}>
+                {seat.studentName ? (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {seat.gender === 'female' ? 
+                        <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
+                        <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
+                      }
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          fontWeight: 'medium',
+                          cursor: 'pointer',
+                          color: 'primary.main',
+                          '&:hover': {
+                            textDecoration: 'underline'
+                          }
+                        }}
+                        onClick={() => {
+                          // Find the student by ID or name to set as selected item
+                          const student = students.find(s => s.id === seat.studentId);
+                          if (student) {
+                            setSelectedItemForAction(student);
+                            handleViewStudent();
+                          }
+                        }}
+                      >
+                        {seat.studentName}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 3 }}>
+                      ID: {seat.studentId || 'N/A'}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">Empty</Typography>
+                )}
+              </TableCell>
+              <TableCell sx={{ 
+                position: 'sticky',
+                right: 0,
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 5 : 'auto',
+                borderLeft: '1px solid rgba(224, 224, 224, 1)'
+              }}>
+                <IconButton 
+                  size="small" 
+                  onClick={(e) => handleActionClick(e, seat)}
+                  sx={{ 
+                    zIndex: 100,
+                    position: 'relative'
+                  }}
+                >
+                  <MoreVertIcon />
+                </IconButton>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+
+  // Render Students View
+  const renderStudentsView = () => (
+    <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+      <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 450 : 'auto' }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ 
+              position: isMobile ? 'sticky' : 'static',
+              left: 0,
+              bgcolor: 'background.paper',
+              zIndex: isMobile ? 10 : 'auto',
+              minWidth: 120
+            }}>
+              <strong>Student ID</strong>
+            </TableCell>
+            <TableCell sx={{ 
+              position: isMobile ? 'sticky' : 'static',
+              left: isMobile ? 120 : 'auto',
+              bgcolor: 'background.paper',
+              zIndex: isMobile ? 10 : 'auto',
+              minWidth: 250,
+              borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
+            }}>
+              <strong>Name</strong>
+            </TableCell>
+            <TableCell sx={{ 
+              minWidth: 80,
+              position: 'sticky',
+              right: 0,
+              bgcolor: 'background.paper',
+              zIndex: isMobile ? 10 : 'auto',
+              borderLeft: '1px solid rgba(224, 224, 224, 1)'
+            }}>
+              <strong>Actions</strong>
+            </TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {filteredData.filter(student => student && student.id).map((student) => (
+            <TableRow key={student.id}>
+              <TableCell sx={{ 
+                position: isMobile ? 'sticky' : 'static',
+                left: 0,
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 5 : 'auto'
+              }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      fontWeight: 'medium',
+                      cursor: 'pointer',
+                      color: 'primary.main',
+                      '&:hover': {
+                        textDecoration: 'underline'
+                      }
+                    }}
+                    onClick={() => {
+                      setSelectedItemForAction(student);
+                      handleViewStudent();
+                    }}
+                  >
+                    {student.id}
+                  </Typography>
+                  <Chip 
+                    icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
+                    label={student.seat_number || 'Unassigned'} 
+                    color={student.seat_number ? 'success' : 'error'}
+                    size="small"
+                  />
+                </Box>
+              </TableCell>
+              <TableCell sx={{ 
+                position: isMobile ? 'sticky' : 'static',
+                left: isMobile ? 120 : 'auto',
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 5 : 'auto',
+                borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
+              }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {student.sex === 'female' ? 
+                      <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
+                      <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
+                    }
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        fontWeight: 'medium',
+                        cursor: 'pointer',
+                        color: 'primary.main',
+                        '&:hover': {
+                          textDecoration: 'underline'
+                        }
+                      }}
+                      onClick={() => {
+                        setSelectedItemForAction(student);
+                        handleViewStudent();
+                      }}
+                    >
+                      {student.name}
+                    </Typography>
+                  </Box>
+                  {student.membership_till && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <AccessTimeIcon sx={{ color: 'grey.600', fontSize: 16 }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Until: {formatDateForDisplay(student.membership_till)}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell sx={{ 
+                position: 'sticky',
+                right: 0,
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 5 : 'auto',
+                borderLeft: '1px solid rgba(224, 224, 224, 1)'
+              }}>
+                <IconButton 
+                  size="small" 
+                  onClick={(e) => handleActionClick(e, student)}
+                  sx={{ 
+                    zIndex: 100,
+                    position: 'relative'
+                  }}
+                >
+                  <MoreVertIcon />
+                </IconButton>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
       </Box>
     );
@@ -469,1547 +1992,709 @@ function Students() {
 
   if (error) {
     return (
-      <Box sx={pageStyles?.container || {}}>
-        <Container maxWidth="xl">
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
-          </Alert>
-        </Container>
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">{error}</Alert>
+        <Button onClick={fetchData} sx={{ mt: 2 }}>Try Again</Button>
       </Box>
     );
   }
 
-  const stats = calculateStats();
-  const filteredSeats = getFilteredSeatData();
-
   return (
-    <Box sx={pageStyles?.container || {}}>
-      <Container maxWidth="xl">
-        {/* Header with view toggle */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4" gutterBottom>
-            🎯 Study Room Management
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Tooltip title="Refresh Data">
-              <IconButton onClick={fetchData} size="small" sx={{ border: 1, borderColor: 'divider' }}>
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setAddDialogOpen(true)}
-            >
-              Add Student
-            </Button>
-          </Box>
-        </Box>
-
-        {/* View Mode Toggle */}
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <Tabs
-            value={viewMode}
-            onChange={(e, newValue) => setViewMode(newValue)}
-            centered
-            sx={{ mb: 2 }}
+    <Box sx={{ p: isMobile ? 1 : 3 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">
+          👥 Students
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setAddDialogOpen(true)}
+            size={isMobile ? "small" : "medium"}
           >
-            <Tab
-              label="🪑 Seat Chart View"
-              value="chart"
-              icon={<EventSeatIcon />}
-              iconPosition="start"
-            />
-            <Tab
-              label="📋 Students Table"
-              value="table"
-              icon={<TableViewIcon />}
-              iconPosition="start"
-            />
-            <Tab
-              label="🔓 Available Seats"
-              value="unassigned"
-              icon={<PersonOutlineIcon />}
-              iconPosition="start"
-            />
-          </Tabs>
-          
-          {/* Show/Hide Unassigned Seats Toggle for Chart View */}
-          {viewMode === 'chart' && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showUnassignedSeats}
-                    onChange={(e) => setShowUnassignedSeats(e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label="Show Available Seats in Chart"
-              />
-            </Box>
-          )}
-        </Paper>
+            Add Student
+          </Button>
+          <IconButton 
+            onClick={fetchData} 
+            color="primary"
+            sx={{ 
+              bgcolor: theme.palette.primary.main + '10',
+              '&:hover': { bgcolor: theme.palette.primary.main + '20' }
+            }}
+          >
+            <RefreshIcon />
+          </IconButton>
+        </Box>
+      </Box>
 
-        {/* Statistics Cards */}
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={2}>
-            <Card sx={cardStyles?.base || {}}>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" color="primary">
-                  {stats.totalStudents}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Total Students
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={2}>
-            <Card sx={cardStyles?.base || {}}>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" color="success.main">
-                  {stats.occupied}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Assigned Seats
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={2}>
-            <Card sx={cardStyles?.base || {}}>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" color="info.main">
-                  {stats.availableSeats}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Available Seats
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={2}>
-            <Card sx={cardStyles?.base || {}}>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" color="warning.main">
-                  {stats.expiring}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Expiring Soon
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={2}>
-            <Card sx={cardStyles?.base || {}}>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" color="error.main">
-                  {stats.studentsWithoutSeats}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Unassigned Students
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={2}>
-            <Card sx={cardStyles?.base || {}}>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" color="text.primary">
-                  {stats.total}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Total Seats
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+      {/* Dashboard Stats */}
+      {renderStats()}
 
-        {/* Filter Section */}
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            🎯 Enhanced Filters (3 Separate Search Fields)
-          </Typography>
-          <Grid container spacing={2} alignItems="center">
-            {/* Name Filter */}
-            <Grid item xs={12} sm={6} md={3}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Search by Name"
-                value={nameSearch}
-                onChange={(e) => setNameSearch(e.target.value)}
-                InputProps={{
-                  startAdornment: <SearchIcon sx={{ color: 'action.active', mr: 1 }} />,
-                  endAdornment: nameSearch && (
-                    <IconButton size="small" onClick={() => setNameSearch('')}>
-                      <ClearIcon />
-                    </IconButton>
-                  )
-                }}
-              />
-            </Grid>
-
-            {/* Seat Number Filter */}
-            <Grid item xs={12} sm={6} md={3}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Search by Seat Number"
-                value={seatSearch}
-                onChange={(e) => setSeatSearch(e.target.value)}
-                InputProps={{
-                  startAdornment: <EventSeatIcon sx={{ color: 'action.active', mr: 1 }} />,
-                  endAdornment: seatSearch && (
-                    <IconButton size="small" onClick={() => setSeatSearch('')}>
-                      <ClearIcon />
-                    </IconButton>
-                  )
-                }}
-              />
-            </Grid>
-
-            {/* Contact Filter */}
-            <Grid item xs={12} sm={6} md={3}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Search by Contact"
-                value={contactSearch}
-                onChange={(e) => setContactSearch(e.target.value)}
-                InputProps={{
-                  startAdornment: <PhoneIcon sx={{ color: 'action.active', mr: 1 }} />,
-                  endAdornment: contactSearch && (
-                    <IconButton size="small" onClick={() => setContactSearch('')}>
-                      <ClearIcon />
-                    </IconButton>
-                  )
-                }}
-              />
-            </Grid>
-
-            {/* Status Filter */}
-            <Grid item xs={12} sm={6} md={3}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Status</InputLabel>
-                <Select
-                  value={statusFilter}
-                  label="Status"
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <MenuItem value="all">All Status</MenuItem>
-                  <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="expiring">Expiring Soon</MenuItem>
-                  <MenuItem value="expired">Expired</MenuItem>
-                  <MenuItem value="vacant">Vacant</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-
-            {/* Gender Filters */}
-            <Grid item xs={12} sm={6} md={3}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showMale}
-                    onChange={(e) => setShowMale(e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <MaleIcon color="primary" />
-                    Male
-                  </Box>
-                }
-              />
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showFemale}
-                    onChange={(e) => setShowFemale(e.target.checked)}
-                    color="secondary"
-                  />
-                }
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <FemaleIcon color="secondary" />
-                    Female
-                  </Box>
-                }
-              />
-            </Grid>
-
-            {/* Clear Filters */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Button
-                variant="outlined"
-                onClick={clearAllFilters}
-                startIcon={<ClearIcon />}
-                fullWidth
-              >
-                Clear All Filters
-              </Button>
-            </Grid>
-
-            {/* Filter Results Count */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Typography variant="body2" color="text.secondary">
-                Showing {filteredSeats.length} of {seatData.length} seats
-              </Typography>
-            </Grid>
-          </Grid>
-        </Paper>
-
-        {/* Main Content */}
-        {viewMode === 'chart' ? (
-          <SeatChartView
-            seats={filteredSeats}
-            unassignedSeats={showUnassignedSeats ? unassignedSeats : []}
-            onSeatClick={handleSeatClick}
-            onSeatHistoryClick={handleSeatHistoryClick}
-            getSeatColor={getSeatColor}
-            isMobile={isMobile}
-          />
-        ) : viewMode === 'table' ? (
-          <TableView
-            seats={filteredSeats}
-            onSeatClick={handleSeatClick}
-            onSeatHistoryClick={handleSeatHistoryClick}
-            normalizeGender={normalizeGender}
-            isMembershipActive={isMembershipActive}
-            isMobile={isMobile}
-          />
-        ) : (
-          <UnassignedSeatsView
-            unassignedSeats={unassignedSeats}
-            students={students}
-            onSeatClick={handleSeatClick}
-            onSeatHistoryClick={handleSeatHistoryClick}
-            isMobile={isMobile}
-          />
-        )}
-
-        {/* Add Student Dialog */}
-        <AddStudentDialog
-          open={addDialogOpen}
-          onClose={() => {
-            setAddDialogOpen(false);
-            setNewStudent({ name: '', seatNumber: '', contact: '', sex: '', fatherName: '' });
-            setAddStudentError('');
-          }}
-          student={newStudent}
-          setStudent={setNewStudent}
-          loading={addStudentLoading}
-          error={addStudentError}
-          seatData={seatData}
-          unassignedSeats={unassignedSeats}
-          onSubmit={async () => {
-            console.log('🔄 === ADD STUDENT START ===');
-            console.log('📅 Timestamp:', new Date().toISOString());
-            console.log('👤 Student data to submit:', newStudent);
-            
-            setAddStudentLoading(true);
-            setAddStudentError('');
-            try {
-              console.log('🚀 Step 1: Preparing student data...');
-              
-              const studentData = {
-                seat_number: newStudent.seatNumber,
-                name: newStudent.name,
-                father_name: newStudent.fatherName,
-                contact_number: newStudent.contact,
-                sex: newStudent.sex.toLowerCase(),
-                membership_till: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                modified_by: 1
-              };
-              
-              console.log('📝 Prepared student data:', studentData);
-              console.log('🚀 Step 2: Making API request...');
-              
-              const response = await fetch(`/api/students`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(studentData)
-              });
-              
-              console.log('📡 Add student API response status:', response.status);
-              
-              if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                console.error('❌ Add student API error response:', errorData);
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-              }
-              
-              const result = await response.json();
-              console.log('✅ Student added successfully:', result);
-              
-              setAddDialogOpen(false);
-              setNewStudent({ name: '', seatNumber: '', contact: '', sex: '', fatherName: '' });
-              
-              console.log('🔄 Step 3: Refreshing data...');
-              fetchData();
-              
-              setSnackbarMessage('Student added successfully');
-              setSnackbarSeverity('success');
-              setSnackbarOpen(true);
-              
-              console.log('🎉 === ADD STUDENT SUCCESS ===');
-            } catch (err) {
-              console.error('💥 === ADD STUDENT ERROR ===');
-              console.error('🔍 Error type:', err.constructor.name);
-              console.error('📄 Error message:', err.message);
-              console.error('📍 Error stack:', err.stack);
-              console.error('📤 Request payload:', {
-                url: `/api/students`,
-                method: 'POST',
-                studentData: newStudent
-              });
-              
-              setAddStudentError(err.message);
-            } finally {
-              setAddStudentLoading(false);
-              console.log('🏁 Add student operation completed');
-            }
-          }}
-        />
-
-        {/* Payment Dialog */}
-        <PaymentDialog
-          open={paymentDialogOpen}
-          onClose={() => {
-            setPaymentDialogOpen(false);
-            setNewPayment({ amount: '', paymentMode: 'cash', remarks: '', paymentDate: new Date().toISOString().split('T')[0] });
-            setPaymentError('');
-          }}
-          student={selectedStudent}
-          payment={newPayment}
-          setPayment={setNewPayment}
-          loading={paymentLoading}
-          error={paymentError}
-          onSubmit={async () => {
-            console.log('🔥 Payment submission started');
-            console.log('Selected Student:', selectedStudent);
-            console.log('Payment Data:', newPayment);
-            
-            setPaymentLoading(true);
-            setPaymentError('');
-            try {
-              if (!selectedStudent?.id) {
-                throw new Error('No student selected for payment');
-              }
-
-              const paymentData = {
-                student_id: selectedStudent.id,
-                amount: parseFloat(newPayment.amount),
-                payment_date: newPayment.paymentDate,
-                payment_mode: newPayment.paymentMode.toUpperCase(),
-                remarks: newPayment.remarks || '',
-                modified_by: 1
-              };
-              
-              console.log('🚀 Sending payment request:', paymentData);
-              
-              const response = await fetch(`/api/payments`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(paymentData)
-              });
-              
-              console.log('📡 Response status:', response.status);
-              
-              if (!response.ok) {
-                const errorData = await response.json();
-                console.error('❌ Payment error response:', errorData);
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-              }
-              
-              const result = await response.json();
-              console.log('✅ Payment success result:', result);
-              
-              setPaymentDialogOpen(false);
-              setNewPayment({ amount: '', paymentMode: 'cash', remarks: '', paymentDate: new Date().toISOString().split('T')[0] });
-              fetchData(); // Refresh data
-              setSnackbarMessage('Payment added successfully');
-              setSnackbarSeverity('success');
-              setSnackbarOpen(true);
-            } catch (err) {
-              console.error('💥 Payment submission error:', err);
-              setPaymentError(err.message);
-            } finally {
-              setPaymentLoading(false);
-            }
-          }}
-        />
-
-        {/* Seat Detail Dialog */}
-        <SeatDetailDialog
-          open={Boolean(selectedSeat)}
-          seat={selectedSeat}
-          student={selectedStudent}
-          onClose={() => {
-            setSelectedSeat(null);
-            setSelectedStudent(null);
-          }}
-          onEdit={() => setEditDialogOpen(true)}
-          onPayment={() => setPaymentDialogOpen(true)}
-          onHistory={() => handleSeatHistoryClick(selectedSeat)}
-          onDelete={() => setDeleteConfirmOpen(true)}
-          onMarkVacant={handleMarkVacant}
-        />
-
-        {/* Seat History Dialog */}
-        <SeatHistoryDialog
-          open={seatHistoryOpen}
-          onClose={() => setSeatHistoryOpen(false)}
-          seatNumber={selectedSeat?.seatNumber}
-          historyData={seatHistoryData}
-          loading={seatHistoryLoading}
-        />
-
-        {/* Snackbar for notifications */}
-        <Snackbar
-          open={snackbarOpen}
-          autoHideDuration={6000}
-          onClose={() => setSnackbarOpen(false)}
+      {/* Tabs */}
+      <Paper sx={{ mb: 2 }}>
+        <Tabs
+          value={currentTab}
+          onChange={(e, newValue) => setCurrentTab(newValue)}
+          variant={isMobile ? "fullWidth" : "standard"}
         >
-          <Alert
-            onClose={() => setSnackbarOpen(false)}
-            severity={snackbarSeverity}
-            sx={{ width: '100%' }}
-          >
-            {snackbarMessage}
-          </Alert>
-        </Snackbar>
-      </Container>
-    </Box>
-  );
-}
+          <Tab label="Seats View" />
+          <Tab label="Students View" />
+        </Tabs>
+      </Paper>
 
-// Seat Chart View Component
-function SeatChartView({ seats, unassignedSeats, onSeatClick, onSeatHistoryClick, getSeatColor, isMobile }) {
-  const seatSize = isMobile ? 40 : 50;
-  const seatsPerRow = isMobile ? 8 : 12;
-  
-  // Combine assigned seats and unassigned seats for display
-  const allSeats = [...seats];
-  
-  // Add unassigned seats to the display if they're being shown
-  if (unassignedSeats && unassignedSeats.length > 0) {
-    const unassignedSeatDisplay = unassignedSeats.map(seat => ({
-      seatNumber: seat.seat_number,
-      occupied: false,
-      studentName: null,
-      gender: null,
-      studentId: null,
-      contactNumber: null,
-      membershipExpiry: null,
-      lastPayment: null,
-      expiring: false,
-      removed: false,
-      maintenance: false,
-      isUnassigned: true
-    }));
-    allSeats.push(...unassignedSeatDisplay);
-  }
-  
-  // Sort seats by seat number for consistent display
-  allSeats.sort((a, b) => {
-    const aNum = parseInt(a.seatNumber);
-    const bNum = parseInt(b.seatNumber);
-    if (!isNaN(aNum) && !isNaN(bNum)) {
-      return aNum - bNum;
-    }
-    return a.seatNumber.localeCompare(b.seatNumber);
-  });
-  
-  const rows = [];
-  for (let i = 0; i < allSeats.length; i += seatsPerRow) {
-    rows.push(allSeats.slice(i, i + seatsPerRow));
-  }
+      {/* Filters */}
+      {renderFilters()}
 
-  return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" sx={{ mb: 2 }}>
-        🪑 Interactive Seat Chart {unassignedSeats && unassignedSeats.length > 0 && `(Including ${unassignedSeats.length} Available Seats)`}
-      </Typography>
-      
-      {/* Legend */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, justifyContent: 'center' }}>
-        <Chip icon={<MaleIcon />} label="Male Occupied" sx={{ background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)', color: 'white' }} />
-        <Chip icon={<FemaleIcon />} label="Female Occupied" sx={{ background: 'linear-gradient(135deg, #e91e63 0%, #f06292 100%)', color: 'white' }} />
-        <Chip icon={<WarningIcon />} label="Expiring Soon" sx={{ background: 'linear-gradient(135deg, #ff9800 0%, #ffb74d 100%)', color: 'white' }} />
-        <Chip icon={<PersonOutlineIcon />} label="Available" sx={{ background: 'linear-gradient(135deg, #4caf50 0%, #81c784 100%)', color: 'white' }} />
-        <Chip icon={<EventSeatIcon />} label="Vacant (Assigned)" sx={{ background: 'linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%)', color: 'black' }} />
-      </Box>
+      {/* Content */}
+      {currentTab === 0 && renderSeatsView()}
+      {currentTab === 1 && renderStudentsView()}
 
-      {/* Instructions */}
-      <Alert severity="info" sx={{ mb: 2 }}>
-        <strong>💡 Interactive Features:</strong>
-        <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
-          <li>🖱️ <strong>Left click</strong> a seat to view student details</li>
-          <li>🖱️ <strong>Right click</strong> a seat to view change history</li>
-          <li>🎨 <strong>Green seats</strong> are available for assignment</li>
-          <li>🎨 Colors indicate gender and membership status</li>
-        </ul>
-      </Alert>
-
-      {/* Seat Grid */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center' }}>
-        {rows.map((row, rowIndex) => (
-          <Box key={rowIndex} sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {row.map((seat) => (
-              <Tooltip
-                key={seat.seatNumber}
-                title={
-                  <Box>
-                    <Typography variant="body2">Seat: {seat.seatNumber}</Typography>
-                    {seat.occupied ? (
-                      <>
-                        <Typography variant="body2">Student: {seat.studentName}</Typography>
-                        <Typography variant="body2">Contact: {seat.contactNumber}</Typography>
-                        <Typography variant="body2">
-                          Expires: {seat.membershipExpiry ? new Date(seat.membershipExpiry).toLocaleDateString() : 'N/A'}
-                        </Typography>
-                      </>
-                    ) : seat.isUnassigned ? (
-                      <Typography variant="body2" color="success.main">Available for Assignment</Typography>
-                    ) : (
-                      <Typography variant="body2">Vacant</Typography>
-                    )}
-                    <Typography variant="caption" sx={{ fontStyle: 'italic' }}>
-                      Left click: Details | Right click: History
-                    </Typography>
-                  </Box>
-                }
-              >
-                <Box
-                  onClick={() => onSeatClick(seat)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    onSeatHistoryClick(seat);
-                  }}
-                  sx={{
-                    width: seatSize,
-                    height: seatSize,
-                    background: seat.isUnassigned 
-                      ? 'linear-gradient(135deg, #4caf50 0%, #81c784 100%)'
-                      : getSeatColor(seat),
-                    borderRadius: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    border: seat.isUnassigned ? '2px solid #4caf50' : '2px solid transparent',
-                    transition: 'all 0.2s',
-                    position: 'relative',
-                    '&:hover': {
-                      transform: 'scale(1.1)',
-                      border: '2px solid #333',
-                      zIndex: 1,
-                      boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
-                    }
-                  }}
-                >
-                  <Typography
-                    variant="caption"
-                    sx={{
-                      color: seat.isUnassigned || seat.occupied ? 'white' : 'black',
-                      fontWeight: 'bold',
-                      fontSize: isMobile ? '10px' : '12px'
-                    }}
-                  >
-                    {seat.seatNumber}
-                  </Typography>
-                  {seat.expiring && (
-                    <WarningIcon
-                      sx={{
-                        position: 'absolute',
-                        top: -5,
-                        right: -5,
-                        fontSize: 16,
-                        color: '#ff9800'
-                      }}
-                    />
-                  )}
-                  {seat.isUnassigned && (
-                    <CheckCircleIcon
-                      sx={{
-                        position: 'absolute',
-                        top: -5,
-                        right: -5,
-                        fontSize: 16,
-                        color: '#4caf50'
-                      }}
-                    />
-                  )}
-                </Box>
-              </Tooltip>
-            ))}
-          </Box>
-        ))}
-      </Box>
-    </Paper>
-  );
-}
-
-// Table View Component
-function TableView({ seats, onSeatClick, onSeatHistoryClick, normalizeGender, isMembershipActive, isMobile }) {
-  return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" sx={{ mb: 2 }}>
-        📋 Seat Table View
-      </Typography>
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Seat</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Student</TableCell>
-              <TableCell>Contact</TableCell>
-              <TableCell>Gender</TableCell>
-              <TableCell>Expires</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {seats.map((seat) => (
-              <TableRow key={seat.seatNumber} hover>
-                <TableCell>
-                  <Chip
-                    label={seat.seatNumber}
-                    sx={{
-                      background: seat.occupied ? 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)' : 'linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%)',
-                      color: seat.occupied ? 'white' : 'black'
-                    }}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    size="small"
-                    label={seat.occupied ? 'Occupied' : 'Vacant'}
-                    color={seat.occupied ? 'success' : 'default'}
-                  />
-                </TableCell>
-                <TableCell>{seat.studentName || '-'}</TableCell>
-                <TableCell>{seat.contactNumber || '-'}</TableCell>
-                <TableCell>
-                  {seat.gender && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {normalizeGender(seat.gender) === 'Male' ? <MaleIcon color="primary" /> : <FemaleIcon color="secondary" />}
-                      {normalizeGender(seat.gender)}
-                    </Box>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {seat.membershipExpiry ? (
-                    <Box>
-                      <Typography variant="body2">
-                        {new Date(seat.membershipExpiry).toLocaleDateString()}
-                      </Typography>
-                      {seat.expiring && (
-                        <Chip size="small" label="Expiring" color="warning" />
-                      )}
-                    </Box>
-                  ) : '-'}
-                </TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="View Details">
-                      <IconButton size="small" onClick={() => onSeatClick(seat)}>
-                        <EditIcon />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="View History">
-                      <IconButton size="small" onClick={() => onSeatHistoryClick(seat)}>
-                        <HistoryIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Paper>
-  );
-}
-
-// Seat Detail Dialog Component
-function SeatDetailDialog({ open, seat, student, onClose, onEdit, onPayment, onHistory, onDelete, onMarkVacant }) {
-  if (!seat) return null;
-
-  // Check if student membership is expired
-  const isExpired = student && student.membership_till && new Date(student.membership_till) < new Date();
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          🪑 Seat {seat.seatNumber} Details
-          <IconButton onClick={onClose}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
-      </DialogTitle>
-      <DialogContent>
-        {seat.occupied && student ? (
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <PersonOutlineIcon />
-                {student.name}
-                {isExpired && (
-                  <Chip
-                    label="EXPIRED"
-                    color="error"
-                    size="small"
-                    sx={{ ml: 1 }}
-                  />
-                )}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">📞 Contact:</Typography>
-              <Typography variant="body1">{student.contact_number}</Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">👤 Gender:</Typography>
-              <Typography variant="body1" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                {student.sex === 'male' ? <MaleIcon color="primary" /> : <FemaleIcon color="secondary" />}
-                {student.sex}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">👨‍👦 Father's Name:</Typography>
-              <Typography variant="body1">{student.father_name || 'N/A'}</Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">📅 Membership Till:</Typography>
-              <Typography 
-                variant="body1" 
-                color={isExpired ? 'error' : 'inherit'}
-                sx={{ fontWeight: isExpired ? 'bold' : 'normal' }}
-              >
-                {student.membership_till ? new Date(student.membership_till).toLocaleDateString() : 'N/A'}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">💰 Total Paid:</Typography>
-              <Typography variant="body1">₹{student.total_paid || 0}</Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">💳 Last Payment:</Typography>
-              <Typography variant="body1">
-                {student.last_payment_date ? new Date(student.last_payment_date).toLocaleDateString() : 'N/A'}
-              </Typography>
-            </Grid>
-            {isExpired && (
-              <Grid item xs={12}>
-                <Alert severity="warning" sx={{ mt: 1 }}>
-                  <Typography variant="body2">
-                    ⚠️ This student's membership has expired. You can mark this seat as vacant to make it available for new students.
-                  </Typography>
-                </Alert>
-              </Grid>
-            )}
-          </Grid>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <EventSeatIcon sx={{ fontSize: 64, color: 'action.disabled', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary">This seat is currently vacant</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Available for new student assignment
-            </Typography>
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onHistory} startIcon={<HistoryIcon />} variant="outlined">
-          View History
-        </Button>
-        {seat.occupied && (
-          <>
-            {isExpired && (
-              <Button 
-                onClick={onMarkVacant} 
-                startIcon={<CheckCircleIcon />} 
-                color="warning" 
-                variant="contained"
-                sx={{ mr: 1 }}
-              >
-                Mark as Vacant
-              </Button>
-            )}
-            <Button onClick={onPayment} startIcon={<PaymentIcon />} variant="outlined">
-              Add Payment
-            </Button>
-            <Button onClick={onEdit} startIcon={<EditIcon />} variant="outlined">
-              Edit Student
-            </Button>
-            <Button onClick={onDelete} startIcon={<DeleteIcon />} color="error" variant="outlined">
-              Remove Student
-            </Button>
-          </>
-        )}
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// Seat History Dialog Component
-function SeatHistoryDialog({ open, onClose, seatNumber, historyData, loading }) {
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          📝 Seat {seatNumber} Change History
-          <IconButton onClick={onClose}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
-      </DialogTitle>
-      <DialogContent>
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-            <CircularProgress />
-          </Box>
-        ) : historyData.length > 0 ? (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Date & Time</TableCell>
-                  <TableCell>Action</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Occupant Sex</TableCell>
-                  <TableCell>Modified By</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {historyData.map((entry, index) => (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <AccessTimeIcon sx={{ fontSize: 16, color: 'action.active' }} />
-                        {new Date(entry.action_timestamp).toLocaleString()}
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={entry.action}
-                        color={
-                          entry.action === 'INSERT' ? 'success' :
-                          entry.action === 'UPDATE' ? 'warning' :
-                          'error'
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>{entry.status}</TableCell>
-                    <TableCell>
-                      {entry.occupant_sex ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {entry.occupant_sex === 'male' ? <MaleIcon color="primary" /> : <FemaleIcon color="secondary" />}
-                          {entry.occupant_sex}
-                        </Box>
-                      ) : 'N/A'}
-                    </TableCell>
-                    <TableCell>{entry.modified_by_name || 'System'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <HistoryIcon sx={{ fontSize: 64, color: 'action.disabled', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary">No history available</Typography>
-            <Typography variant="body2" color="text.secondary">
-              This seat has no recorded changes yet
-            </Typography>
-          </Box>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Add Student Dialog Component
-function AddStudentDialog({ open, onClose, student, setStudent, loading, error, onSubmit, seatData = [], unassignedSeats = [] }) {
-  // Validation state
-  const [validationErrors, setValidationErrors] = useState({});
-
-  // Validation functions
-  const validateName = (name) => {
-    if (!name || name.trim().length === 0) return 'Name is required';
-    if (name.trim().length < 2) return 'Name must be at least 2 characters long';
-    if (name.trim().length > 100) return 'Name must not exceed 100 characters';
-    if (!/^[a-zA-Z\s\.\-']+$/.test(name.trim())) return 'Name can only contain letters, spaces, dots, hyphens, and apostrophes';
-    return '';
-  };
-
-  const validateContact = (contact) => {
-    if (!contact || contact.trim().length === 0) return 'Contact number is required';
-    const cleanContact = contact.replace(/[\s\-\(\)]/g, '');
-    if (!/^\+?[0-9]{10,15}$/.test(cleanContact)) return 'Contact number must be 10-15 digits (may include country code with +)';
-    return '';
-  };
-
-  const validateFatherName = (fatherName) => {
-    if (!fatherName) return ''; // Optional field
-    if (fatherName.trim().length < 2) return "Father's name must be at least 2 characters long if provided";
-    if (fatherName.trim().length > 100) return "Father's name must not exceed 100 characters";
-    if (!/^[a-zA-Z\s\.\-']+$/.test(fatherName.trim())) return "Father's name can only contain letters, spaces, dots, hyphens, and apostrophes";
-    return '';
-  };
-
-  const validateSeatNumber = (seatNumber) => {
-    if (!seatNumber || seatNumber.trim().length === 0) return 'Seat number is required';
-    if (!/^[A-Za-z0-9\-]+$/.test(seatNumber.trim()) && seatNumber !== 'UNASSIGNED') return 'Seat number can only contain letters, numbers, and hyphens';
-    if (seatNumber.trim().length > 20) return 'Seat number must not exceed 20 characters';
-    return '';
-  };
-
-  const validateGender = (gender) => {
-    if (!gender) return 'Gender is required';
-    if (!['Male', 'Female'].includes(gender)) return 'Gender must be either Male or Female';
-    return '';
-  };
-
-  // Get available seats based on selected gender
-  const getAvailableSeats = () => {
-    const selectedGender = student.sex;
-    if (!selectedGender) return [];
-    
-    // Always include "Unassigned" option
-    const unassignedOption = {
-      value: 'UNASSIGNED',
-      label: '📍 Unassigned (No physical seat)',
-      designation: ''
-    };
-    
-    // Get seats from unassigned seats data (these are confirmed available)
-    const availableSeatsFromUnassigned = unassignedSeats.map(seat => ({
-      value: seat.seat_number,
-      label: `Seat ${seat.seat_number}`,
-      designation: '',
-      source: 'unassigned'
-    }));
-    
-    // Also check seatData for compatibility (for gender restrictions)
-    const availableSeatsFromSeatData = seatData
-      .filter(seat => {
-        // Seat must not be occupied
-        if (seat.occupied) return false;
+      {/* Action Menu */}
+      <Menu
+        anchorEl={actionMenuAnchor}
+        open={Boolean(actionMenuAnchor)}
+        onClose={handleActionClose}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'right',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'right',
+        }}
+      >
+        {currentTab === 0 && selectedItemForAction && [ // Seats View Actions
+          <MenuItem key="history" onClick={handleSeatHistory}>
+            <ListItemIcon>
+              <HistoryIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>View Seat History</ListItemText>
+          </MenuItem>
+        ]}
         
-        // Seat must not be removed/maintenance
-        if (seat.removed || seat.maintenance) return false;
-        
-        // Gender restriction logic:
-        if (seat.gender) {
-          // Seat has a gender designation - must match student's gender
-          if (seat.gender.toLowerCase() !== selectedGender.toLowerCase()) {
-            return false;
-          }
-        }
-        
-        return true;
-      })
-      .map(seat => ({
-        value: seat.seatNumber,
-        label: `Seat ${seat.seatNumber}`,
-        designation: seat.designation || '',
-        source: 'seatData'
-      }));
-    
-    // Combine and deduplicate seats
-    const allAvailableSeats = [...availableSeatsFromUnassigned];
-    
-    // Add seats from seatData that aren't already in unassigned seats
-    availableSeatsFromSeatData.forEach(seat => {
-      if (!allAvailableSeats.find(existing => existing.value === seat.value)) {
-        allAvailableSeats.push(seat);
-      }
-    });
-    
-    // Sort numerically if possible, otherwise alphabetically
-    allAvailableSeats.sort((a, b) => {
-      const aNum = parseInt(a.value);
-      const bNum = parseInt(b.value);
-      if (!isNaN(aNum) && !isNaN(bNum)) {
-        return aNum - bNum;
-      }
-      return a.value.localeCompare(b.value);
-    });
-    
-    // Return unassigned option first, then available seats
-    return [unassignedOption, ...allAvailableSeats];
-  };
+        {currentTab === 1 && selectedItemForAction && [ // Students View Actions
+          <MenuItem key="viewStudent" onClick={handleViewStudent}>
+            <ListItemIcon>
+              <VisibilityIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>View Student Details</ListItemText>
+          </MenuItem>,
+          <MenuItem key="addPayment" onClick={handleAddPayment}>
+            <ListItemIcon>
+              <PaymentIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Add Payment</ListItemText>
+          </MenuItem>,
+          <MenuItem key="editStudent" onClick={handleEditStudent}>
+            <ListItemIcon>
+              <EditIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Edit Student</ListItemText>
+          </MenuItem>,
+          <MenuItem key="paymentHistory" onClick={handlePaymentHistory}>
+            <ListItemIcon>
+              <HistoryIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Payment History</ListItemText>
+          </MenuItem>,
+          <MenuItem key="seatHistory" onClick={handleSeatHistory}>
+            <ListItemIcon>
+              <EventSeatIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Seat Change History</ListItemText>
+          </MenuItem>,
+          <Divider key="divider" />,
+          <MenuItem key="remove" onClick={handleRemoveStudent} sx={{ color: 'error.main' }}>
+            <ListItemIcon>
+              <DeleteIcon fontSize="small" color="error" />
+            </ListItemIcon>
+            <ListItemText>Remove Student</ListItemText>
+          </MenuItem>
+        ]}
+      </Menu>
 
-  // Handle field changes with validation
-  const handleFieldChange = (field, value) => {
-    const updates = { [field]: value };
-    
-    // If gender changes, clear seat selection since available seats will change
-    if (field === 'sex' && student.seatNumber) {
-      updates.seatNumber = '';
-      if (validationErrors.seatNumber) {
-        setValidationErrors({ ...validationErrors, [field]: '', seatNumber: '' });
-      }
-    }
-    
-    setStudent({ ...student, ...updates });
-    
-    // Clear error for this field when user starts typing
-    if (validationErrors[field]) {
-      setValidationErrors({ ...validationErrors, [field]: '' });
-    }
-  };
-
-  // Validate all fields
-  const validateForm = () => {
-    const errors = {
-      name: validateName(student.name),
-      contact: validateContact(student.contact),
-      fatherName: validateFatherName(student.fatherName),
-      seatNumber: validateSeatNumber(student.seatNumber),
-      sex: validateGender(student.sex)
-    };
-    
-    setValidationErrors(errors);
-    return !Object.values(errors).some(error => error !== '');
-  };
-
-  // Enhanced submit handler
-  const handleSubmit = () => {
-    if (validateForm()) {
-      onSubmit();
-    }
-  };
-
-  const availableSeats = getAvailableSeats();
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>✨ Add New Student</DialogTitle>
-      <DialogContent>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
-        )}
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} sm={6}>
+      {/* Add Student Dialog */}
+      <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add New Student</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               fullWidth
               label="Student Name *"
-              value={student.name || ''}
-              onChange={e => handleFieldChange('name', e.target.value)}
+              value={newStudent.name}
+              onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
               required
-              error={!!validationErrors.name}
-              helperText={validationErrors.name || 'Enter the full name of the student'}
-              inputProps={{ maxLength: 100 }}
+              error={!newStudent.name.trim()}
+              helperText={!newStudent.name.trim() ? "Name is required" : ""}
             />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth required error={!!validationErrors.sex}>
+            <FormControl fullWidth required error={!newStudent.sex}>
               <InputLabel>Gender *</InputLabel>
               <Select
-                value={student.sex || ''}
+                value={newStudent.sex}
+                onChange={(e) => handleGenderChange(e.target.value)}
                 label="Gender *"
-                onChange={e => handleFieldChange('sex', e.target.value)}
-                required
               >
-                <MenuItem value="Male">👨 Male</MenuItem>
-                <MenuItem value="Female">👩 Female</MenuItem>
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
               </Select>
-              {validationErrors.sex && (
-                <Typography variant="caption" color="error" sx={{ ml: 2, mt: 0.5 }}>
-                  {validationErrors.sex}
+              {!newStudent.sex && (
+                <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.5 }}>
+                  Gender is required
                 </Typography>
               )}
             </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Contact Number *"
-              value={student.contact || ''}
-              onChange={e => handleFieldChange('contact', e.target.value)}
-              required
-              error={!!validationErrors.contact}
-              helperText={validationErrors.contact || 'Enter 10-15 digit phone number'}
-              inputProps={{ maxLength: 20 }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth required error={!!validationErrors.seatNumber}>
-              <InputLabel>Seat Number *</InputLabel>
+            <FormControl fullWidth disabled={!newStudent.sex || seatLoading}>
+              <InputLabel>Seat Number</InputLabel>
               <Select
-                value={student.seatNumber || ''}
-                label="Seat Number *"
-                onChange={e => handleFieldChange('seatNumber', e.target.value)}
-                required
-                disabled={!student.sex} // Disable until gender is selected
-                displayEmpty
+                value={newStudent.seat_number}
+                onChange={(e) => setNewStudent({ ...newStudent, seat_number: e.target.value })}
+                label="Seat Number"
               >
-                {!student.sex && (
-                  <MenuItem value="" disabled>
+                {seatLoading ? (
+                  <MenuItem disabled>
+                    <CircularProgress size={20} sx={{ mr: 1 }} />
+                    Loading seats...
                   </MenuItem>
+                ) : availableSeats.length > 0 ? (
+                  availableSeats.map((seat) => (
+                    <MenuItem key={seat.seat_number} value={seat.seat_number}>
+                      Seat #{seat.seat_number}
+                      {seat.floor_number && ` (Floor ${seat.floor_number})`}
+                    </MenuItem>
+                  ))
+                ) : newStudent.sex ? (
+                  <MenuItem disabled>No available seats for {newStudent.sex} students</MenuItem>
+                ) : (
+                  <MenuItem disabled>Select gender first to see available seats</MenuItem>
                 )}
-                {student.sex && availableSeats.length === 0 && (
-                  <MenuItem value="" disabled>
-                    <em>No seats available for {student.sex}</em>
-                  </MenuItem>
-                )}
-                {student.sex && availableSeats.map((seat) => (
-                  <MenuItem key={seat.value} value={seat.value}>
-                    {seat.value === 'UNASSIGNED' ? seat.label : `🪑 ${seat.label} ${seat.designation}`}
-                  </MenuItem>
-                ))}
               </Select>
-              {validationErrors.seatNumber ? (
-                <Typography variant="caption" color="error" sx={{ ml: 2, mt: 0.5 }}>
-                  {validationErrors.seatNumber}
-                </Typography>
-              ) : (
-                <Typography variant="caption" color="text.secondary" sx={{ ml: 2, mt: 0.5 }}>
-                  {!student.sex 
-                    ? 'Select gender first to see available seats'
-                    : `${availableSeats.length} seats available for ${student.sex} (${unassignedSeats.length} confirmed available)`
-                  }
-                </Typography>
-              )}
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                {newStudent.sex ? 
+                  `${availableSeats.length} seats available for ${newStudent.sex} students` :
+                  "Select gender to see available seats"
+                }
+              </Typography>
             </FormControl>
-          </Grid>
-          <Grid item xs={12}>
             <TextField
               fullWidth
-              label="Father's Name (optional)"
-              value={student.fatherName || ''}
-              onChange={e => handleFieldChange('fatherName', e.target.value)}
-              error={!!validationErrors.fatherName}
-              helperText={validationErrors.fatherName || 'Enter father\'s full name (optional)'}
-              inputProps={{ maxLength: 100 }}
+              label="Contact Number"
+              value={newStudent.contact}
+              onChange={(e) => setNewStudent({ ...newStudent, contact: e.target.value })}
+              placeholder="10-digit mobile number"
             />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={loading || !student.name || !student.seatNumber || !student.contact || !student.sex}
-          startIcon={loading ? <CircularProgress size={16} /> : <AddIcon />}
-        >
-          Add Student
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// Payment Dialog Component  
-function PaymentDialog({ open, onClose, student, payment, setPayment, loading, error, onSubmit }) {
-  if (!student) return null;
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          💳 Add Payment for {student.name}
-          <IconButton onClick={onClose}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
-      </DialogTitle>
-      <DialogContent>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
-        )}
-        
-        {/* Student Info */}
-        <Paper sx={{ p: 2, mb: 3, bgcolor: 'primary.50' }}>
-          <Grid container spacing={2}>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">Student:</Typography>
-              <Typography variant="body1" fontWeight="bold">{student.name}</Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">Current Balance:</Typography>
-              <Typography variant="body1" fontWeight="bold" color="success.main">
-                ₹{student.total_paid || 0}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">Last Payment:</Typography>
-              <Typography variant="body1">
-                {student.last_payment_date ? new Date(student.last_payment_date).toLocaleDateString() : 'No payments yet'}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">Membership Till:</Typography>
-              <Typography variant="body1">
-                {student.membership_till ? new Date(student.membership_till).toLocaleDateString() : 'N/A'}
-              </Typography>
-            </Grid>
-          </Grid>
-        </Paper>
-
-        {/* Payment Form */}
-        <Grid container spacing={2}>
-          <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
-              label="Payment Amount"
+              label="Father's Name"
+              value={newStudent.fatherName}
+              onChange={(e) => setNewStudent({ ...newStudent, fatherName: e.target.value })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setAddDialogOpen(false);
+            setNewStudent({ name: '', seatNumber: '', contact: '', sex: '', fatherName: '' });
+            setAvailableSeats([]);
+          }}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={handleAddStudent}
+            disabled={addStudentLoading || !newStudent.name.trim() || !newStudent.sex}
+          >
+            {addStudentLoading ? 'Adding...' : 'Add Student'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Seat History Dialog */}
+      <Dialog open={seatHistoryOpen} onClose={() => setSeatHistoryOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {seatHistoryContext?.contextTab === 0 
+            ? `Seat History - ${seatHistoryContext?.seatNumber || seatHistoryContext?.seat_number || 'Unknown'}`
+            : (() => {
+                // For student tab, prioritize student info but fallback gracefully
+                const studentName = seatHistoryContext?.name || seatHistoryContext?.student_name;
+                const studentId = seatHistoryContext?.id;
+                const seatNumber = seatHistoryContext?.seatNumber || seatHistoryContext?.seat_number;
+                
+                if (studentName) {
+                  return `Seat Change History - ${studentName}`;
+                } else if (studentId) {
+                  return `Seat Change History - Student ID: ${studentId}`;
+                } else if (seatNumber) {
+                  return `Seat History - Seat #${seatNumber}`;
+                } else {
+                  return 'Seat History - Unknown';
+                }
+              })()
+          }
+        </DialogTitle>
+        <DialogContent>
+          {seatHistory.length === 0 ? (
+            <Typography>
+              {seatHistoryContext?.contextTab === 0 
+                ? 'No history available for this seat.'
+                : 'No seat assignment history available for this student.'
+              }
+            </Typography>
+          ) : (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    {seatHistoryContext?.contextTab === 0 ? (
+                      <>
+                        <TableCell>Student</TableCell>
+                        <TableCell>Period</TableCell>
+                        <TableCell>Status</TableCell>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell>Seat Number</TableCell>
+                        <TableCell>Period</TableCell>
+                        <TableCell>Status</TableCell>
+                      </>
+                    )}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {seatHistory.map((entry, index) => (
+                    <TableRow key={index}>
+                      <TableCell>
+                        {seatHistoryContext?.contextTab === 0 
+                          ? (entry.student_name || 'N/A')
+                          : (entry.seat_number || 'N/A')
+                        }
+                      </TableCell>
+                      <TableCell>
+                        {formatDateForDisplay(entry.start_date)} - {entry.end_date ? formatDateForDisplay(entry.end_date) : 'Current'}
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={entry.assignment_status} 
+                          color={entry.assignment_status === 'Current' ? 'success' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSeatHistoryOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Assign Seat Dialog */}
+      <Dialog open={assignSeatOpen} onClose={() => setAssignSeatOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Assign Seat #{selectedItemForAction?.seatNumber}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth>
+              <InputLabel>Select Student</InputLabel>
+              <Select
+                value={assignSeatData.studentId}
+                onChange={(e) => setAssignSeatData({ ...assignSeatData, studentId: e.target.value })}
+                label="Select Student"
+              >
+                {(() => {
+                  console.log('🔍 [Assign Seat Dialog] Debugging student data:');
+                  console.log('Total students array length:', students.length);
+                  console.log('Students array:', students);
+                  
+                  // Filter out null/undefined students first
+                  const validStudents = students.filter(student => student && typeof student === 'object');
+                  console.log('Valid students after null check:', validStudents.length);
+                  
+                  // Then filter for unassigned students
+                  const unassignedStudents = validStudents.filter(student => {
+                    const hasNoSeat = !student.seat_number && student.seat_number !== 0;
+                    console.log(`Student ${student.name} (ID: ${student.id}): seat_number=${student.seat_number}, hasNoSeat=${hasNoSeat}`);
+                    return hasNoSeat;
+                  });
+                  
+                  console.log('Unassigned students:', unassignedStudents.length);
+                  console.log('Unassigned students data:', unassignedStudents);
+                  
+                  if (unassignedStudents.length === 0) {
+                    return (
+                      <MenuItem disabled>
+                        No unassigned students available
+                      </MenuItem>
+                    );
+                  }
+                  
+                  return unassignedStudents.map((student) => (
+                    <MenuItem key={student.id} value={student.id}>
+                      {student.name} (ID: {student.id})
+                      {student.seat_number && ` - Currently: Seat ${student.seat_number}`}
+                    </MenuItem>
+                  ));
+                })()}
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                {(() => {
+                  const validStudents = students.filter(student => student && typeof student === 'object');
+                  const unassignedCount = validStudents.filter(student => !student.seat_number && student.seat_number !== 0).length;
+                  return `${unassignedCount} unassigned students available`;
+                })()}
+              </Typography>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAssignSeatOpen(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleConfirmAssignSeat}
+            disabled={!assignSeatData.studentId}
+          >
+            Assign Seat
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Payment History Dialog */}
+      <Dialog open={paymentHistoryOpen} onClose={() => setPaymentHistoryOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          Payment History - {selectedItemForAction?.name}
+        </DialogTitle>
+        <DialogContent>
+          {paymentHistory.length === 0 ? (
+            <Typography>No payment history available for this student.</Typography>
+          ) : (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Amount</TableCell>
+                    <TableCell>Method</TableCell>
+                    <TableCell>Type</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {paymentHistory.filter(payment => payment && payment.id).map((payment) => (
+                    <TableRow key={payment.id}>
+                      <TableCell>{formatDateForDisplay(payment.payment_date)}</TableCell>
+                      <TableCell>₹{payment.amount}</TableCell>
+                      <TableCell>{payment.payment_mode}</TableCell>
+                      <TableCell>{payment.payment_type}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPaymentHistoryOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Payment Dialog */}
+      <Dialog open={addPaymentOpen} onClose={() => {
+        setAddPaymentOpen(false);
+        handleActionClose();
+      }} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Payment - {selectedItemForAction?.name}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              fullWidth
+              label="Amount"
               type="number"
-              value={payment.amount}
-              onChange={e => setPayment({ ...payment, amount: e.target.value })}
-              required
-              InputProps={{
-                startAdornment: <Typography sx={{ mr: 1 }}>₹</Typography>,
-              }}
-              placeholder="Enter amount"
+              value={paymentData.amount}
+              onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })}
             />
-          </Grid>
-          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth>
+              <InputLabel>Payment Method</InputLabel>
+              <Select
+                value={paymentData.method}
+                onChange={(e) => setPaymentData({ ...paymentData, method: e.target.value })}
+                label="Payment Method"
+              >
+                <MenuItem value="cash">Cash</MenuItem>
+                <MenuItem value="online">Online</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Payment Type</InputLabel>
+              <Select
+                value={paymentData.type}
+                onChange={(e) => setPaymentData({ ...paymentData, type: e.target.value })}
+                label="Payment Type"
+              >
+                <MenuItem value="monthly_fee">Monthly Fee</MenuItem>
+                <MenuItem value="refund">Refund</MenuItem>
+              </Select>
+            </FormControl>
             <TextField
               fullWidth
-              label="Payment Date"
+              label="Date"
               type="date"
-              value={payment.paymentDate}
-              onChange={e => setPayment({ ...payment, paymentDate: e.target.value })}
-              required
+              value={paymentData.date}
+              onChange={(e) => setPaymentData({ ...paymentData, date: e.target.value })}
               InputLabelProps={{ shrink: true }}
             />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth>
-              <InputLabel>Payment Mode</InputLabel>
-              <Select
-                value={payment.paymentMode}
-                label="Payment Mode"
-                onChange={e => setPayment({ ...payment, paymentMode: e.target.value })}
-                required
-              >
-                <MenuItem value="cash">💵 Cash</MenuItem>
-                <MenuItem value="online">💳 Online</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={6}>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setAddPaymentOpen(false);
+            handleActionClose();
+          }}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleConfirmAddPayment}
+            disabled={!paymentData.amount || !paymentData.method}
+          >
+            Add Payment
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Student Dialog */}
+      <Dialog open={editStudentOpen} onClose={() => {
+        setEditStudentOpen(false);
+        setEditAvailableSeats([]);
+      }} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Student</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               fullWidth
-              label="Remarks (Optional)"
-              value={payment.remarks}
-              onChange={e => setPayment({ ...payment, remarks: e.target.value })}
-              placeholder="Payment description..."
+              label="Student Name"
+              value={editStudent.name}
+              onChange={(e) => setEditStudent({ ...editStudent, name: e.target.value })}
             />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={loading}>
-          Cancel
-        </Button>
-        <Button
-          onClick={onSubmit}
-          variant="contained"
-          disabled={loading || !payment.amount || !payment.paymentDate || !payment.paymentMode}
-          startIcon={loading ? <CircularProgress size={16} /> : <PaymentIcon />}
-          color="success"
-        >
-          {loading ? 'Processing...' : 'Add Payment'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
+            <TextField
+              fullWidth
+              label="Contact Number"
+              value={editStudent.contactNumber}
+              onChange={(e) => setEditStudent({ ...editStudent, contactNumber: e.target.value })}
+            />
+            <FormControl fullWidth>
+              <InputLabel>Gender</InputLabel>
+              <Select
+                value={editStudent.sex}
+                onChange={(e) => handleEditGenderChange(e.target.value)}
+                label="Gender"
+              >
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth disabled={!editStudent.sex || editSeatLoading}>
+              <InputLabel>Seat Number</InputLabel>
+              <Select
+                value={editStudent.seatNumber}
+                onChange={(e) => setEditStudent({ ...editStudent, seatNumber: e.target.value })}
+                label="Seat Number"
+              >
+                <MenuItem value="">
+                  <em>No Seat Assigned</em>
+                </MenuItem>
+                {editSeatLoading ? (
+                  <MenuItem disabled>
+                    <CircularProgress size={20} sx={{ mr: 1 }} />
+                    Loading seats...
+                  </MenuItem>
+                ) : editAvailableSeats.length > 0 ? (
+                  editAvailableSeats.map((seat) => (
+                    <MenuItem key={seat.seat_number} value={seat.seat_number}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <span>Seat #{seat.seat_number}</span>
+                        {seat.is_current && (
+                          <Chip size="small" label="Current" color="primary" sx={{ ml: 1 }} />
+                        )}
+                        {seat.status === 'occupied' && !seat.is_current && (
+                          <Chip size="small" label="Occupied" color="warning" sx={{ ml: 1 }} />
+                        )}
+                      </Box>
+                      {seat.floor_number && ` (Floor ${seat.floor_number})`}
+                    </MenuItem>
+                  ))
+                ) : editStudent.sex ? (
+                  <MenuItem disabled>No available seats for {editStudent.sex} students</MenuItem>
+                ) : (
+                  <MenuItem disabled>Select gender first to see available seats</MenuItem>
+                )}
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                {editStudent.sex ? 
+                  `${editAvailableSeats.filter(seat => !seat.is_current).length} additional seats available for ${editStudent.sex} students` :
+                  "Select gender to see available seats"
+                }
+              </Typography>
+            </FormControl>
+            <TextField
+              fullWidth
+              label="Membership End Date"
+              type="date"
+              value={editStudent.membershipTill}
+              onChange={(e) => setEditStudent({ ...editStudent, membershipTill: e.target.value })}
+              InputLabelProps={{
+                shrink: true,
+              }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setEditStudentOpen(false);
+            setEditAvailableSeats([]);
+          }}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleConfirmEditStudent}
+          >
+            Update Student
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-// Unassigned Seats View Component
-function UnassignedSeatsView({ unassignedSeats, students, onSeatClick, onSeatHistoryClick, isMobile }) {
-  const unassignedStudents = students.filter(student => !student.assigned_seat || student.assigned_seat === 'UNASSIGNED');
-  
-  return (
-    <Box>
-      {/* Available Seats Section */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-          🔓 Available Seats ({unassignedSeats.length})
-          <Chip 
-            label={`${unassignedSeats.length} Available`} 
-            color="success" 
-            size="small" 
-          />
-        </Typography>
-        
-        {unassignedSeats.length > 0 ? (
-          <Grid container spacing={2}>
-            {unassignedSeats.map((seat) => (
-              <Grid item xs={6} sm={4} md={3} lg={2} key={seat.seat_number}>
-                <Card 
-                  sx={{ 
-                    p: 2, 
-                    textAlign: 'center', 
-                    cursor: 'pointer',
-                    border: '2px solid #4caf50',
-                    bgcolor: 'success.50',
-                    '&:hover': {
-                      transform: 'scale(1.05)',
-                      boxShadow: 3
+      {/* View Student Details Dialog */}
+      <Dialog open={viewStudentOpen} onClose={() => {
+        setViewStudentOpen(false);
+        setViewStudentTotalPaid(0);
+      }} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Student Details - {viewStudentData?.name || 'Unknown'}
+        </DialogTitle>
+        <DialogContent>
+          {!viewStudentData ? (
+            <Box sx={{ mt: 1, p: 2, textAlign: 'center' }}>
+              <Typography color="error">No student data available</Typography>
+            </Box>
+          ) : (
+            <Box sx={{ mt: 1 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Student ID</Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.id || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Name</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    {viewStudentData.sex === 'female' ? 
+                      <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
+                      <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
                     }
-                  }}
-                  onClick={() => onSeatClick({
-                    seatNumber: seat.seat_number,
-                    occupied: false,
-                    isUnassigned: true
-                  })}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    onSeatHistoryClick({
-                      seatNumber: seat.seat_number
-                    });
-                  }}
-                >
-                  <EventSeatIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
-                  <Typography variant="h6" color="success.main">
-                    {seat.seat_number}
+                    <Typography variant="body1">{viewStudentData.name || 'N/A'}</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Gender</Typography>
+                  <Typography variant="body1" sx={{ mb: 2, textTransform: 'capitalize' }}>
+                    {viewStudentData.sex || 'N/A'}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Available
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Contact Number</Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.contact_number || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Father's Name</Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.father_name || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Current Seat</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    {viewStudentData.seat_number ? (
+                      <>
+                        <EventSeatIcon sx={{ color: 'success.main', fontSize: 18 }} />
+                        <Typography variant="body1">#{viewStudentData.seat_number}</Typography>
+                      </>
+                    ) : (
+                      <Typography variant="body1" color="text.secondary">Unassigned</Typography>
+                    )}
+                  </Box>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Status</Typography>
+                  <Chip 
+                    label={viewStudentData.seat_number ? 'Assigned' : 'Unassigned'} 
+                    color={viewStudentData.seat_number ? 'success' : 'error'}
+                    size="small"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Date Joined</Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {formatDateForDisplay(viewStudentData.membership_date)}
                   </Typography>
-                </Card>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Membership Till</Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {formatDateForDisplay(viewStudentData.membership_till)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Total Paid</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <Typography variant="body1" sx={{ fontWeight: 600, color: 'success.main' }}>
+                      ₹{viewStudentTotalPaid.toLocaleString()}
+                    </Typography>
+                  </Box>
+                </Grid>
               </Grid>
-            ))}
-          </Grid>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <EventSeatIcon sx={{ fontSize: 64, color: 'action.disabled', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary">
-              No Available Seats
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              All seats are currently assigned or under maintenance
-            </Typography>
-          </Box>
-        )}
-      </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setViewStudentOpen(false);
+            setViewStudentTotalPaid(0);
+          }}>Close</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleEditFromView}
+            startIcon={<EditIcon />}
+          >
+            Edit Student
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-      {/* Unassigned Students Section */}
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-          👥 Students Without Seats ({unassignedStudents.length})
-          <Chip 
-            label={`${unassignedStudents.length} Unassigned`} 
-            color="warning" 
-            size="small" 
-          />
-        </Typography>
-        
-        {unassignedStudents.length > 0 ? (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Student Name</TableCell>
-                  <TableCell>Contact</TableCell>
-                  <TableCell>Gender</TableCell>
-                  <TableCell>Membership Status</TableCell>
-                  <TableCell>Membership Till</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {unassignedStudents.map((student) => (
-                  <TableRow key={student.id} hover>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Avatar sx={{ width: 32, height: 32, bgcolor: 'warning.main' }}>
-                          <PersonOutlineIcon />
-                        </Avatar>
-                        {student.name}
-                      </Box>
-                    </TableCell>
-                    <TableCell>{student.contact_number}</TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {student.sex === 'male' ? 
-                          <MaleIcon color="primary" /> : 
-                          <FemaleIcon color="secondary" />
-                        }
-                        {student.sex}
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={student.membership_status || 'active'}
-                        color={
-                          student.membership_status === 'active' ? 'success' :
-                          student.membership_status === 'expired' ? 'error' :
-                          'warning'
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {student.membership_till ? (
-                        <Box>
-                          <Typography variant="body2">
-                            {new Date(student.membership_till).toLocaleDateString()}
-                          </Typography>
-                          {new Date(student.membership_till) < new Date() && (
-                            <Chip size="small" label="Expired" color="error" />
-                          )}
-                        </Box>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          Not set
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip title="Assign Seat">
-                        <IconButton 
-                          size="small" 
-                          onClick={() => {
-                            // Handle seat assignment - could open a dialog
-                            console.log('Assign seat to student:', student);
-                          }}
-                        >
-                          <EventSeatIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <CheckCircleIcon sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
-            <Typography variant="h6" color="success.main">
-              All Students Have Seats!
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Every student has been assigned a seat
-            </Typography>
-          </Box>
-        )}
-      </Paper>
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to remove student "{selectedItemForAction?.name}"? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            color="error"
+            onClick={confirmDeleteStudent}
+          >
+            Delete Student
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={4000}
+        onClose={() => setSnackbarOpen(false)}
+      >
+        <Alert severity={snackbarSeverity} onClose={() => setSnackbarOpen(false)}>
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

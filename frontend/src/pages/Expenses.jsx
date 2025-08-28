@@ -34,10 +34,10 @@ import {
   TableSortLabel,
   InputAdornment,
   Fab,
-  Collapse,
   ToggleButton,
   ToggleButtonGroup
 } from '@mui/material';
+import MobileFilters from '../components/MobileFilters';
 import {
   Add as AddIcon,
   TrendingUp as TrendingUpIcon,
@@ -50,13 +50,13 @@ import {
   FilterList as FilterIcon,
   CalendarToday as CalendarIcon,
   ExpandMore as ExpandIcon,
-  ExpandLess as CollapseIcon,
   Analytics as AnalyticsIcon,
   AccountBalance as AccountBalanceIcon,
   Refresh as RefreshIcon,
   Download as DownloadIcon
 } from '@mui/icons-material';
 import { pageStyles } from '../styles/commonStyles';
+import api from '../services/api';
 
 function Expenses() {
   const theme = useTheme();
@@ -71,7 +71,6 @@ function Expenses() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [dateRange, setDateRange] = useState('all');
   const [sortConfig, setSortConfig] = useState({ field: 'date', direction: 'desc' });
-  const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState(isMobile ? 'cards' : 'table');
   
   // New expense form state
@@ -81,6 +80,15 @@ function Expenses() {
     description: '',
     amount: ''
   });
+
+  // Global error handler for API calls
+  const handleApiError = (error, fallbackMessage = 'An error occurred') => {
+    if (error?.response?.data?.error === 'TOKEN_EXPIRED') {
+      // Let the global interceptor handle token expiration
+      return;
+    }
+    setError(error?.response?.data?.message || error?.message || fallbackMessage);
+  };
 
   useEffect(() => {
     fetchData();
@@ -120,7 +128,7 @@ function Expenses() {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Failed to load data. Please try again.');
+      handleApiError(error, 'Failed to load data. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -177,7 +185,7 @@ function Expenses() {
       }
     } catch (error) {
       console.error('Error adding expense:', error);
-      setError('Failed to add expense. Please try again.');
+      handleApiError(error, 'Failed to add expense. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -283,13 +291,6 @@ function Expenses() {
       field,
       direction: prevConfig.field === field && prevConfig.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
-
-  const clearFilters = () => {
-    setSearchQuery('');
-    setTypeFilter('all');
-    setDateRange('all');
-    setSortConfig({ field: 'date', direction: 'desc' });
   };
 
   const getTypeIcon = (type) => {
@@ -607,98 +608,95 @@ function Expenses() {
             <FilterIcon sx={{ mr: 1 }} />
             Filters & Search
           </Typography>
-          <Stack direction="row" spacing={1}>
-            <ToggleButtonGroup
-              value={viewMode}
-              exclusive
-              onChange={(e, value) => value && setViewMode(value)}
-              size="small"
-            >
-              <ToggleButton value="table">Table</ToggleButton>
-              <ToggleButton value="cards">Cards</ToggleButton>
-            </ToggleButtonGroup>
-            <IconButton onClick={() => setShowFilters(!showFilters)} size="small">
-              {showFilters ? <CollapseIcon /> : <ExpandIcon />}
-            </IconButton>
-          </Stack>
+          <ToggleButtonGroup
+            value={viewMode}
+            exclusive
+            onChange={(e, value) => value && setViewMode(value)}
+            size="small"
+          >
+            <ToggleButton value="table">Table</ToggleButton>
+            <ToggleButton value="cards">Cards</ToggleButton>
+          </ToggleButtonGroup>
         </Box>
         
-        <TextField
-          fullWidth
-          variant="outlined"
-          placeholder="Search expenses..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-            endAdornment: searchQuery && (
-              <InputAdornment position="end">
-                <IconButton onClick={() => setSearchQuery('')} size="small">
-                  <ClearIcon />
-                </IconButton>
-              </InputAdornment>
-            )
+        <MobileFilters
+          title="Expense Filters"
+          filterCount={[searchQuery, typeFilter !== 'all' ? typeFilter : '', dateRange !== 'all' ? dateRange : ''].filter(v => v).length}
+          onClearAll={() => {
+            setSearchQuery('');
+            setTypeFilter('all');
+            setDateRange('all');
           }}
-          sx={{ mb: showFilters ? 2 : 0 }}
-        />
-        
-        <Collapse in={showFilters}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>Type</InputLabel>
-                <Select
-                  value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
-                  label="Type"
-                >
-                  <MenuItem value="all">All Types</MenuItem>
-                  <MenuItem value="electricity">Electricity</MenuItem>
-                  <MenuItem value="rent">Rent</MenuItem>
-                  <MenuItem value="maintenance">Maintenance</MenuItem>
-                  <MenuItem value="supplies">Supplies</MenuItem>
-                  <MenuItem value="internet">Internet</MenuItem>
-                  <MenuItem value="water">Water</MenuItem>
-                  <MenuItem value="cleaning">Cleaning</MenuItem>
-                  <MenuItem value="security">Security</MenuItem>
-                  <MenuItem value="other">Other</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>Date Range</InputLabel>
-                <Select
-                  value={dateRange}
-                  onChange={(e) => setDateRange(e.target.value)}
-                  label="Date Range"
-                >
-                  <MenuItem value="all">All Time</MenuItem>
-                  <MenuItem value="thisMonth">This Month</MenuItem>
-                  <MenuItem value="lastMonth">Last Month</MenuItem>
-                  <MenuItem value="last3Months">Last 3 Months</MenuItem>
-                  <MenuItem value="thisYear">This Year</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ display: 'flex', gap: 1, height: '100%', alignItems: 'center' }}>
-                <Button
-                  variant="outlined"
-                  onClick={clearFilters}
-                  startIcon={<ClearIcon />}
-                  fullWidth
-                >
-                  Clear Filters
-                </Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </Collapse>
+          activeFilters={{
+            search: searchQuery,
+            type: typeFilter !== 'all' ? typeFilter : '',
+            dateRange: dateRange !== 'all' ? dateRange : ''
+          }}
+          onFilterRemove={(key) => {
+            switch (key) {
+              case 'search': setSearchQuery(''); break;
+              case 'type': setTypeFilter('all'); break;
+              case 'dateRange': setDateRange('all'); break;
+            }
+          }}
+        >
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Search expenses..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+              endAdornment: searchQuery && (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => setSearchQuery('')} size="small">
+                    <ClearIcon />
+                  </IconButton>
+                </InputAdornment>
+              )
+            }}
+          />
+          
+          <FormControl fullWidth>
+            <InputLabel>Type</InputLabel>
+            <Select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              label="Type"
+            >
+              <MenuItem value="all">All Types</MenuItem>
+              <MenuItem value="electricity">Electricity</MenuItem>
+              <MenuItem value="rent">Rent</MenuItem>
+              <MenuItem value="maintenance">Maintenance</MenuItem>
+              <MenuItem value="supplies">Supplies</MenuItem>
+              <MenuItem value="internet">Internet</MenuItem>
+              <MenuItem value="water">Water</MenuItem>
+              <MenuItem value="cleaning">Cleaning</MenuItem>
+              <MenuItem value="security">Security</MenuItem>
+              <MenuItem value="other">Other</MenuItem>
+            </Select>
+          </FormControl>
+          
+          <FormControl fullWidth>
+            <InputLabel>Date Range</InputLabel>
+            <Select
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value)}
+              label="Date Range"
+            >
+              <MenuItem value="all">All Time</MenuItem>
+              <MenuItem value="thisMonth">This Month</MenuItem>
+              <MenuItem value="lastMonth">Last Month</MenuItem>
+              <MenuItem value="last3Months">Last 3 Months</MenuItem>
+              <MenuItem value="thisYear">This Year</MenuItem>
+            </Select>
+          </FormControl>
+        </MobileFilters>
 
         {/* Filter Summary */}
         {(searchQuery || typeFilter !== 'all' || dateRange !== 'all') && (

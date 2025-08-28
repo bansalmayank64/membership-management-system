@@ -16,7 +16,10 @@ router.get('/', async (req, res) => {
     const query = `
       SELECT 
         s.seat_number,
-        s.status,
+        CASE 
+          WHEN st.id IS NOT NULL THEN 'occupied'
+          ELSE 'available'
+        END as status,
         s.occupant_sex,
         st.id as student_id,
         st.name as student_name,
@@ -24,19 +27,48 @@ router.get('/', async (req, res) => {
         st.contact_number,
         st.membership_till,
         st.membership_status,
-        st.last_payment_date,
+        payment_summary.last_payment_date,
+        -- Enhanced expiring logic: only calculate for seats with students
         CASE 
-          WHEN st.membership_till < NOW() THEN true 
-          WHEN st.membership_till <= NOW() + INTERVAL '7 days' THEN true
+          WHEN st.id IS NOT NULL AND st.membership_till IS NOT NULL THEN
+            CASE 
+              WHEN st.membership_till < NOW() THEN true 
+              WHEN st.membership_till <= NOW() + INTERVAL '7 days' THEN true
+              ELSE false 
+            END
           ELSE false 
-        END as expiring
+        END as expiring,
+        -- Enhanced occupancy logic with better validation
+        CASE 
+          WHEN st.id IS NOT NULL 
+            AND st.membership_status = 'active'
+            AND (st.membership_till IS NULL OR st.membership_till >= NOW()) THEN true
+          ELSE false 
+        END as is_truly_occupied,
+        -- Additional computed fields for better frontend handling
+        CASE 
+          WHEN st.id IS NOT NULL AND st.membership_till IS NOT NULL AND st.membership_till < NOW() THEN true
+          ELSE false
+        END as membership_expired,
+        CASE 
+          WHEN st.id IS NOT NULL AND st.membership_status = 'suspended' THEN true
+          ELSE false
+        END as membership_suspended
       FROM seats s
-      LEFT JOIN students st ON s.student_id = st.id
-      WHERE s.status != 'removed'
+      LEFT JOIN students st ON s.seat_number = st.seat_number
+      LEFT JOIN (
+        SELECT 
+          student_id,
+          MAX(payment_date) as last_payment_date
+        FROM payments 
+        GROUP BY student_id
+      ) payment_summary ON st.id = payment_summary.student_id
       ORDER BY 
+        -- Improved sorting: handle numeric seats better
         CASE 
           WHEN s.seat_number ~ '^[0-9]+$' THEN CAST(s.seat_number AS INTEGER)
-          ELSE 999999 
+          WHEN s.seat_number ~ '^[A-Za-z][0-9]+$' THEN 1000000 + CAST(substring(s.seat_number from '[0-9]+') AS INTEGER)
+          ELSE 9999999 
         END ASC,
         s.seat_number ASC
     `;
@@ -47,24 +79,42 @@ router.get('/', async (req, res) => {
     const queryTime = Date.now() - queryStart;
     
     console.log(`✅ Query executed successfully in ${queryTime}ms, returned ${result.rows.length} rows`);
-    console.log(`📋 Raw data sample:`, result.rows.slice(0, 2));
+    
+    // Show a more representative sample: first 2 rows + any seats with students
+    const seatsWithStudents = result.rows.filter(row => row.student_id !== null);
+    const sampleData = {
+      firstTwoSeats: result.rows.slice(0, 2),
+      seatsWithStudents: seatsWithStudents.slice(0, 3),
+      totalSeatsWithStudents: seatsWithStudents.length
+    };
+    console.log(`📋 Raw data sample:`, sampleData);
     
     console.log(`🔄 Step 3: Transforming data to match frontend expectations...`);
     const transformStart = Date.now();
     
-    // Transform data to match frontend expectations
+    // Transform data to match frontend expectations with enhanced validation
     const seats = result.rows.map(row => ({
       seatNumber: row.seat_number,
-      occupied: row.status === 'occupied' && row.student_id,
+      occupied: row.is_truly_occupied, // Use the enhanced computed field for accurate occupancy status
       studentName: row.student_name,
       gender: row.student_sex,
-      studentId: row.student_id ? `STU${row.student_id.toString().padStart(3, '0')}` : null,
+      studentId: row.student_id,
       contactNumber: row.contact_number,
       membershipExpiry: row.membership_till ? row.membership_till.toISOString().split('T')[0] : null,
       lastPayment: row.last_payment_date ? row.last_payment_date.toISOString().split('T')[0] : null,
-      expiring: row.expiring,
-      removed: row.status === 'removed',
-      maintenance: row.status === 'maintenance'
+      expiring: row.expiring && row.is_truly_occupied, // Only show expiring if truly occupied
+      removed: false, // Status field removed - seats are either present or deleted
+      maintenance: false, // Status field removed - maintenance should be handled separately
+      membershipStatus: row.membership_status, // Add membership status for better validation
+      membershipExpired: row.membership_expired || false, // New field for expired memberships
+      membershipSuspended: row.membership_suspended || false, // New field for suspended memberships
+      // Enhanced status information
+      seatStatus: row.status,
+      occupantSexRestriction: row.occupant_sex,
+      hasStudent: !!row.student_id,
+      // Validation flags for frontend
+      canMarkVacant: row.is_truly_occupied && (row.membership_expired || row.membership_suspended || row.expiring),
+      needsAttention: (row.is_truly_occupied && row.expiring) || row.membership_suspended
     }));
     
     const transformTime = Date.now() - transformStart;
@@ -72,14 +122,33 @@ router.get('/', async (req, res) => {
     
     console.log(`🔧 Data transformation completed in ${transformTime}ms`);
     console.log(`📊 Response statistics: ${seats.length} seats processed`);
+    
+    //console.log(`📊 Response seats final: ${JSON.stringify(seats, null, 2)}`);
     console.log(`📈 Seat status breakdown:`, {
+      total: seats.length,
       occupied: seats.filter(s => s.occupied).length,
-      vacant: seats.filter(s => !s.occupied && !s.maintenance).length,
+      vacant: seats.filter(s => !s.occupied && !s.maintenance && !s.removed).length,
       maintenance: seats.filter(s => s.maintenance).length,
-      expiring: seats.filter(s => s.expiring).length
+      removed: seats.filter(s => s.removed).length,
+      expiring: seats.filter(s => s.expiring).length,
+      expired: seats.filter(s => s.membershipExpired).length,
+      suspended: seats.filter(s => s.membershipSuspended).length,
+      needsAttention: seats.filter(s => s.needsAttention).length,
+      canMarkVacant: seats.filter(s => s.canMarkVacant).length,
+      withStudents: seats.filter(s => s.hasStudent).length,
+      withGenderRestriction: seats.filter(s => s.occupantSexRestriction).length
     });
     
     console.log(`✨ Step 4: Sending response...`);
+    
+    // Log complete response data for debugging frontend display issues
+    console.log(`📤 COMPLETE RESPONSE DATA:`, JSON.stringify({
+      totalSeats: seats.length,
+      seatsWithStudents: seats.filter(s => s.hasStudent),
+      sampleTransformedSeats: seats.slice(0, 5),
+      occupiedSeatsDetails: seats.filter(s => s.occupied)
+    }, null, 2));
+    
     console.log(`🎯 [${new Date().toISOString()}] GET /api/seats completed successfully in ${totalTime}ms [${requestId}]`);
     
     res.json(seats);
@@ -136,16 +205,36 @@ router.post('/', async (req, res) => {
       });
     }
     
+    // Validate occupant_sex if provided
+    if (occupant_sex && !['male', 'female'].includes(occupant_sex)) {
+      console.log(`❌ Validation failed: invalid occupant_sex value`);
+      return res.status(400).json({ 
+        error: 'Occupant sex must be either "male" or "female"',
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Validate seat_number format (should be alphanumeric)
+    if (!/^[A-Za-z0-9\-]+$/.test(seat_number)) {
+      console.log(`❌ Validation failed: invalid seat_number format`);
+      return res.status(400).json({ 
+        error: 'Seat number can only contain letters, numbers, and hyphens',
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     console.log(`📝 Step 2: Preparing database insertion query...`);
     const query = `
-      INSERT INTO seats (seat_number, occupant_sex, modified_by)
-      VALUES ($1, $2, $3)
+      INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by)
+      VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)
       RETURNING *
     `;
     
     console.log(`🔧 Step 3: Executing database insertion...`);
     const queryStart = Date.now();
-    const result = await pool.query(query, [seat_number, occupant_sex, modified_by]);
+    const result = await pool.query(query, [seat_number, occupant_sex, req.user?.userId || req.user?.id || 1]);
     const queryTime = Date.now() - queryStart;
     const totalTime = Date.now() - startTime;
     
@@ -214,11 +303,19 @@ router.get('/:seatNumber/history', async (req, res) => {
     const query = `
       SELECT 
         sh.*,
-        u.username as modified_by_name
+        u.username as modified_by_name,
+        CASE 
+          WHEN sh.end_date IS NULL THEN 'Current'
+          ELSE 'Completed'
+        END as assignment_status,
+        CASE 
+          WHEN sh.end_date IS NULL THEN NULL
+          ELSE EXTRACT(DAYS FROM (sh.end_date - sh.start_date))
+        END as days_assigned
       FROM seats_history sh
       LEFT JOIN users u ON sh.modified_by = u.id
       WHERE sh.seat_number = $1
-      ORDER BY sh.action_timestamp DESC
+      ORDER BY sh.start_date DESC, sh.action_timestamp DESC
       LIMIT 50
     `;
     
@@ -256,7 +353,7 @@ router.get('/:seatNumber/history', async (req, res) => {
   }
 });
 
-// PUT /api/seats/:seatNumber - Update seat status
+// PUT /api/seats/:seatNumber - Update seat properties (Note: Status is now determined by student assignments)
 router.put('/:seatNumber', async (req, res) => {
   const requestId = `seats-put-${Date.now()}`;
   const startTime = Date.now();
@@ -265,7 +362,7 @@ router.put('/:seatNumber', async (req, res) => {
     console.log(`🪑🔄 [${new Date().toISOString()}] Starting PUT /api/seats/:seatNumber [${requestId}]`);
     
     const { seatNumber } = req.params;
-    const { status, modified_by } = req.body;
+    const { occupant_sex, modified_by } = req.body;
     
     console.log(`📊 Request params: seatNumber="${seatNumber}"`);
     console.log(`📊 Request body:`, req.body);
@@ -281,10 +378,11 @@ router.put('/:seatNumber', async (req, res) => {
       });
     }
     
-    if (!status) {
-      console.log(`❌ Validation failed: status is required`);
+    // Validate occupant_sex if provided
+    if (occupant_sex && !['male', 'female'].includes(occupant_sex)) {
+      console.log(`❌ Validation failed: invalid occupant_sex value`);
       return res.status(400).json({ 
-        error: 'Status is required',
+        error: 'occupant_sex must be either "male" or "female"',
         requestId: requestId,
         timestamp: new Date().toISOString()
       });
@@ -293,14 +391,14 @@ router.put('/:seatNumber', async (req, res) => {
     console.log(`📝 Step 2: Preparing seat update query...`);
     const query = `
       UPDATE seats 
-      SET status = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
+      SET occupant_sex = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
       WHERE seat_number = $3
       RETURNING *
     `;
     
     console.log(`🔧 Step 3: Executing seat update...`);
     const queryStart = Date.now();
-    const result = await pool.query(query, [status, modified_by, seatNumber]);
+    const result = await pool.query(query, [occupant_sex, req.user?.userId || req.user?.id || 1, seatNumber]);
     const queryTime = Date.now() - queryStart;
     
     console.log(`✅ Update query executed successfully in ${queryTime}ms`);
@@ -370,17 +468,16 @@ router.delete('/:seatNumber', async (req, res) => {
       });
     }
     
-    console.log(`📝 Step 2: Preparing seat removal query (marking as removed)...`);
+    console.log(`📝 Step 2: Preparing seat deletion query...`);
     const query = `
-      UPDATE seats 
-      SET status = 'removed', modified_by = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE seat_number = $2
+      DELETE FROM seats 
+      WHERE seat_number = $1
       RETURNING *
     `;
     
-    console.log(`🔧 Step 3: Executing seat removal...`);
+    console.log(`🔧 Step 3: Executing seat deletion...`);
     const queryStart = Date.now();
-    const result = await pool.query(query, [modified_by, seatNumber]);
+    const result = await pool.query(query, [seatNumber]);
     const queryTime = Date.now() - queryStart;
     
     console.log(`✅ Removal query executed successfully in ${queryTime}ms`);
@@ -457,12 +554,20 @@ router.put('/:seatNumber/mark-vacant', async (req, res) => {
       await client.query('BEGIN');
       console.log('✅ Transaction started successfully');
 
-      // Get current seat and student information
+      // Get current seat and student information with proper validation
       console.log(`🔍 Step 3: Fetching current seat and student information...`);
       const seatQuery = `
-        SELECT s.*, st.name as student_name, st.membership_till, st.id as student_id
+        SELECT 
+          s.seat_number,
+          s.status,
+          s.occupant_sex,
+          st.id as student_id,
+          st.name as student_name, 
+          st.membership_till, 
+          st.membership_status,
+          st.sex as student_sex
         FROM seats s
-        LEFT JOIN students st ON s.student_id = st.id
+        LEFT JOIN students st ON s.seat_number = st.seat_number
         WHERE s.seat_number = $1
       `;
       
@@ -484,12 +589,13 @@ router.put('/:seatNumber/mark-vacant', async (req, res) => {
       const seatInfo = seatResult.rows[0];
       console.log(`📊 Current seat info:`, seatInfo);
 
-      // Check if seat is occupied and has expired membership
-      if (seatInfo.status !== 'occupied' || !seatInfo.student_id) {
-        console.log(`❌ Seat is not occupied: ${seatNumber}`);
+      // Check if seat has a student assigned
+      if (!seatInfo.student_id) {
+        console.log(`❌ Seat has no student assigned: ${seatNumber}`);
         await client.query('ROLLBACK');
         return res.status(400).json({ 
-          error: 'Seat is not currently occupied',
+          error: 'Seat is not currently occupied or has no student assigned',
+          hasStudent: !!seatInfo.student_id,
           requestId: requestId,
           timestamp: new Date().toISOString()
         });
@@ -500,48 +606,61 @@ router.put('/:seatNumber/mark-vacant', async (req, res) => {
       const membershipTill = new Date(seatInfo.membership_till);
       const isExpired = membershipTill < now;
 
-      console.log(`📅 Membership check:`, {
+      console.log(`📅 Membership validation:`, {
+        student_name: seatInfo.student_name,
         membership_till: seatInfo.membership_till,
+        membership_status: seatInfo.membership_status,
         is_expired: isExpired,
         current_time: now.toISOString()
       });
 
-      if (!isExpired) {
+      // Allow marking as vacant if:
+      // 1. Membership is expired (past due date), OR
+      // 2. Membership status is already 'expired' or 'suspended'
+      const canMarkVacant = isExpired || 
+                           seatInfo.membership_status === 'expired' || 
+                           seatInfo.membership_status === 'suspended';
+
+      if (!canMarkVacant) {
         console.log(`❌ Student membership is still active: ${seatNumber}`);
         await client.query('ROLLBACK');
         return res.status(400).json({ 
-          error: 'Student membership is still active. Can only mark expired seats as vacant.',
+          error: 'Student membership is still active. Can only mark expired or suspended memberships as vacant.',
           membership_till: seatInfo.membership_till,
+          membership_status: seatInfo.membership_status,
           requestId: requestId,
           timestamp: new Date().toISOString()
         });
       }
 
-      console.log(`🔄 Step 4: Marking seat as vacant...`);
+      console.log(`🔄 Step 4: Marking seat as vacant and updating student record...`);
       
       // Update seat status to available and clear occupant info
       const updateSeatQuery = `
         UPDATE seats 
-        SET student_id = NULL, status = 'available', occupant_sex = NULL, 
-            modified_by = $1, updated_at = CURRENT_TIMESTAMP
+        SET occupant_sex = NULL, 
+            modified_by = $1, 
+            updated_at = CURRENT_TIMESTAMP
         WHERE seat_number = $2
         RETURNING *
       `;
       
-      const updateSeatResult = await client.query(updateSeatQuery, [modified_by, seatNumber]);
+      const updateSeatResult = await client.query(updateSeatQuery, [req.user?.userId || req.user?.id || 1, seatNumber]);
       console.log(`✅ Seat marked as vacant:`, updateSeatResult.rows[0]);
 
-      // Update student to remove seat assignment
+      // Update student to remove seat assignment and set status to expired
       console.log(`🔄 Step 5: Updating student record...`);
       const updateStudentQuery = `
         UPDATE students 
-        SET seat_number = NULL, membership_status = 'expired',
-            modified_by = $1, updated_at = CURRENT_TIMESTAMP
+        SET seat_number = NULL, 
+            membership_status = 'expired',
+            modified_by = $1, 
+            updated_at = CURRENT_TIMESTAMP
         WHERE id = $2
         RETURNING *
       `;
       
-      const updateStudentResult = await client.query(updateStudentQuery, [modified_by, seatInfo.student_id]);
+      const updateStudentResult = await client.query(updateStudentQuery, [req.user?.userId || req.user?.id || 1, seatInfo.student_id]);
       console.log(`✅ Student record updated:`, updateStudentResult.rows[0]);
 
       console.log(`💯 Step 6: Committing transaction...`);

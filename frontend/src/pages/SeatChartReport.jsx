@@ -101,6 +101,20 @@ function SeatChartReport() {
   const [selectedSeatForAdmin, setSelectedSeatForAdmin] = useState(null);
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
 
+  // Global error handler for API calls
+  const handleApiError = (error, fallbackMessage = 'An error occurred') => {
+    if (error?.response?.data?.error === 'TOKEN_EXPIRED') {
+      // Let the global interceptor handle token expiration
+      return;
+    }
+    setError(error?.response?.data?.message || error?.message || fallbackMessage);
+    setNotification({ 
+      open: true, 
+      message: error?.response?.data?.message || error?.message || fallbackMessage, 
+      severity: 'error' 
+    });
+  };
+
   useEffect(() => {
     fetchSeatChart();
   }, []);
@@ -124,7 +138,7 @@ function SeatChartReport() {
       const data = await getSeatChartData();
       setSeatData(data);
     } catch (err) {
-      setError('Failed to load seat chart data');
+      handleApiError(err, 'Failed to load seat chart data');
     } finally {
       setLoading(false);
     }
@@ -134,12 +148,26 @@ function SeatChartReport() {
   const getStatistics = () => {
     const total = seatData.length;
     const occupied = seatData.filter(seat => seat.occupied && !seat.removed).length;
-    const vacant = seatData.filter(seat => !seat.occupied && !seat.removed).length;
-    const expiring = seatData.filter(seat => seat.expiring && !seat.removed).length;
+    const available = seatData.filter(seat => seat.available && !seat.removed).length;
+    
+    // Calculate expiring count based on membership expiry within 7 days
+    const today = new Date();
+    const sevenDaysFromNow = new Date();
+    sevenDaysFromNow.setDate(today.getDate() + 7);
+    
+    const expiring = seatData.filter(seat => {
+      if (!seat.occupied || seat.removed || !seat.membershipExpiry) {
+        return false;
+      }
+      
+      const expiryDate = new Date(seat.membershipExpiry);
+      return expiryDate >= today && expiryDate <= sevenDaysFromNow;
+    }).length;
+    
     const removed = seatData.filter(seat => seat.removed).length;
     const occupancyRate = total > 0 ? ((occupied / (total - removed)) * 100).toFixed(1) : 0;
 
-    return { total, occupied, vacant, expiring, removed, occupancyRate };
+    return { total, occupied, available, expiring, removed, occupancyRate };
   };
 
   // Filter seats based on search term
@@ -270,11 +298,7 @@ function SeatChartReport() {
       });
 
     } catch (error) {
-      setNotification({
-        open: true,
-        message: 'Failed to update seat status',
-        severity: 'error'
-      });
+      handleApiError(error, 'Failed to update seat status');
     }
 
     handleAdminMenuClose();
@@ -326,12 +350,13 @@ function SeatChartReport() {
     <Box sx={{ p: isMobile ? 1 : 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">
-          Seat Chart Report
+          💺 Seat Chart
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <IconButton 
             onClick={fetchSeatChart} 
             color="primary"
+            size={isMobile ? "small" : "medium"}
             sx={{ 
               bgcolor: theme.palette.primary.main + '10',
               '&:hover': { bgcolor: theme.palette.primary.main + '20' }
@@ -340,80 +365,24 @@ function SeatChartReport() {
             <RefreshIcon />
           </IconButton>
           <Button
-            variant={autoRefresh ? "contained" : "outlined"}
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            size="small"
-            startIcon={<AccessTimeIcon />}
-          >
-            {autoRefresh ? 'Auto ON' : 'Auto OFF'}
-          </Button>
-          <Button
             variant={adminMode ? "contained" : "outlined"}
             onClick={() => setAdminMode(!adminMode)}
             size="small"
             startIcon={<AdminPanelSettingsIcon />}
             color={adminMode ? "secondary" : "primary"}
+            sx={{ minWidth: 'auto', px: isMobile ? 1 : 2 }}
           >
-            Admin {adminMode ? 'ON' : 'OFF'}
+            {isMobile ? 'Admin' : `Admin ${adminMode ? 'ON' : 'OFF'}`}
           </Button>
         </Box>
       </Box>
 
-      {/* Quick Insights */}
-      <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
-        <Typography variant="h6" gutterBottom>
-          📊 Quick Insights
-        </Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Total Capacity
-              </Typography>
-              <Typography variant="h5" fontWeight="bold" color="primary.main">
-                {statistics.total - statistics.removed}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Revenue Potential
-              </Typography>
-              <Typography variant="h5" fontWeight="bold" color="success.main">
-                ₹{(statistics.occupied * 2500).toLocaleString()}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Needs Attention
-              </Typography>
-              <Typography variant="h5" fontWeight="bold" color="warning.main">
-                {statistics.expiring}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Available Seats
-              </Typography>
-              <Typography variant="h5" fontWeight="bold" color="info.main">
-                {statistics.vacant}
-              </Typography>
-            </Box>
-          </Grid>
-        </Grid>
-      </Paper>
-
-      {/* Statistics Cards */}
+      {/* Quick Stats */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={6} sm={3}>
           <Card sx={{ textAlign: 'center', bgcolor: 'primary.main', color: 'white' }}>
             <CardContent sx={{ py: 1.5 }}>
-              <Typography variant="h4" fontWeight="bold">{statistics.occupied}</Typography>
+              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">{statistics.occupied}</Typography>
               <Typography variant="body2">Occupied</Typography>
             </CardContent>
           </Card>
@@ -421,15 +390,15 @@ function SeatChartReport() {
         <Grid item xs={6} sm={3}>
           <Card sx={{ textAlign: 'center', bgcolor: 'grey.100' }}>
             <CardContent sx={{ py: 1.5 }}>
-              <Typography variant="h4" fontWeight="bold">{statistics.vacant}</Typography>
-              <Typography variant="body2">Vacant</Typography>
+              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">{statistics.available}</Typography>
+              <Typography variant="body2">Available</Typography>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Card sx={{ textAlign: 'center', bgcolor: 'warning.main', color: 'white' }}>
             <CardContent sx={{ py: 1.5 }}>
-              <Typography variant="h4" fontWeight="bold">{statistics.expiring}</Typography>
+              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">{statistics.expiring}</Typography>
               <Typography variant="body2">Expiring</Typography>
             </CardContent>
           </Card>
@@ -437,49 +406,42 @@ function SeatChartReport() {
         <Grid item xs={6} sm={3}>
           <Card sx={{ textAlign: 'center', bgcolor: 'success.main', color: 'white' }}>
             <CardContent sx={{ py: 1.5 }}>
-              <Typography variant="h4" fontWeight="bold">{statistics.occupancyRate}%</Typography>
-              <Typography variant="body2">Occupancy</Typography>
+              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">{statistics.occupancyRate}%</Typography>
+              <Typography variant="body2">Full</Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {/* Alerts Section */}
+      {/* Alerts */}
       {statistics.expiring > 0 && (
         <Paper sx={{ p: 2, mb: 3, bgcolor: 'warning.light', borderLeft: '4px solid', borderColor: 'warning.main' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AccessTimeIcon color="warning" />
             <Typography variant="subtitle1" fontWeight="bold">
-              Action Required: {statistics.expiring} membership{statistics.expiring > 1 ? 's' : ''} expiring soon
+              ⚠️ {statistics.expiring} membership{statistics.expiring > 1 ? 's' : ''} expiring soon
             </Typography>
           </Box>
-          <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
-            Contact these students to renew their memberships to avoid seat vacancy.
-          </Typography>
         </Paper>
       )}
 
-      {/* Admin Mode Notice */}
       {adminMode && (
         <Paper sx={{ p: 2, mb: 3, bgcolor: 'info.light', borderLeft: '4px solid', borderColor: 'info.main' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AdminPanelSettingsIcon color="info" />
             <Typography variant="subtitle1" fontWeight="bold">
-              Admin Mode Active
+              🔧 Admin Mode: Click seats to manage
             </Typography>
           </Box>
-          <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
-            Click on any seat to manage it. You can add new seats, remove existing ones, or put them under maintenance.
-          </Typography>
         </Paper>
       )}
 
       <Paper sx={{ p: isMobile ? 2 : 3 }}>
-        {/* Search and Legend */}
+        {/* Search */}
         <Box sx={{ mb: 3 }}>
           <TextField
             fullWidth
-            placeholder="Search by seat number or student name..."
+            placeholder="Search seat or student name..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             InputProps={{
@@ -488,10 +450,12 @@ function SeatChartReport() {
             sx={{ mb: 2 }}
           />
           
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          {/* Legend */}
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
             <Chip 
               icon={<MaleIcon />} 
-              label="Male Occupied" 
+              label="Male" 
+              size="small"
               sx={{ 
                 background: seatColors.occupied.male.gradient,
                 color: 'white',
@@ -500,7 +464,8 @@ function SeatChartReport() {
             />
             <Chip 
               icon={<FemaleIcon />} 
-              label="Female Occupied" 
+              label="Female" 
+              size="small"
               sx={{ 
                 background: seatColors.occupied.female.gradient,
                 color: 'white',
@@ -509,7 +474,8 @@ function SeatChartReport() {
             />
             <Chip 
               icon={<EventSeatIcon />} 
-              label="Vacant" 
+              label="Empty" 
+              size="small"
               sx={{ 
                 background: seatColors.vacant.gradient,
                 '& .MuiChip-icon': { color: 'text.secondary' }
@@ -517,19 +483,12 @@ function SeatChartReport() {
             />
             <Chip 
               icon={<AccessTimeIcon />} 
-              label="Expiring Soon" 
+              label="Expiring" 
+              size="small"
               sx={{ 
                 background: seatColors.expiring.male.gradient,
                 color: 'white',
                 '& .MuiChip-icon': { color: 'white' }
-              }} 
-            />
-            <Chip 
-              icon={<RemoveCircleOutlineIcon />} 
-              label="Maintenance" 
-              sx={{ 
-                background: seatColors.removed.gradient,
-                '& .MuiChip-icon': { color: 'text.secondary' }
               }} 
             />
           </Box>
@@ -547,9 +506,9 @@ function SeatChartReport() {
         ) : (
           <Box sx={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', 
-            gap: 2,
-            p: 2
+            gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? '80px' : '100px'}, 1fr))`, 
+            gap: isMobile ? 1 : 2,
+            p: 1
           }}>
             {getFilteredSeats().map(seat => {
               const isHighlighted = searchTerm && (
@@ -580,46 +539,23 @@ function SeatChartReport() {
                           🔧 Under Maintenance
                         </Typography>
                       )}
-                      {adminMode && <Typography variant="caption">Admin: Click to manage</Typography>}
-                      {!adminMode && seat.occupied && <Typography variant="caption">Click for details</Typography>}
                     </Box>
                   }
                   arrow
                 >
                   <Card
-                    onClick={(e) => {
-                      if (adminMode) {
-                        handleSeatAdminClick(seat, e);
-                      } else {
-                        handleSeatClick(seat);
-                      }
-                    }}
                     sx={{
-                      minHeight: 100,
-                      cursor: adminMode 
-                        ? 'pointer' 
-                        : seat.occupied 
-                          ? 'pointer' 
-                          : 'default',
-                      transition: 'all 0.3s ease',
+                      minHeight: isMobile ? 70 : 90,
+                      cursor: 'default',
+                      transition: 'all 0.2s ease',
                       border: isHighlighted 
-                        ? '3px solid #4caf50' 
+                        ? '2px solid #4caf50' 
                         : seat.occupied && seat.gender
-                          ? `2px solid ${seat.gender === 'female' ? '#e91e63' : '#1976d2'}`
+                          ? `1px solid ${seat.gender === 'female' ? '#e91e63' : '#1976d2'}`
                           : '1px solid transparent',
-                      borderRadius: seat.occupied && seat.gender === 'female' ? '20px' : '12px',
+                      borderRadius: seat.occupied && seat.gender === 'female' ? '16px' : '8px',
                       background: getSeatBackground(seat),
-                      '&:hover': seat.occupied ? {
-                        transform: 'translateY(-4px)',
-                        boxShadow: 6
-                      } : {},
-                      boxShadow: seat.occupied ? 3 : 1,
-                      animation: isHighlighted ? 'pulse 1s infinite' : 'none',
-                      '@keyframes pulse': {
-                        '0%': { boxShadow: '0 0 0 0 rgba(76, 175, 80, 0.7)' },
-                        '70%': { boxShadow: '0 0 0 10px rgba(76, 175, 80, 0)' },
-                        '100%': { boxShadow: '0 0 0 0 rgba(76, 175, 80, 0)' }
-                      }
+                      boxShadow: seat.occupied ? 2 : 1,
                     }}
                   >
                     <CardContent sx={{ 
@@ -627,8 +563,8 @@ function SeatChartReport() {
                       flexDirection: 'column', 
                       alignItems: 'center', 
                       justifyContent: 'center',
-                      p: 1.5,
-                      '&:last-child': { pb: 1.5 }
+                      p: isMobile ? 0.5 : 1,
+                      '&:last-child': { pb: isMobile ? 0.5 : 1 }
                     }}>
                       {seat.occupied ? (
                         <Badge
@@ -645,41 +581,39 @@ function SeatChartReport() {
                             }
                           }}
                         >
-                          {getSeatIcon(seat)}
+                          {seat.gender === 'female' ? (
+                            <FemaleIcon sx={{ 
+                              color: 'white', 
+                              fontSize: isMobile ? 20 : 28,
+                              filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))'
+                            }} />
+                          ) : (
+                            <MaleIcon sx={{ 
+                              color: 'white', 
+                              fontSize: isMobile ? 20 : 28,
+                              filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))'
+                            }} />
+                          )}
                         </Badge>
                       ) : (
-                        getSeatIcon(seat)
+                        <EventSeatIcon sx={{ 
+                          color: seat.removed ? '#757575' : '#9e9e9e', 
+                          fontSize: isMobile ? 20 : 28,
+                          opacity: seat.removed ? 0.5 : 0.7
+                        }} />
                       )}
                       <Typography
-                        variant="body2"
+                        variant="caption"
                         sx={{
-                          mt: 1,
-                          fontSize: '0.9rem',
+                          mt: 0.5,
+                          fontSize: isMobile ? '0.65rem' : '0.75rem',
                           fontWeight: 'bold',
                           color: seat.occupied ? 'white' : 'text.secondary',
-                          textShadow: seat.occupied ? '0 1px 2px rgba(0,0,0,0.5)' : 'none'
+                          textShadow: seat.occupied ? '0 1px 1px rgba(0,0,0,0.5)' : 'none'
                         }}
                       >
                         #{seat.seatNumber}
                       </Typography>
-                      {seat.occupied && seat.studentName && (
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            fontSize: '0.7rem',
-                            color: 'rgba(255,255,255,0.9)',
-                            textAlign: 'center',
-                            lineHeight: 1.2,
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            textShadow: '0 1px 1px rgba(0,0,0,0.5)'
-                          }}
-                        >
-                          {seat.studentName.split(' ')[0]}
-                        </Typography>
-                      )}
                     </CardContent>
                   </Card>
                 </Tooltip>
@@ -815,13 +749,12 @@ function SeatChartReport() {
                 </Box>
               </Stack>
             </DialogContent>
-            <DialogActions>
-              <Button onClick={handleCloseDialog}>Close</Button>
-              <Button variant="contained" color="primary">
-                View Profile
+            <DialogActions sx={{ px: 3, pb: 3 }}>
+              <Button onClick={handleCloseDialog} color="inherit">
+                Close
               </Button>
-              <Button variant="outlined" color="warning">
-                Extend Membership
+              <Button variant="contained" color="primary" size="small">
+                View Profile
               </Button>
             </DialogActions>
           </>

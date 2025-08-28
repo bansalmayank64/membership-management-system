@@ -24,7 +24,9 @@ import {
   Chip
 } from '@mui/material';
 import { Refresh as RefreshIcon } from '@mui/icons-material';
+import MobileFilters from '../components/MobileFilters';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
+import api from '../services/api';
 
 // PaymentCard component for mobile view
 const PaymentCard = ({ payment }) => {
@@ -107,6 +109,15 @@ function Payments() {
     endDate: ''
   });
 
+  // Global error handler for API calls
+  const handleApiError = (error, fallbackMessage = 'An error occurred') => {
+    if (error?.response?.data?.error === 'TOKEN_EXPIRED') {
+      // Let the global interceptor handle token expiration
+      return;
+    }
+    setError(error?.response?.data?.message || error?.message || fallbackMessage);
+  };
+
   useEffect(() => {
     fetchPayments();
   }, []);
@@ -130,7 +141,7 @@ function Payments() {
       setPayments(paymentArray);
     } catch (error) {
       console.error('Error fetching payments:', error);
-      setError(error.message);
+      handleApiError(error, 'Failed to fetch payments');
       setPayments([]);
     } finally {
       setLoading(false);
@@ -188,41 +199,51 @@ function Payments() {
 
       <Paper sx={tableStyles.paper}>
         {/* Filters */}
-        <Paper sx={tableStyles.filterContainer}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
-              <TextField
-                label="Search by Seat Number"
-                fullWidth
-                value={filters.seatNumber}
-                onChange={(e) => setFilters({ ...filters, seatNumber: e.target.value })}
-                size="small"
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                label="Start Date"
-                type="date"
-                fullWidth
-                size="small"
-                InputLabelProps={{ shrink: true }}
-                value={filters.startDate}
-                onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                label="End Date"
-                type="date"
-                fullWidth
-                size="small"
-                InputLabelProps={{ shrink: true }}
-                value={filters.endDate}
-                onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
-              />
-            </Grid>
-          </Grid>
-        </Paper>
+        <MobileFilters
+          title="Payment Filters"
+          filterCount={Object.values(filters).filter(v => v && v !== '').length}
+          onClearAll={() => setFilters({ seatNumber: '', startDate: '', endDate: '' })}
+          activeFilters={{
+            seat: filters.seatNumber,
+            start: filters.startDate,
+            end: filters.endDate
+          }}
+          onFilterRemove={(key) => {
+            const newFilters = { ...filters };
+            switch (key) {
+              case 'seat': newFilters.seatNumber = ''; break;
+              case 'start': newFilters.startDate = ''; break;
+              case 'end': newFilters.endDate = ''; break;
+            }
+            setFilters(newFilters);
+          }}
+        >
+          <TextField
+            label="Search by Seat Number"
+            fullWidth
+            value={filters.seatNumber}
+            onChange={(e) => setFilters({ ...filters, seatNumber: e.target.value })}
+            size="small"
+          />
+          <TextField
+            label="Start Date"
+            type="date"
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+            value={filters.startDate}
+            onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+          />
+          <TextField
+            label="End Date"
+            type="date"
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+            value={filters.endDate}
+            onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+          />
+        </MobileFilters>
 
         {loading ? (
           <div style={loadingStyles.container}>

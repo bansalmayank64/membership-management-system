@@ -91,10 +91,7 @@ import {
   const getPaymentModeColor = (mode) => {
     const modeColors = {
       'Cash': 'success',
-      'Online': 'primary',
-      'Card': 'secondary',
-      'UPI': 'info',
-      'Bank Transfer': 'warning'
+      'Online': 'primary'
     };
     return modeColors[mode] || 'default';
   };

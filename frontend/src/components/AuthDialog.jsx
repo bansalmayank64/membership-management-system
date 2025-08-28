@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -27,6 +27,15 @@ const AuthDialog = ({ open, onClose }) => {
   
   const { login } = useAuth();
 
+  // Clear form when dialog opens
+  useEffect(() => {
+    if (open) {
+      setFormData({ username: '', password: '' });
+      setError('');
+      setShowPassword(false);
+    }
+  }, [open]);
+
   const handleInputChange = (field) => (event) => {
     setFormData(prev => ({
       ...prev,
@@ -52,33 +61,44 @@ const AuthDialog = ({ open, onClose }) => {
 
       if (result.success) {
         onClose();
+        // Clear form after successful login
+        setFormData({ username: '', password: '' });
       } else {
-        setError(result.error);
+        setError(result.error || 'Login failed. Please try again.');
       }
     } catch (error) {
-      setError('An unexpected error occurred');
+      console.error('Login error:', error);
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleClose = () => {
-    setError('');
-    setFormData({
-      username: '',
-      password: ''
-    });
-    onClose();
+    if (!loading) { // Prevent closing while loading
+      setError('');
+      setFormData({
+        username: '',
+        password: ''
+      });
+      onClose();
+    }
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
+    <Dialog 
+      open={open} 
+      onClose={handleClose} 
+      maxWidth="sm" 
+      fullWidth 
+      disableEscapeKeyDown={loading} // Prevent escape key when loading
+    >
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Typography variant="h6">
             Login to Continue
           </Typography>
-          <IconButton onClick={handleClose}>
+          <IconButton onClick={handleClose} disabled={loading}>
             <Close />
           </IconButton>
         </Box>
