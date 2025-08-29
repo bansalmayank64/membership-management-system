@@ -64,7 +64,7 @@ CREATE TABLE students (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     father_name VARCHAR(100),
-    contact_number VARCHAR(20) UNIQUE,
+    contact_number VARCHAR(20),
     sex VARCHAR(10) CHECK (sex IN ('male','female')) NOT NULL,
     seat_number VARCHAR(20),
     membership_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

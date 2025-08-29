@@ -294,10 +294,19 @@ function AdminPanel() {
 
       if (response.ok) {
         const result = await response.json();
+        const hasErrors = result.errors && result.errors.total > 0;
+        
         setMessage({ 
-          type: 'success', 
-          text: `Import completed successfully! ${result.imported} records processed.` 
+          type: hasErrors ? 'warning' : 'success', 
+          text: hasErrors 
+            ? `${result.message} Check console for details.` 
+            : `${result.message} ${result.imported} records processed.`
         });
+        
+        if (hasErrors) {
+          console.log('Import completed with errors:', result.errors);
+        }
+        
         setImportFile(null);
         // Reset file input
         const fileInput = document.getElementById('excel-file-input');
@@ -509,34 +518,6 @@ function AdminPanel() {
     } finally {
       setLoading(false);
       setConfirmDialog({ open: false, action: '', data: null });
-    }
-  };
-
-  const handleExportData = async () => {
-    setLoading(true);
-    try {
-  const response = await fetch(`/api/admin/export-excel`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        }
-      });
-
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `library-data-export-${new Date().toISOString().split('T')[0]}.xlsx`;
-        link.click();
-        window.URL.revokeObjectURL(url);
-        setMessage({ type: 'success', text: 'Data exported successfully!' });
-      } else {
-        throw new Error('Export failed');
-      }
-    } catch (error) {
-      setMessage({ type: 'error', text: error.message });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -754,6 +735,20 @@ function AdminPanel() {
                       <Typography variant="body2">{importProgress.status}</Typography>
                     </Box>
                   )}
+                  
+                  {/* Excel Format Requirements */}
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Excel File Format Requirements:
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Sheet 1 - "Library Members":</strong> ID, Seat Number, Sex, Name_Student, Father_Name, Contact Number, Membership_Date, Total_Paid, Membership_Till, Membership_Status, Last_Payment_date
+                      <br />
+                      <strong>Sheet 2 - "Renewals":</strong> ID, Seat_Number, Amount_paid, Payment_date, Payment_mode
+                      <br />
+                      <em>Note: Column order can be flexible and slight variations in column names are supported.</em>
+                    </Typography>
+                  </Alert>
                 </CardContent>
               </Card>
             </Grid>
@@ -764,21 +759,11 @@ function AdminPanel() {
                 <CardContent>
                   <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <DownloadIcon color="primary" />
-                    Export, Full Report & Backup
+                    Full Report & Backup
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Download all library data as an Excel file, a full multi-sheet report, or backup/restore the entire system as JSON.
+                    Download a full multi-sheet report or backup/restore the entire system as JSON.
                   </Typography>
-                  <Button
-                    variant="contained"
-                    onClick={handleExportData}
-                    disabled={loading}
-                    fullWidth
-                    sx={{ mb: 1 }}
-                    startIcon={loading ? <CircularProgress size={20} /> : <DownloadIcon />}
-                  >
-                    {loading ? 'Exporting...' : 'Export to Excel'}
-                  </Button>
                   <Button
                     variant="contained"
                     color="success"
@@ -837,14 +822,6 @@ function AdminPanel() {
             <Grid item xs={12}>
               <Alert severity="info">
                 <Typography variant="subtitle2" gutterBottom>
-                  Excel File Format Requirements:
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Sheet 1 - "Library Members":</strong> ID, Seat Number, Sex, Name_Student, Father_Name, Contact Number, Membership_Date, Total_Paid, Membership_Till, Membership_Status, Last_Payment_date
-                  <br />
-                  <strong>Sheet 2 - "Renewals":</strong> ID, Seat_Number, Amount_paid, Payment_date, Payment_mode
-                </Typography>
-                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
                   Backup/Restore:
                 </Typography>
                 <Typography variant="body2">

@@ -400,10 +400,10 @@ router.post('/', async (req, res) => {
     }
 
     // Normalize data
-    const normalizedName = name.trim().replace(/\s+/g, ' ');
+    const normalizedName = name.trim().replace(/\s+/g, ' ').toUpperCase();
     const normalizedSex = sex.toLowerCase(); // Database expects lowercase: male/female
     const normalizedContact = contact_number && contact_number.trim() ? contact_number.replace(/[\s\-\(\)]/g, '') : null;
-    const normalizedFatherName = father_name ? father_name.trim().replace(/\s+/g, ' ') : null;
+    const normalizedFatherName = father_name ? father_name.trim().replace(/\s+/g, ' ').toUpperCase() : null;
     const normalizedSeatNumber = seat_number ? seat_number.trim().toUpperCase() : null;
 
     console.log('✅ Step 1: Validation passed - all fields are valid');
@@ -683,10 +683,10 @@ router.put('/:id', async (req, res) => {
     }
 
     // Normalize data
-    const normalizedName = name.trim().replace(/\s+/g, ' ');
+    const normalizedName = name.trim().replace(/\s+/g, ' ').toUpperCase();
     const normalizedSex = sex.toLowerCase(); // Database expects lowercase: male/female
     const normalizedContact = contact_number && contact_number.trim() ? contact_number.replace(/[\s\-\(\)]/g, '') : null;
-    const normalizedFatherName = father_name ? father_name.trim().replace(/\s+/g, ' ') : null;
+    const normalizedFatherName = father_name ? father_name.trim().replace(/\s+/g, ' ').toUpperCase() : null;
     const normalizedSeatNumber = seat_number ? seat_number.trim().toUpperCase() : null;
 
     console.log('✅ Step 1: Validation passed - all fields are valid');

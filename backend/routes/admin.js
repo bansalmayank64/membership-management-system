@@ -42,44 +42,51 @@ const requireAdmin = (req, res, next) => {
 // Download full data report (XLSX, all tables, presentable)
 router.get('/full-report', auth, requireAdmin, async (req, res) => {
   try {
-    // Fetch all data
-    const users = await pool.query('SELECT id, username, role, status, created_at FROM users ORDER BY id');
-    const students = await pool.query('SELECT * FROM students ORDER BY id');
-    let payments;
-    try {
-      payments = await pool.query('SELECT * FROM payments ORDER BY id');
-    } catch (paymentError) {
-      // If payments table has issues, try basic columns
-      payments = await pool.query('SELECT id, student_id, amount, payment_date, payment_mode, payment_type, description, created_at, updated_at, modified_by FROM payments ORDER BY id');
-    }
-    const seats = await pool.query('SELECT * FROM seats ORDER BY seat_number');
-    const expenses = await pool.query('SELECT * FROM expenses ORDER BY id');
-    // History: seat assignment, payment, and status changes (if tracked)
-    let seatHistory = [];
-    try {
-      const historyResult = await pool.query('SELECT * FROM seat_history ORDER BY id');
-      seatHistory = historyResult.rows;
-    } catch (e) { /* ignore if not present */ }
-
-    // Format data for sheets
+    // Get all table names from the database metadata
+    const tablesResult = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+    
     const sheets = {};
-    if (users.rows.length) {
-      sheets['Users'] = users.rows;
-    }
-    if (students.rows.length) {
-      sheets['Students'] = students.rows;
-    }
-    if (payments.rows.length) {
-      sheets['Payments'] = payments.rows;
-    }
-    if (seats.rows.length) {
-      sheets['Seats'] = seats.rows;
-    }
-    if (expenses.rows.length) {
-      sheets['Expenses'] = expenses.rows;
-    }
-    if (seatHistory.length) {
-      sheets['Seat History'] = seatHistory;
+    
+    // Export all tables dynamically
+    for (const tableRow of tablesResult.rows) {
+      const tableName = tableRow.table_name;
+      try {
+        console.log(`Exporting table: ${tableName}`);
+        
+        // Check if table has an 'id' column for ordering
+        const columnsResult = await pool.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_name = $1 AND table_schema = 'public' AND column_name = 'id'
+        `, [tableName]);
+        
+        let orderClause = '';
+        if (columnsResult.rows.length > 0) {
+          orderClause = ' ORDER BY id';
+        }
+        
+        const tableData = await pool.query(`SELECT * FROM ${tableName}${orderClause}`);
+        
+        if (tableData.rows.length > 0) {
+          // Capitalize first letter for sheet name and make it readable
+          const sheetName = tableName
+            .split('_')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+          
+          sheets[sheetName] = tableData.rows;
+          console.log(`Exported ${tableData.rows.length} rows from ${tableName}`);
+        }
+      } catch (tableError) {
+        console.warn(`Failed to export table ${tableName}:`, tableError.message);
+        // Continue with other tables even if one fails
+      }
     }
 
     // Create workbook
@@ -105,11 +112,26 @@ router.get('/full-report', auth, requireAdmin, async (req, res) => {
 // Backup all data as JSON
 router.get('/backup', auth, requireAdmin, async (req, res) => {
   try {
-    const tables = ['users', 'students', 'seats', 'payments', 'expenses', 'student_fees_config'];
+    // Get all table names from the database metadata
+    const tablesResult = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+    
     const backup = {};
-    for (const table of tables) {
-      const result = await pool.query(`SELECT * FROM ${table}`);
-      backup[table] = result.rows;
+    for (const tableRow of tablesResult.rows) {
+      const tableName = tableRow.table_name;
+      try {
+        const result = await pool.query(`SELECT * FROM ${tableName}`);
+        backup[tableName] = result.rows;
+        console.log(`Backed up ${result.rows.length} rows from ${tableName}`);
+      } catch (tableError) {
+        console.warn(`Failed to backup table ${tableName}:`, tableError.message);
+        backup[tableName] = []; // Include empty array for failed tables
+      }
     }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', 'attachment; filename="study-room-backup.json"');
@@ -215,6 +237,64 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
   const startTime = Date.now();
   const client = await pool.connect();
   
+  // Helper function to find column value with flexible column name matching
+  const getColumnValue = (row, possibleNames) => {
+    for (const name of possibleNames) {
+      if (row.hasOwnProperty(name)) {
+        return row[name];
+      }
+    }
+    return null;
+  };
+
+  // Helper function to parse Excel dates
+  const parseExcelDate = (value) => {
+    if (!value) return null;
+    
+    // If it's already a Date object
+    if (value instanceof Date) return value;
+    
+    // If it's a string that looks like a date
+    if (typeof value === 'string') {
+      const parsed = new Date(value);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+    
+    // If it's a number (Excel serial date)
+    if (typeof value === 'number' && value > 1) {
+      // Excel date serial number (days since January 1, 1900)
+      // Note: Excel incorrectly treats 1900 as a leap year, so we need to adjust
+      const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
+      const date = new Date(excelEpoch.getTime() + (value * 24 * 60 * 60 * 1000));
+      return date;
+    }
+    
+    return null;
+  };
+
+  // Column mapping definitions for flexible import
+  const memberColumnMappings = {
+    id: ['ID', 'id', 'Id', 'Student_ID', 'Student ID', 'student_id', 'StudentID'],
+    name: ['Name_Student', 'name', 'Name', 'Student_Name', 'Student Name', 'student_name', 'StudentName'],
+    father_name: ['Father_Name', 'father_name', 'Father Name', 'FatherName', 'Father', 'Guardian'],
+    contact_number: ['Contact Number', 'contact_number', 'Contact_Number', 'Phone', 'Mobile', 'ContactNumber'],
+    sex: ['Sex', 'sex', 'Gender', 'gender', 'G'],
+    seat_number: ['Seat Number', 'seat_number', 'Seat_Number', 'SeatNumber', 'Seat', 'Seat#'],
+    membership_date: ['Membership_Date', 'membership_date', 'Membership Date', 'MembershipDate', 'Start_Date', 'Start Date'],
+    total_paid: ['Total_Paid', 'total_paid', 'Total Paid', 'TotalPaid', 'Amount_Paid', 'Amount Paid'],
+    membership_till: ['Membership_Till', 'membership_till', 'Membership Till', 'MembershipTill', 'End_Date', 'End Date', 'Expiry_Date', 'Expiry Date'],
+    membership_status: ['Membership_Status', 'membership_status', 'Membership Status', 'Status', 'Active_Status'],
+    last_payment_date: ['Last_Payment_date', 'last_payment_date', 'Last Payment Date', 'LastPaymentDate', 'Recent_Payment']
+  };
+
+  const renewalColumnMappings = {
+    id: ['ID', 'id', 'Id', 'Student_ID', 'Student ID', 'student_id', 'StudentID'],
+    seat_number: ['Seat_Number', 'seat_number', 'Seat Number', 'SeatNumber', 'Seat', 'Seat#'],
+    amount_paid: ['Amount_paid', 'amount_paid', 'Amount Paid', 'AmountPaid', 'Amount', 'Payment_Amount', 'Payment Amount'],
+    payment_date: ['Payment_date', 'payment_date', 'Payment Date', 'PaymentDate', 'Date', 'Transaction_Date'],
+    payment_mode: ['Payment_mode', 'payment_mode', 'Payment Mode', 'PaymentMode', 'Mode', 'Method', 'Payment_Method']
+  };
+  
   try {
     console.log(`📊📥 [${new Date().toISOString()}] Starting POST /api/admin/import-excel [${requestId}]`);
     console.log(`👤 Requested by: ${req.user.username} (ID: ${req.user.userId})`);
@@ -245,39 +325,86 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
     
     console.log(`🔍 Step 3: Validating required sheets...`);
     const requiredSheets = ['Library Members', 'Renewals'];
-    const missingSheets = requiredSheets.filter(sheet => !workbook.SheetNames.includes(sheet));
+    
+    // Flexible sheet name matching
+    const findSheet = (workbook, possibleNames) => {
+      for (const name of possibleNames) {
+        if (workbook.SheetNames.some(sheet => 
+          sheet.toLowerCase().includes(name.toLowerCase()) || 
+          name.toLowerCase().includes(sheet.toLowerCase())
+        )) {
+          return workbook.SheetNames.find(sheet => 
+            sheet.toLowerCase().includes(name.toLowerCase()) || 
+            name.toLowerCase().includes(sheet.toLowerCase())
+          );
+        }
+      }
+      return null;
+    };
+    
+    const membersSheetNames = ['Library Members', 'Members', 'Students', 'Library_Members', 'Student_Data'];
+    const renewalsSheetNames = ['Renewals', 'Payments', 'Renewal', 'Payment', 'Renewal_Data'];
+    
+    const membersSheetName = findSheet(workbook, membersSheetNames);
+    const renewalsSheetName = findSheet(workbook, renewalsSheetNames);
+    
+    const missingSheets = [];
+    if (!membersSheetName) missingSheets.push('Library Members (or similar)');
+    if (!renewalsSheetName) missingSheets.push('Renewals (or similar)');
     
     if (missingSheets.length > 0) {
       console.log(`❌ Missing required sheets: ${missingSheets.join(', ')}`);
+      console.log(`📊 Available sheets: ${workbook.SheetNames.join(', ')}`);
       const totalTime = Date.now() - startTime;
       console.log(`🎯 [${new Date().toISOString()}] POST /api/admin/import-excel completed with 400 in ${totalTime}ms [${requestId}]`);
       
       return res.status(400).json({ 
-        error: `Missing required sheets: ${missingSheets.join(', ')}`,
+        error: `Missing required sheets: ${missingSheets.join(', ')}. Available sheets: ${workbook.SheetNames.join(', ')}`,
         requestId: requestId,
         timestamp: new Date().toISOString()
       });
     }
 
-    console.log(`🔧 Step 4: Starting database transaction...`);
-    await client.query('BEGIN');
+    console.log(`✅ Found matching sheets: Members="${membersSheetName}", Renewals="${renewalsSheetName}"`);
 
-    let importedCount = 0;
-    let memberErrors = 0;
-    let renewalErrors = 0;
+    console.log(`🔧 Step 4: Starting atomic transaction - either all data imports or nothing does...`);
+    
+    try {
+      await client.query('BEGIN');
+      console.log(`🚀 Transaction started - ensuring data integrity with all-or-nothing approach`);
 
-    console.log(`👥 Step 5: Processing Library Members sheet...`);
-    const membersStart = Date.now();
-    const membersSheet = workbook.Sheets['Library Members'];
-    const membersData = xlsx.utils.sheet_to_json(membersSheet);
-    
-    console.log(`📊 Found ${membersData.length} member records to process`);
-    console.log(`📋 Sample member data:`, membersData.slice(0, 2));
-    
-    for (let i = 0; i < membersData.length; i++) {
-      const member = membersData[i];
-      try {
-        console.log(`👤 Processing member ${i + 1}/${membersData.length}: ${member.Name_Student || member.name}`);
+      let importedCount = 0;
+      let memberImported = 0;
+      let memberSkipped = 0;
+      let renewalImported = 0;
+      let renewalSkipped = 0;
+
+      console.log(`👥 Step 5: Processing Members sheet...`);
+      const membersStart = Date.now();
+      const membersSheet = workbook.Sheets[membersSheetName];
+      const membersData = xlsx.utils.sheet_to_json(membersSheet);
+      
+      console.log(`📊 Found ${membersData.length} member records to process`);
+      console.log(`📋 Sample member data:`, membersData.slice(0, 2));
+      
+      for (let i = 0; i < membersData.length; i++) {
+        const member = membersData[i];
+        
+        const memberName = getColumnValue(member, memberColumnMappings.name) || 'Unknown';
+        console.log(`👤 Processing member ${i + 1}/${membersData.length}: ${memberName}`);
+        
+        // Extract values using flexible column mapping
+        const memberId = getColumnValue(member, memberColumnMappings.id);
+        const memberSex = getColumnValue(member, memberColumnMappings.sex);
+        const seatNumber = getColumnValue(member, memberColumnMappings.seat_number);
+        const membershipStatus = getColumnValue(member, memberColumnMappings.membership_status);
+        
+        // Validate required fields - skip invalid records instead of aborting
+        if (!memberId || !memberName || memberName === 'Unknown') {
+          console.log(`⚠️ Skipping member ${i + 1}: missing required ID or Name`);
+          memberSkipped++;
+          continue;
+        }
         
         // Insert student with enhanced data validation and proper constraint handling
         const studentResult = await client.query(`
@@ -305,26 +432,51 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `, [
-          member.ID || member.id,
-          (member.Name_Student || member.name || '').substring(0, 100), // Respect VARCHAR(100) constraint
-          (member.Father_Name || member.father_name || '').substring(0, 100), // Respect VARCHAR(100) constraint
-          (member['Contact Number'] || member.contact_number || '').substring(0, 20), // Respect VARCHAR(20) constraint
-          (member.Sex || member.sex || '').toLowerCase() === 'male' ? 'male' : 'female', // Ensure valid enum
-          (member['Seat Number'] || member.seat_number || '').substring(0, 20), // Respect VARCHAR(20) constraint
-          member.Membership_Date || member.membership_date,
-          member.Membership_Till || member.membership_till,
-          ['active', 'expired', 'suspended'].includes(member.Membership_Status || member.membership_status) 
-            ? (member.Membership_Status || member.membership_status) 
+          memberId,
+          (memberName || '').toString().substring(0, 100).toUpperCase(), // Store in uppercase
+          (getColumnValue(member, memberColumnMappings.father_name) || '').toString().substring(0, 100).toUpperCase(), // Store in uppercase
+          (getColumnValue(member, memberColumnMappings.contact_number) || '').toString().substring(0, 20), // Respect VARCHAR(20) constraint
+          (memberSex || '').toString().toLowerCase() === 'male' ? 'male' : 'female', // Ensure valid enum
+          (seatNumber || '').toString().substring(0, 20), // Convert to string first, then respect VARCHAR(20) constraint
+          parseExcelDate(getColumnValue(member, memberColumnMappings.membership_date)),
+          parseExcelDate(getColumnValue(member, memberColumnMappings.membership_till)),
+          ['active', 'expired', 'suspended'].includes(membershipStatus) 
+            ? membershipStatus 
             : 'active', // Default to 'active' if invalid
           req.user.userId || req.user.id
         ]);
 
-        // Assign seat if specified with enhanced validation
-        if ((member['Seat Number'] || member.seat_number) && studentResult.rows[0]) {
-          const seatNumber = (member['Seat Number'] || member.seat_number).substring(0, 20);
-          console.log(`🪑 Assigning seat ${seatNumber} to student ${studentResult.rows[0].id}`);
+        // Assign seat if specified with enhanced validation and auto-creation
+        if (seatNumber && studentResult.rows[0]) {
+          const cleanSeatNumber = String(seatNumber).substring(0, 20);
+          // Properly map gender values to database constraints
+          const studentGender = (memberSex || '').toString().toLowerCase() === 'male' ? 'male' : 'female';
+          console.log(`🪑 Assigning seat ${cleanSeatNumber} to student ${studentResult.rows[0].id} (${studentGender})`);
           
-          // Check if seat exists and update seat assignment properly
+          // First, check if seat exists
+          const seatExistsResult = await client.query(`
+            SELECT seat_number, occupant_sex FROM seats WHERE seat_number = $1
+          `, [cleanSeatNumber]);
+          
+          if (seatExistsResult.rows.length === 0) {
+            // Seat doesn't exist, create it with appropriate gender restriction
+            console.log(`🆕 Creating new seat ${cleanSeatNumber} for ${studentGender} student`);
+            await client.query(`
+              INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by)
+              VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)
+            `, [cleanSeatNumber, studentGender, req.user.userId || req.user.id]);
+            
+            console.log(`✅ Seat ${cleanSeatNumber} created successfully`);
+          } else {
+            // Seat exists, check gender compatibility
+            const existingSeat = seatExistsResult.rows[0];
+            if (existingSeat.occupant_sex && existingSeat.occupant_sex !== studentGender) {
+              console.log(`⚠️ Seat ${cleanSeatNumber} has gender restriction (${existingSeat.occupant_sex}) but student is ${studentGender} - skipping assignment`);
+              // Continue without assigning seat
+            }
+          }
+          
+          // Now assign the seat to the student
           const seatUpdateResult = await client.query(`
             UPDATE students 
             SET seat_number = $1,
@@ -333,50 +485,73 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
             AND EXISTS (
               SELECT 1 FROM seats 
               WHERE seat_number = $1 
-                AND status IN ('available', 'occupied')
                 AND (occupant_sex IS NULL OR occupant_sex = $3)
             )
             RETURNING seat_number
-          `, [seatNumber, studentResult.rows[0].id, (member.Sex || member.sex || '').toLowerCase()]);
+          `, [cleanSeatNumber, studentResult.rows[0].id, studentGender]);
           
           if (seatUpdateResult.rows.length > 0) {
-            console.log(`✅ Seat ${seatNumber} assigned successfully`);
+            console.log(`✅ Seat ${cleanSeatNumber} assigned successfully to student ${studentResult.rows[0].id}`);
           } else {
-            console.log(`⚠️ Seat ${seatNumber} assignment failed - seat may not exist or gender mismatch`);
+            console.log(`⚠️ Seat ${cleanSeatNumber} assignment failed - gender mismatch or seat occupied`);
           }
         }
 
         importedCount++;
+        memberImported++;
         
         if ((i + 1) % 10 === 0) {
           console.log(`📈 Progress: ${i + 1}/${membersData.length} members processed`);
         }
-      } catch (error) {
-        memberErrors++;
-        console.error(`❌ Error importing member ${i + 1}:`, {
-          member: member,
-          error: error.message,
-          code: error.code
-        });
-        // Continue with next record
       }
-    }
-    
-    const membersTime = Date.now() - membersStart;
-    console.log(`✅ Library Members processing completed in ${membersTime}ms: ${importedCount} imported, ${memberErrors} errors`);
+      
+      const membersTime = Date.now() - membersStart;
+      console.log(`✅ Library Members processing completed in ${membersTime}ms: ${memberImported} imported`);
 
-    console.log(`💰 Step 6: Processing Renewals sheet...`);
-    const renewalsStart = Date.now();
-    const renewalsSheet = workbook.Sheets['Renewals'];
-    const renewalsData = xlsx.utils.sheet_to_json(renewalsSheet);
+    // Check how many students are actually in the database now
+    const studentCountResult = await client.query('SELECT COUNT(*) as count FROM students');
+    console.log(`📊 Total students in database after member import: ${studentCountResult.rows[0].count}`);
     
-    console.log(`📊 Found ${renewalsData.length} renewal records to process`);
-    console.log(`📋 Sample renewal data:`, renewalsData.slice(0, 2));
-    
-    for (let i = 0; i < renewalsData.length; i++) {
-      const renewal = renewalsData[i];
-      try {
-        console.log(`💳 Processing renewal ${i + 1}/${renewalsData.length}: Student ID ${renewal.ID || renewal.id}`);
+    // Show sample of student IDs that were imported
+    const sampleStudentsResult = await client.query('SELECT id FROM students ORDER BY id LIMIT 10');
+    console.log(`📋 Sample student IDs in database:`, sampleStudentsResult.rows.map(r => r.id));
+
+      console.log(`💰 Step 6: Processing Renewals sheet...`);
+      const renewalsStart = Date.now();
+      const renewalsSheet = workbook.Sheets[renewalsSheetName];
+      const renewalsData = xlsx.utils.sheet_to_json(renewalsSheet);
+      
+      console.log(`📊 Found ${renewalsData.length} renewal records to process`);
+      console.log(`📋 Sample renewal data:`, renewalsData.slice(0, 2));
+      
+      for (let i = 0; i < renewalsData.length; i++) {
+        const renewal = renewalsData[i];
+        
+        const studentId = getColumnValue(renewal, renewalColumnMappings.id);
+        const amount = getColumnValue(renewal, renewalColumnMappings.amount_paid);
+        const paymentDate = getColumnValue(renewal, renewalColumnMappings.payment_date);
+        const paymentMode = getColumnValue(renewal, renewalColumnMappings.payment_mode);
+        const seatNumber = getColumnValue(renewal, renewalColumnMappings.seat_number);
+        
+        console.log(`💳 Processing renewal ${i + 1}/${renewalsData.length}: Student ID ${studentId}`);
+        
+        // Validate required fields - skip invalid records instead of aborting
+        if (!studentId || !amount) {
+          console.log(`⚠️ Skipping renewal ${i + 1}: missing required Student ID or Amount`);
+          renewalSkipped++;
+          continue;
+        }
+        
+        // Check if student exists before inserting payment - any missing student aborts import
+        const studentCheckResult = await client.query(`
+          SELECT id FROM students WHERE id = $1
+        `, [studentId]);
+        
+        if (studentCheckResult.rows.length === 0) {
+          console.log(`⚠️ Skipping renewal ${i + 1}: Student ID ${studentId} not found`);
+          renewalSkipped++;
+          continue;
+        }
         
         // Insert payment with enhanced validation
         await client.query(`
@@ -385,79 +560,98 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
             created_at, updated_at
           ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `, [
-          renewal.ID || renewal.id || renewal.student_id,
-          Math.max(0, parseFloat(renewal.Amount_paid || renewal.amount || 0)), // Ensure positive amount
-          renewal.Payment_date || renewal.payment_date || new Date(),
-          ['cash', 'online'].includes((renewal.Payment_mode || renewal.payment_mode || 'cash').toLowerCase()) 
-            ? (renewal.Payment_mode || renewal.payment_mode || 'cash').toLowerCase() 
+          studentId,
+          Math.max(0, parseFloat(amount || 0)), // Ensure positive amount
+          parseExcelDate(paymentDate) || new Date(),
+          ['cash', 'online'].includes((paymentMode || 'cash').toLowerCase()) 
+            ? (paymentMode || 'cash').toLowerCase() 
             : 'cash', // Ensure valid payment mode
-          `Renewal payment - Seat ${(renewal.Seat_Number || renewal.seat_number || 'N/A').substring(0, 100)}`, // Limit description length
+          `Renewal payment - Seat ${String(seatNumber || 'N/A').substring(0, 100)}`, // Convert to string first, then limit description length
           req.user.userId || req.user.id
         ]);
 
         importedCount++;
+        renewalImported++;
         
         if ((i + 1) % 10 === 0) {
           console.log(`📈 Progress: ${i + 1}/${renewalsData.length} renewals processed`);
         }
-      } catch (error) {
-        renewalErrors++;
-        console.error(`❌ Error importing renewal ${i + 1}:`, {
-          renewal: renewal,
-          error: error.message,
-          code: error.code
-        });
-        // Continue with next record
       }
+      
+      const renewalsTime = Date.now() - renewalsStart;
+      console.log(`✅ Renewals processing completed in ${renewalsTime}ms: ${renewalImported} imported`);
+
+      // Commit the transaction - all data imported successfully
+      await client.query('COMMIT');
+      console.log(`🎉 Transaction committed successfully! All ${importedCount} records imported atomically.`);
+
+      const totalTime = Date.now() - startTime;
+      const totalSkipped = memberSkipped + renewalSkipped;
+      console.log(`📊 Import summary: ${importedCount} records imported, ${totalSkipped} skipped (${memberImported} members, ${renewalImported} renewals)`);
+      console.log(`🎯 [${new Date().toISOString()}] POST /api/admin/import-excel completed successfully in ${totalTime}ms [${requestId}]`);
+      
+      const message = totalSkipped > 0 
+        ? `Import completed! ${importedCount} records imported, ${totalSkipped} records skipped due to missing data.`
+        : `Import completed successfully! All ${importedCount} records imported.`;
+      
+      res.json({ 
+        message: message,
+        imported: importedCount,
+        skipped: totalSkipped,
+        members: {
+          total: membersData.length,
+          imported: memberImported,
+          skipped: memberSkipped,
+          errors: 0
+        },
+        renewals: {
+          total: renewalsData.length,
+          imported: renewalImported,
+          skipped: renewalSkipped,
+          errors: 0
+        },
+        success: true,
+        allOrNothing: true,
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      // Rollback the transaction - no data should be imported
+      await client.query('ROLLBACK');
+      console.log(`🔄 Transaction rolled back due to error: ${error.message}`);
+      
+      const totalTime = Date.now() - startTime;
+      console.error(`❌ [${new Date().toISOString()}] POST /api/admin/import-excel FAILED after ${totalTime}ms [${requestId}]`);
+      console.error(`💥 Error details:`, {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        fileName: req.file?.originalname
+      });
+      
+      res.status(400).json({ 
+        message: `Import failed: ${error.message}. No data was imported to maintain data integrity.`,
+        success: false,
+        allOrNothing: true,
+        error: error.message,
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+    } finally {
+      client.release();
     }
-    
-    const renewalsTime = Date.now() - renewalsStart;
-    console.log(`✅ Renewals processing completed in ${renewalsTime}ms: ${renewalErrors} errors`);
-
-    console.log(`🔧 Step 7: Committing transaction...`);
-    const commitStart = Date.now();
-    await client.query('COMMIT');
-    const commitTime = Date.now() - commitStart;
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`✅ Transaction committed in ${commitTime}ms`);
-    console.log(`📊 Import summary: ${importedCount} total records imported, ${memberErrors + renewalErrors} total errors`);
-    console.log(`🎯 [${new Date().toISOString()}] POST /api/admin/import-excel completed successfully in ${totalTime}ms [${requestId}]`);
-    
-    res.json({ 
-      message: 'Import completed successfully',
-      imported: importedCount,
-      members: membersData.length,
-      renewals: renewalsData.length,
-      errors: {
-        members: memberErrors,
-        renewals: renewalErrors,
-        total: memberErrors + renewalErrors
-      },
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
-
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] POST /api/admin/import-excel FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      fileName: req.file?.originalname
-    });
-    
-    console.log(`🔄 Rolling back transaction...`);
-    await client.query('ROLLBACK');
-    
+    console.error(`❌ Unexpected error in import-excel: ${error.message}`);
+    if (client) {
+      client.release();
+    }
     res.status(500).json({ 
-      error: 'Import failed: ' + error.message,
+      message: 'An unexpected error occurred during import',
+      error: error.message,
       requestId: requestId,
       timestamp: new Date().toISOString()
     });
-  } finally {
-    client.release();
   }
 });
 

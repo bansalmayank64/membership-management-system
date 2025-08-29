@@ -144,6 +144,16 @@ function Students() {
   const [actionMenuAnchor, setActionMenuAnchor] = useState(null);
   const [selectedItemForAction, setSelectedItemForAction] = useState(null);
   
+  // Reactivation state
+  const [reactivateSelectedSeat, setReactivateSelectedSeat] = useState('');
+  const [reactivateAvailableSeats, setReactivateAvailableSeats] = useState([]);
+  
+  // Assign seat state
+  const [assignSeatDialogOpen, setAssignSeatDialogOpen] = useState(false);
+  const [assignSelectedSeat, setAssignSelectedSeat] = useState('');
+  const [assignAvailableSeats, setAssignAvailableSeats] = useState([]);
+  const [studentForSeatAssignment, setStudentForSeatAssignment] = useState(null);
+  
   // History data
   const [seatHistoryData, setSeatHistoryData] = useState([]);
   const [paymentHistoryData, setPaymentHistoryData] = useState([]);
@@ -246,6 +256,50 @@ function Students() {
       setEditAvailableSeats([]);
     } finally {
       setEditSeatLoading(false);
+    }
+  };
+
+  // Fetch available seats for reactivation
+  const fetchReactivateAvailableSeats = async (gender) => {
+    try {
+      setReactivateAvailableSeats([]);
+      if (!gender) return;
+
+      const response = await fetch(`/api/students/available-seats/${gender}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch available seats');
+
+      const data = await response.json();
+      setReactivateAvailableSeats(data.availableSeats || []);
+    } catch (err) {
+      handleApiError(err, 'Failed to load available seats');
+      setReactivateAvailableSeats([]);
+    }
+  };
+
+  // Fetch available seats for assignment
+  const fetchAssignAvailableSeats = async (gender) => {
+    try {
+      setAssignAvailableSeats([]);
+      if (!gender) return;
+
+      const response = await fetch(`/api/students/available-seats/${gender}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch available seats');
+
+      const data = await response.json();
+      setAssignAvailableSeats(data.availableSeats || []);
+    } catch (err) {
+      handleApiError(err, 'Failed to load available seats for assignment');
+      setAssignAvailableSeats([]);
     }
   };
 
@@ -1170,6 +1224,10 @@ function Students() {
       return;
     }
     
+    // Reset seat selection and fetch available seats for this student's gender
+    setReactivateSelectedSeat('');
+    fetchReactivateAvailableSeats(selectedItemForAction.sex);
+    
     console.log('🟢 [handleReactivateStudent] Opening reactivate confirmation dialog');
     setReactivateConfirmOpen(true);
     // Don't call handleActionClose() here - keep selectedItemForAction for the confirmation
@@ -1180,6 +1238,7 @@ function Students() {
     console.log('🟢 [confirmReactivateStudent] Called');
     console.log('🟢 [confirmReactivateStudent] selectedItemForAction:', selectedItemForAction);
     console.log('🟢 [confirmReactivateStudent] selectedItemForAction stringified:', JSON.stringify(selectedItemForAction, null, 2));
+    console.log('🟢 [confirmReactivateStudent] Selected seat:', reactivateSelectedSeat);
     
     if (!selectedItemForAction) {
       console.error('❌ [confirmReactivateStudent] No selected item for action, aborting');
@@ -1190,11 +1249,16 @@ function Students() {
       console.log('🟢 [confirmReactivateStudent] Preparing to reactivate student:', selectedItemForAction.name);
       console.log('🟢 [confirmReactivateStudent] Student ID:', selectedItemForAction.id);
       
-      // Update student's membership_status to 'active'
+      // Update student's membership_status to 'active' and optionally assign seat
       const requestBody = {
         ...selectedItemForAction,
         membership_status: 'active'
       };
+      
+      // Only include seat_number if a seat was selected
+      if (reactivateSelectedSeat) {
+        requestBody.seat_number = reactivateSelectedSeat;
+      }
       
       console.log('🟢 [confirmReactivateStudent] Request body:', JSON.stringify(requestBody, null, 2));
       
@@ -1228,6 +1292,54 @@ function Students() {
     } catch (err) {
       console.error('❌ [confirmReactivateStudent] Error:', err);
       handleApiError(err, 'Failed to reactivate student');
+    }
+  };
+
+  // Handle assign seat to student
+  const handleAssignSeatToStudent = (student) => {
+    console.log('🟢 [handleAssignSeatToStudent] Opening assign seat dialog for student:', student);
+    setStudentForSeatAssignment(student);
+    setAssignSelectedSeat('');
+    fetchAssignAvailableSeats(student.sex);
+    setAssignSeatDialogOpen(true);
+  };
+
+  // Confirm assign seat to student
+  const confirmAssignSeatToStudent = async () => {
+    if (!studentForSeatAssignment || !assignSelectedSeat) {
+      setSnackbarMessage('Please select a seat');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+
+    try {
+      console.log('🟢 [confirmAssignSeatToStudent] Assigning seat:', assignSelectedSeat, 'to student:', studentForSeatAssignment.id);
+      
+      const response = await fetch(`/api/students/${studentForSeatAssignment.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          ...studentForSeatAssignment,
+          seat_number: assignSelectedSeat
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to assign seat');
+
+      setSnackbarMessage('Seat assigned successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setAssignSeatDialogOpen(false);
+      setStudentForSeatAssignment(null);
+      setAssignSelectedSeat('');
+      fetchData();
+    } catch (err) {
+      console.error('❌ [confirmAssignSeatToStudent] Error:', err);
+      handleApiError(err, 'Failed to assign seat');
     }
   };
 
@@ -2128,14 +2240,7 @@ function Students() {
                   </Box>
                   {seat.expired ? (
                     <Chip 
-                      label={
-                        seat.membershipExpiry || seat.membership_till ? (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <span>Expired</span>
-                            <span style={{ fontSize: '0.7rem' }}>{formatDateForDisplay(seat.membershipExpiry || seat.membership_till)}</span>
-                          </Box>
-                        ) : "Expired"
-                      }
+                      label="Expired"
                       color="error" 
                       size="small" 
                     />
@@ -2350,6 +2455,19 @@ function Students() {
                     label={student.seat_number || 'Unassigned'} 
                     color={student.seat_number ? 'success' : 'error'}
                     size="small"
+                    onClick={!student.seat_number ? (event) => {
+                      event.stopPropagation();
+                      handleAssignSeatToStudent(student);
+                    } : undefined}
+                    sx={{
+                      cursor: !student.seat_number ? 'pointer' : 'default',
+                      '&:hover': !student.seat_number ? {
+                        backgroundColor: 'error.dark',
+                        '& .MuiChip-label': {
+                          color: 'white'
+                        }
+                      } : {}
+                    }}
                   />
                 </Box>
               </TableCell>
@@ -3295,6 +3413,29 @@ function Students() {
           <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
             Student ID: {selectedItemForAction?.id || 'N/A'}, Name: {selectedItemForAction?.name || 'N/A'}
           </Typography>
+          
+          <FormControl fullWidth sx={{ mt: 3 }}>
+            <InputLabel>Select Seat (Optional)</InputLabel>
+            <Select
+              value={reactivateSelectedSeat}
+              onChange={(e) => setReactivateSelectedSeat(e.target.value)}
+              label="Select Seat (Optional)"
+            >
+              <MenuItem value="">
+                <em>No seat assignment</em>
+              </MenuItem>
+              {reactivateAvailableSeats.map((seat) => (
+                <MenuItem key={seat.seat_number} value={seat.seat_number}>
+                  Seat {seat.seat_number}
+                </MenuItem>
+              ))}
+            </Select>
+            {reactivateAvailableSeats.length === 0 && (
+              <Typography variant="caption" color="warning.main" sx={{ mt: 1 }}>
+                No available seats for {selectedItemForAction?.gender || 'this'} gender
+              </Typography>
+            )}
+          </FormControl>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
@@ -3307,6 +3448,58 @@ function Students() {
             onClick={confirmReactivateStudent}
           >
             Reactivate Student
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Assign Seat Dialog */}
+      <Dialog open={assignSeatDialogOpen} onClose={() => {
+        setAssignSeatDialogOpen(false);
+        setStudentForSeatAssignment(null);
+        setAssignSelectedSeat('');
+      }}>
+        <DialogTitle>Assign Seat</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Assign a seat to student "{studentForSeatAssignment?.name || 'Unknown'}"
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            Student ID: {studentForSeatAssignment?.id || 'N/A'}, Gender: {studentForSeatAssignment?.sex || 'N/A'}
+          </Typography>
+          
+          <FormControl fullWidth sx={{ mt: 3 }} required>
+            <InputLabel>Select Seat</InputLabel>
+            <Select
+              value={assignSelectedSeat}
+              onChange={(e) => setAssignSelectedSeat(e.target.value)}
+              label="Select Seat"
+            >
+              {assignAvailableSeats.map((seat) => (
+                <MenuItem key={seat.seat_number} value={seat.seat_number}>
+                  Seat {seat.seat_number}
+                </MenuItem>
+              ))}
+            </Select>
+            {assignAvailableSeats.length === 0 && (
+              <Typography variant="caption" color="error" sx={{ mt: 1 }}>
+                No available seats for {studentForSeatAssignment?.sex || 'this'} gender
+              </Typography>
+            )}
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setAssignSeatDialogOpen(false);
+            setStudentForSeatAssignment(null);
+            setAssignSelectedSeat('');
+          }}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={confirmAssignSeatToStudent}
+            disabled={!assignSelectedSeat}
+          >
+            Assign Seat
           </Button>
         </DialogActions>
       </Dialog>
