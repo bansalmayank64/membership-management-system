@@ -1,33 +1,3 @@
-  // Full Data Report state
-  const [reportLoading, setReportLoading] = useState(false);
-
-  // Download full data report (XLSX)
-  const handleDownloadFullReport = async () => {
-    setReportLoading(true);
-    try {
-      const response = await fetch('/api/admin/full-report', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        }
-      });
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `full-data-report-${new Date().toISOString().split('T')[0]}.xlsx`;
-        link.click();
-        window.URL.revokeObjectURL(url);
-        setMessage({ type: 'success', text: 'Full data report downloaded!' });
-      } else {
-        throw new Error('Failed to download report');
-      }
-    } catch (error) {
-      setMessage({ type: 'error', text: error.message });
-    } finally {
-      setReportLoading(false);
-    }
-  };
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -128,6 +98,8 @@ function AdminPanel() {
   const [restoreFile, setRestoreFile] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
+  // Full Data Report state
+  const [reportLoading, setReportLoading] = useState(false);
   // Handle backup (download JSON)
   const handleBackup = async () => {
     setBackupLoading(true);
@@ -186,6 +158,34 @@ function AdminPanel() {
       setMessage({ type: 'error', text: error.message });
     } finally {
       setRestoreLoading(false);
+    }
+  };
+
+  // Download full data report (XLSX)
+  const handleDownloadFullReport = async () => {
+    setReportLoading(true);
+    try {
+      const response = await fetch('/api/admin/full-report', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `full-data-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        setMessage({ type: 'success', text: 'Full data report downloaded!' });
+      } else {
+        throw new Error('Failed to download report');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setReportLoading(false);
     }
   };
 
