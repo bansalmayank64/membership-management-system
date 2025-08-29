@@ -1,5 +1,7 @@
+
 const express = require('express');
 const multer = require('multer');
+const XLSX = require('xlsx');
 const xlsx = require('xlsx');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../config/database');
@@ -7,29 +9,23 @@ const auth = require('../middleware/auth');
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const storage = multer.memoryStorage();
-const upload = multer({ 
-  storage: storage,
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only .xlsx files are allowed'), false);
-    }
-  },
-  limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
-  }
-});
+// Helper to format worksheet columns
+function autoFitColumns(worksheet, data) {
+  const objectMaxLength = [];
+  data.forEach(row => {
+    Object.values(row).forEach((val, idx) => {
+      const len = val ? val.toString().length : 0;
+      objectMaxLength[idx] = Math.max(objectMaxLength[idx] || 10, len + 2);
+    });
+  });
+  worksheet['!cols'] = objectMaxLength.map(w => ({ wch: w }));
+}
 
 // Middleware to check admin permissions
 const requireAdmin = (req, res, next) => {
   const requestId = `admin-auth-${Date.now()}`;
-  
   console.log(`🔐👨‍💼 [${new Date().toISOString()}] Checking admin permissions [${requestId}]`);
   console.log(`👤 User: ${req.user?.username} (ID: ${req.user?.userId}, Role: ${req.user?.role})`);
-  
   if (req.user && (req.user.role === 'admin' || req.user.permissions?.canManageUsers)) {
     console.log(`✅ Admin access granted for: ${req.user.username}`);
     next();
@@ -42,6 +38,155 @@ const requireAdmin = (req, res, next) => {
     });
   }
 };
+
+// Download full data report (XLSX, all tables, presentable)
+router.get('/full-report', auth, requireAdmin, async (req, res) => {
+  try {
+    // Fetch all data
+    const users = await db.any('SELECT id, username, role, status, created_at FROM users ORDER BY id');
+    const students = await db.any('SELECT * FROM students ORDER BY id');
+    const payments = await db.any('SELECT * FROM payments ORDER BY id');
+    const seats = await db.any('SELECT * FROM seats ORDER BY seat_number');
+    const expenses = await db.any('SELECT * FROM expenses ORDER BY id');
+    // History: seat assignment, payment, and status changes (if tracked)
+    let seatHistory = [];
+    try {
+      seatHistory = await db.any('SELECT * FROM seat_history ORDER BY id');
+    } catch (e) { /* ignore if not present */ }
+
+    // Format data for sheets
+    const sheets = {};
+    if (users.length) {
+      sheets['Users'] = users;
+    }
+    if (students.length) {
+      sheets['Students'] = students;
+    }
+    if (payments.length) {
+      sheets['Payments'] = payments;
+    }
+    if (seats.length) {
+      sheets['Seats'] = seats;
+    }
+    if (expenses.length) {
+      sheets['Expenses'] = expenses;
+    }
+    if (seatHistory.length) {
+      sheets['Seat History'] = seatHistory;
+    }
+
+    // Create workbook
+    const wb = XLSX.utils.book_new();
+    for (const [sheetName, data] of Object.entries(sheets)) {
+      const ws = XLSX.utils.json_to_sheet(data);
+      autoFitColumns(ws, data);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    }
+
+    // Write workbook to buffer
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename="full-data-report-${new Date().toISOString().split('T')[0]}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buf);
+  } catch (err) {
+    console.error('Full report error:', err);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// ...existing code...
+// Backup all data as JSON
+router.get('/backup', auth, requireAdmin, async (req, res) => {
+  try {
+    const tables = ['users', 'students', 'seats', 'payments', 'expenses', 'student_fees_config'];
+    const backup = {};
+    for (const table of tables) {
+      const result = await pool.query(`SELECT * FROM ${table}`);
+      backup[table] = result.rows;
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="study-room-backup.json"');
+    res.send(JSON.stringify(backup, null, 2));
+  } catch (error) {
+    console.error('Backup error:', error);
+    res.status(500).json({ error: 'Backup failed: ' + error.message });
+  }
+});
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.mimetype === 'application/json') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .xlsx or .json files are allowed'), false);
+    }
+  },
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB limit
+  }
+});
+
+// Restore all data from JSON
+router.post('/restore', auth, requireAdmin, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  const client = await pool.connect();
+  try {
+    const backup = JSON.parse(req.file.buffer.toString());
+    await client.query('BEGIN');
+    // Clean tables (except users if you want to keep admin)
+    await client.query('DELETE FROM payments');
+    await client.query('DELETE FROM expenses');
+    await client.query('DELETE FROM students');
+    await client.query('DELETE FROM seats');
+    await client.query('DELETE FROM student_fees_config');
+    // Optionally: await client.query('DELETE FROM users WHERE username != \'admin\'');
+    // Restore seats
+    for (const row of backup.seats || []) {
+      await client.query(`INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (seat_number) DO NOTHING`, [row.seat_number, row.occupant_sex, row.created_at, row.updated_at, row.modified_by]);
+    }
+    // Restore students
+    for (const row of backup.students || []) {
+      await client.query(`INSERT INTO students (id, name, father_name, contact_number, sex, seat_number, membership_date, membership_till, membership_status, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`, [row.id, row.name, row.father_name, row.contact_number, row.sex, row.seat_number, row.membership_date, row.membership_till, row.membership_status, row.created_at, row.updated_at, row.modified_by]);
+    }
+    // Restore users (skip if you want to keep admin only)
+    for (const row of backup.users || []) {
+      if (row.username !== 'admin') {
+        await client.query(`INSERT INTO users (id, username, password_hash, role, permissions, status, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`, [row.id, row.username, row.password_hash, row.role, row.permissions, row.status, row.created_at, row.updated_at]);
+      }
+    }
+    // Restore payments
+    for (const row of backup.payments || []) {
+      await client.query(`INSERT INTO payments (id, student_id, amount, payment_date, payment_mode, payment_type, description, remarks, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`, [row.id, row.student_id, row.amount, row.payment_date, row.payment_mode, row.payment_type, row.description, row.remarks, row.created_at, row.updated_at, row.modified_by]);
+    }
+    // Restore expenses
+    for (const row of backup.expenses || []) {
+      await client.query(`INSERT INTO expenses (id, category, description, amount, expense_date, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`, [row.id, row.category, row.description, row.amount, row.expense_date, row.created_at, row.updated_at, row.modified_by]);
+    }
+    // Restore student_fees_config
+    for (const row of backup.student_fees_config || []) {
+      await client.query(`INSERT INTO student_fees_config (id, gender, monthly_fees, created_at, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`, [row.id, row.gender, row.monthly_fees, row.created_at, row.updated_at]);
+    }
+    await client.query('COMMIT');
+    res.json({ message: 'Restore completed successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Restore error:', error);
+    res.status(500).json({ error: 'Restore failed: ' + error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ...existing code...
+
+
+
+
 
 // Import Excel data
 router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (req, res) => {
@@ -313,7 +458,7 @@ router.get('/export-excel', auth, requireAdmin, async (req, res) => {
         payment_summary.last_payment_date as "Last_Payment_date",
         se.seat_number as "Seat Number"
       FROM students s
-      LEFT JOIN seats se ON s.id = se.student_id
+      LEFT JOIN seats se ON s.seat_number = se.seat_number
       LEFT JOIN (
         SELECT 
           student_id,
@@ -328,13 +473,12 @@ router.get('/export-excel', auth, requireAdmin, async (req, res) => {
     const paymentsResult = await pool.query(`
       SELECT 
         p.student_id as "ID",
-        se.seat_number as "Seat_Number",
+        st.seat_number as "Seat_Number",
         p.amount as "Amount_paid",
         p.payment_date as "Payment_date",
         p.payment_mode as "Payment_mode"
       FROM payments p
       LEFT JOIN students st ON p.student_id = st.id
-      LEFT JOIN seats se ON st.seat_number = se.seat_number
       ORDER BY p.payment_date DESC
     `);
 
@@ -368,6 +512,7 @@ router.get('/users', auth, requireAdmin, async (req, res) => {
     const result = await pool.query(`
       SELECT id, username, role, permissions, created_at
       FROM users
+      WHERE status = 'active'
       ORDER BY created_at DESC
     `);
     
@@ -427,13 +572,14 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete admin user' });
     }
 
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-    
+    // Set students.modified_by = NULL for all students referencing this user
+    // await pool.query('UPDATE students SET modified_by = NULL WHERE modified_by = $1', [id]);
+
+    const result = await pool.query('UPDATE users SET status = $2, updated_at = CURRENT_TIMESTAMP, password_hash = $3 WHERE id = $1 RETURNING id', [id, 'inactive', 'ajshakshkahskdcdscdsc']);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-
-    res.json({ message: 'User deleted successfully' });
+    res.json({ message: 'User marked as inactive' });
   } catch (error) {
     console.error('Error deleting user:', error);
     res.status(500).json({ error: 'Failed to delete user' });
@@ -480,7 +626,7 @@ router.get('/stats', auth, requireAdmin, async (req, res) => {
       pool.query('SELECT COUNT(*) as total FROM seats WHERE EXISTS (SELECT 1 FROM students WHERE students.seat_number = seats.seat_number)'),
       pool.query('SELECT COUNT(*) as total FROM payments'),
       pool.query('SELECT COUNT(*) as total FROM expenses'),
-      pool.query('SELECT COUNT(*) as total FROM users'),
+      pool.query("SELECT COUNT(*) as total FROM users WHERE status = 'active'"),
       pool.query('SELECT SUM(amount) as total FROM payments'),
       pool.query('SELECT SUM(amount) as total FROM expenses')
     ]);
@@ -601,76 +747,6 @@ router.delete('/seats/:seatNumber', auth, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error deleting seat:', error);
     res.status(500).json({ error: 'Failed to delete seat' });
-  }
-});
-
-// Change student seat
-router.post('/change-seat', auth, requireAdmin, async (req, res) => {
-  const { studentId, newSeatNumber } = req.body;
-  const client = await pool.connect();
-
-  try {
-    if (!studentId || !newSeatNumber) {
-      return res.status(400).json({ error: 'Student ID and new seat number are required' });
-    }
-
-    await client.query('BEGIN');
-
-    // Get student info
-    const studentResult = await client.query(
-      'SELECT * FROM students WHERE id = $1',
-      [studentId]
-    );
-
-    if (studentResult.rows.length === 0) {
-      throw new Error('Student not found');
-    }
-
-    const student = studentResult.rows[0];
-
-    // Check if new seat exists and is available
-    const newSeatResult = await client.query(
-      'SELECT *, (SELECT id FROM students WHERE seat_number = $1 AND id != $2) as occupying_student_id FROM seats WHERE seat_number = $1',
-      [newSeatNumber, studentId]
-    );
-
-    if (newSeatResult.rows.length === 0) {
-      throw new Error('New seat does not exist');
-    }
-
-    const newSeat = newSeatResult.rows[0];
-
-    if (newSeat.occupying_student_id) {
-      throw new Error('New seat is already occupied');
-    }
-
-    // Check gender restriction
-    if (newSeat.occupant_sex && newSeat.occupant_sex !== student.sex) {
-      throw new Error(`Seat ${newSeatNumber} is restricted to ${newSeat.occupant_sex} students`);
-    }
-
-    // Update student's seat assignment
-    await client.query(`
-      UPDATE students 
-      SET seat_number = $1, updated_at = CURRENT_TIMESTAMP, modified_by = $2
-      WHERE id = $3
-    `, [newSeatNumber, req.user.userId || req.user.id || 1, studentId]);
-
-    await client.query('COMMIT');
-
-    res.json({ 
-      message: 'Seat changed successfully',
-      studentId,
-      newSeatNumber,
-      studentName: student.name
-    });
-
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error changing seat:', error);
-    res.status(500).json({ error: error.message || 'Failed to change seat' });
-  } finally {
-    client.release();
   }
 });
 

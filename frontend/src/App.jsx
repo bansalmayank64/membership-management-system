@@ -4,10 +4,10 @@ import { theme } from './config/theme';
 import { AuthProvider } from './contexts/AuthContext';
 import Navigation from './components/Navigation';
 import ProtectedRoute from './components/ProtectedRoute';
+import AdminRoute from './components/AdminRoute';
 import Students from './pages/Students';
 import StudentProfile from './pages/StudentProfile';
 import Payments from './pages/Payments';
-import Expenses from './pages/Expenses';
 import AdminPanel from './pages/AdminPanel';
 
 function App() {
@@ -33,15 +33,10 @@ function App() {
                 <Payments />
               </ProtectedRoute>
             } />
-            <Route path="/expenses" element={
-              <ProtectedRoute>
-                <Expenses />
-              </ProtectedRoute>
-            } />
             <Route path="/admin" element={
-              <ProtectedRoute>
+              <AdminRoute>
                 <AdminPanel />
-              </ProtectedRoute>
+              </AdminRoute>
             } />
           </Routes>
         </ThemeProvider>

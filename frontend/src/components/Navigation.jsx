@@ -48,8 +48,7 @@ function Navigation() {
   const navigationItems = [
     { label: t('nav.students'), path: '/', icon: <PeopleIcon /> },
     { label: t('nav.payments'), path: '/payments', icon: <PaymentIcon /> },
-    { label: t('nav.expenses'), path: '/expenses', icon: <ReceiptIcon /> },
-    ...(user?.role === 'admin' || user?.permissions?.canManageUsers ? [
+    ...(user?.role === 'admin' ? [
       { label: 'Admin Panel', path: '/admin', icon: <AdminIcon /> }
     ] : [])
   ];

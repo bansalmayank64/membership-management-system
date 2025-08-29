@@ -1,3 +1,33 @@
+  // Full Data Report state
+  const [reportLoading, setReportLoading] = useState(false);
+
+  // Download full data report (XLSX)
+  const handleDownloadFullReport = async () => {
+    setReportLoading(true);
+    try {
+      const response = await fetch('/api/admin/full-report', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `full-data-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        setMessage({ type: 'success', text: 'Full data report downloaded!' });
+      } else {
+        throw new Error('Failed to download report');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setReportLoading(false);
+    }
+  };
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -30,8 +60,7 @@ import {
   MenuItem,
   Switch,
   FormControlLabel,
-  CircularProgress,
-  Divider
+  CircularProgress
 } from '@mui/material';
 import {
   Upload as UploadIcon,
@@ -83,17 +112,7 @@ function AdminPanel() {
   const [userForm, setUserForm] = useState({
     username: '',
     password: '',
-    role: 'user',
-    permissions: {
-      canManageUsers: false,
-      canImportData: false,
-      canExportData: false,
-      canDeleteData: false,
-      canManageSeats: true,
-      canManageStudents: true,
-      canManagePayments: true,
-      canManageExpenses: true
-    }
+    role: 'user'
   });
 
   // Seat form state
@@ -105,6 +124,70 @@ function AdminPanel() {
   // Import state
   const [importFile, setImportFile] = useState(null);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0, status: '' });
+  // Backup/Restore state
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  // Handle backup (download JSON)
+  const handleBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const response = await fetch('/api/admin/backup', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `library-backup-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        setMessage({ type: 'success', text: 'Backup downloaded successfully!' });
+      } else {
+        throw new Error('Backup failed');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  // Handle restore (upload JSON)
+  const handleRestore = async () => {
+    if (!restoreFile) {
+      setMessage({ type: 'error', text: 'Please select a backup file first' });
+      return;
+    }
+    setRestoreLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', restoreFile);
+      const response = await fetch('/api/admin/restore', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: formData
+      });
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Restore completed successfully! Please reload the page.' });
+        setRestoreFile(null);
+        const fileInput = document.getElementById('restore-file-input');
+        if (fileInput) fileInput.value = '';
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Restore failed');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setRestoreLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchUsers();
@@ -239,33 +322,13 @@ function AdminPanel() {
       setUserForm({
         username: user.username,
         password: '',
-        role: user.role || 'user',
-        permissions: user.permissions || {
-          canManageUsers: false,
-          canImportData: false,
-          canExportData: false,
-          canDeleteData: false,
-          canManageSeats: true,
-          canManageStudents: true,
-          canManagePayments: true,
-          canManageExpenses: true
-        }
+        role: user.role || 'user'
       });
     } else {
       setUserForm({
         username: '',
         password: '',
-        role: 'user',
-        permissions: {
-          canManageUsers: false,
-          canImportData: false,
-          canExportData: false,
-          canDeleteData: false,
-          canManageSeats: true,
-          canManageStudents: true,
-          canManagePayments: true,
-          canManageExpenses: true
-        }
+        role: 'user'
       });
     }
     setDialogOpen(true);
@@ -346,12 +409,6 @@ function AdminPanel() {
         occupantSex: ''
       });
     }
-    setDialogOpen(true);
-  };
-
-  const handleStudentDialog = (seat) => {
-    setDialogType('viewStudent');
-    setSelectedSeat(seat);
     setDialogOpen(true);
   };
 
@@ -653,6 +710,7 @@ function AdminPanel() {
         {/* Data Import/Export Tab */}
         {tabValue === 0 && (
           <Grid container spacing={3}>
+            {/* Import Excel */}
             <Grid item xs={12} md={6}>
               <Card>
                 <CardContent>
@@ -663,7 +721,6 @@ function AdminPanel() {
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     Upload an Excel file with 'Library Members' and 'Renewals' sheets to import data.
                   </Typography>
-                  
                   <Box sx={{ mb: 2 }}>
                     <input
                       id="excel-file-input"
@@ -683,7 +740,6 @@ function AdminPanel() {
                       </Typography>
                     )}
                   </Box>
-
                   <Button
                     variant="contained"
                     onClick={handleImportData}
@@ -693,7 +749,6 @@ function AdminPanel() {
                   >
                     {loading ? 'Importing...' : 'Import Data'}
                   </Button>
-
                   {importProgress.status && (
                     <Box sx={{ mt: 2 }}>
                       <Typography variant="body2">{importProgress.status}</Typography>
@@ -703,25 +758,77 @@ function AdminPanel() {
               </Card>
             </Grid>
 
+            {/* Export Excel, Full Report & Backup/Restore */}
             <Grid item xs={12} md={6}>
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <DownloadIcon color="primary" />
-                    Export Data
+                    Export, Full Report & Backup
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Download all library data as an Excel file for backup or analysis.
+                    Download all library data as an Excel file, a full multi-sheet report, or backup/restore the entire system as JSON.
                   </Typography>
-                  
                   <Button
                     variant="contained"
                     onClick={handleExportData}
                     disabled={loading}
                     fullWidth
+                    sx={{ mb: 1 }}
                     startIcon={loading ? <CircularProgress size={20} /> : <DownloadIcon />}
                   >
                     {loading ? 'Exporting...' : 'Export to Excel'}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleDownloadFullReport}
+                    disabled={reportLoading}
+                    fullWidth
+                    sx={{ mb: 1 }}
+                    startIcon={reportLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
+                  >
+                    {reportLoading ? 'Preparing...' : 'Download Full Data report'}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    onClick={handleBackup}
+                    disabled={backupLoading}
+                    fullWidth
+                    sx={{ mb: 1 }}
+                    startIcon={backupLoading ? <CircularProgress size={20} /> : <StorageIcon />}
+                  >
+                    {backupLoading ? 'Backing up...' : 'Backup (JSON)'}
+                  </Button>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
+                    <input
+                      id="restore-file-input"
+                      type="file"
+                      accept=".json"
+                      style={{ display: 'none' }}
+                      onChange={e => setRestoreFile(e.target.files[0])}
+                    />
+                    <label htmlFor="restore-file-input" style={{ flex: 1 }}>
+                      <Button variant="outlined" component="span" fullWidth>
+                        Select Backup File (.json)
+                      </Button>
+                    </label>
+                    {restoreFile && (
+                      <Typography variant="body2" color="success.main" sx={{ ml: 1 }}>
+                        {restoreFile.name}
+                      </Typography>
+                    )}
+                  </Box>
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    onClick={handleRestore}
+                    disabled={!restoreFile || restoreLoading}
+                    fullWidth
+                    startIcon={restoreLoading ? <CircularProgress size={20} /> : <UploadIcon />}
+                  >
+                    {restoreLoading ? 'Restoring...' : 'Restore from Backup'}
                   </Button>
                 </CardContent>
               </Card>
@@ -736,6 +843,12 @@ function AdminPanel() {
                   <strong>Sheet 1 - "Library Members":</strong> ID, Seat Number, Sex, Name_Student, Father_Name, Contact Number, Membership_Date, Total_Paid, Membership_Till, Membership_Status, Last_Payment_date
                   <br />
                   <strong>Sheet 2 - "Renewals":</strong> ID, Seat_Number, Amount_paid, Payment_date, Payment_mode
+                </Typography>
+                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
+                  Backup/Restore:
+                </Typography>
+                <Typography variant="body2">
+                  Backup will download a JSON file containing all system data (users, students, payments, seats, expenses, fees config). Restore will overwrite all data with the uploaded backup file. <strong>Use with caution!</strong>
                 </Typography>
               </Alert>
             </Grid>
@@ -856,8 +969,6 @@ function AdminPanel() {
                         <TableHead>
                           <TableRow>
                             <TableCell>Seat#</TableCell>
-                            <TableCell>Status</TableCell>
-                            <TableCell>Student</TableCell>
                             <TableCell>Restriction</TableCell>
                             <TableCell>Actions</TableCell>
                           </TableRow>
@@ -869,34 +980,6 @@ function AdminPanel() {
                                 <Typography variant="subtitle2" fontWeight="bold">
                                   {seat.seat_number}
                                 </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={seat.status === 'occupied' ? 'Occupied' : 'Available'} 
-                                  color={seat.status === 'occupied' ? 'error' : 'success'}
-                                  size="small"
-                                />
-                              </TableCell>
-                              <TableCell>
-                                {seat.status === 'occupied' && seat.student_name ? (
-                                  <Button
-                                    variant="text"
-                                    color="primary"
-                                    onClick={() => handleStudentDialog(seat)}
-                                    sx={{ 
-                                      textTransform: 'none',
-                                      justifyContent: 'flex-start',
-                                      p: 0.5,
-                                      minWidth: 'auto'
-                                    }}
-                                  >
-                                    {seat.student_name}
-                                  </Button>
-                                ) : (
-                                  <Typography variant="body2" color="text.secondary">
-                                    -
-                                  </Typography>
-                                )}
                               </TableCell>
                               <TableCell>
                                 {seat.occupant_sex ? (
@@ -1112,28 +1195,6 @@ function AdminPanel() {
                   <MenuItem value="admin">Admin</MenuItem>
                 </Select>
               </FormControl>
-              
-              <Divider />
-              <Typography variant="h6">Permissions</Typography>
-              
-              {Object.entries(userForm.permissions).map(([key, value]) => (
-                <FormControlLabel
-                  key={key}
-                  control={
-                    <Switch
-                      checked={value}
-                      onChange={(e) => setUserForm({
-                        ...userForm,
-                        permissions: {
-                          ...userForm.permissions,
-                          [key]: e.target.checked
-                        }
-                      })}
-                    />
-                  }
-                  label={key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                />
-              ))}
             </Box>
           </DialogContent>
           <DialogActions>
@@ -1206,109 +1267,6 @@ function AdminPanel() {
               }
             >
               {loading ? <CircularProgress size={20} /> : (dialogType === 'addSeat' ? 'Add Seat' : 'Update Seat')}
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Student Details Dialog */}
-        <Dialog open={dialogOpen && dialogType === 'viewStudent'} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>
-            Student Details
-          </DialogTitle>
-          <DialogContent>
-            {selectedSeat && selectedSeat.student_name && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, bgcolor: 'primary.light', borderRadius: 1 }}>
-                  <Typography variant="h6" color="primary.contrastText">
-                    Seat {selectedSeat.seat_number}
-                  </Typography>
-                  <Chip 
-                    label="Occupied" 
-                    color="error" 
-                    size="small"
-                  />
-                </Box>
-                
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Student Name
-                    </Typography>
-                    <Typography variant="body1" fontWeight="bold">
-                      {selectedSeat.student_name}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Student ID
-                    </Typography>
-                    <Typography variant="body1">
-                      {selectedSeat.student_id}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Father's Name
-                    </Typography>
-                    <Typography variant="body1">
-                      {selectedSeat.father_name || 'N/A'}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Contact Number
-                    </Typography>
-                    <Typography variant="body1">
-                      {selectedSeat.contact_number || 'N/A'}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Membership Status
-                    </Typography>
-                    <Chip 
-                      label={selectedSeat.membership_status || 'Active'} 
-                      color={selectedSeat.membership_status === 'active' ? 'success' : 'default'}
-                      size="small"
-                    />
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Seat Restriction
-                    </Typography>
-                    {selectedSeat.occupant_sex ? (
-                      <Chip 
-                        label={selectedSeat.occupant_sex} 
-                        color={selectedSeat.occupant_sex === 'male' ? 'info' : 'secondary'}
-                        size="small"
-                      />
-                    ) : (
-                      <Chip label="No restriction" variant="outlined" size="small" />
-                    )}
-                  </Box>
-                </Box>
-                
-                <Divider sx={{ my: 1 }} />
-                
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                    Seat Assignment Date
-                  </Typography>
-                  <Typography variant="body2">
-                    {selectedSeat.updated_at ? new Date(selectedSeat.updated_at).toLocaleDateString() : 'N/A'}
-                  </Typography>
-                </Box>
-              </Box>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDialogOpen(false)} variant="contained">
-              Close
             </Button>
           </DialogActions>
         </Dialog>

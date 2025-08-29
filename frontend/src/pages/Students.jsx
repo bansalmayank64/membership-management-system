@@ -392,8 +392,12 @@ function Students() {
     const validStudents = students.filter(student => student && typeof student === 'object');
     console.log('Valid students after null check:', validStudents.length);
     
-    const totalStudents = validStudents.length;
-    const assignedSeats = validStudents.filter(s => s.seat_number).length;
+    // Filter only active students (membership_status !== 'inactive')
+    const activeStudents = validStudents.filter(student => student.membership_status !== 'inactive');
+    console.log('Active students after status check:', activeStudents.length);
+    
+    const totalStudents = activeStudents.length;
+    const assignedSeats = activeStudents.filter(s => s.seat_number).length;
     const availableSeats = unassignedSeats.length;
     
     // Calculate expiring students based on membership_till within 7 days
@@ -401,7 +405,7 @@ function Students() {
     const sevenDaysFromNow = new Date();
     sevenDaysFromNow.setDate(today.getDate() + 7);
     
-    const expiringSeats = validStudents.filter(student => {
+    const expiringSeats = activeStudents.filter(student => {
       if (!student.membership_till) {
         return false;
       }
@@ -410,7 +414,17 @@ function Students() {
       return expiryDate >= today && expiryDate <= sevenDaysFromNow;
     }).length;
     
-    const unassignedStudents = validStudents.filter(s => !s.seat_number).length;
+    // Calculate expired seats based on membership_till less than current date
+    const expiredSeats = activeStudents.filter(student => {
+      if (!student.membership_till) {
+        return true; // No membership end date means expired
+      }
+      
+      const expiryDate = new Date(student.membership_till);
+      return expiryDate < today;
+    }).length;
+    
+    const unassignedStudents = activeStudents.filter(s => !s.seat_number).length;
     const totalSeats = seatData.length;
     
     // Calculate male and female seat counts
@@ -424,6 +438,7 @@ function Students() {
     console.log('- Assigned Seats:', assignedSeats);
     console.log('- Available Seats:', availableSeats);
     console.log('- Expiring Seats:', expiringSeats);
+    console.log('- Expired Seats:', expiredSeats);
     console.log('- Unassigned Students:', unassignedStudents);
     console.log('- Total Seats:', totalSeats);
     console.log('- Male Seats:', maleSeats);
@@ -435,6 +450,7 @@ function Students() {
       assignedSeats,
       availableSeats,
       expiringSeats,
+      expiredSeats,
       unassignedStudents,
       totalSeats,
       maleSeats,
@@ -506,6 +522,12 @@ function Students() {
       
       data = seatData.map(seat => {
         const student = students.find(s => s.seat_number === seat.seatNumber);
+        
+        // Check if membership is expired
+        const membershipTill = seat.membershipExpiry || student?.membership_till;
+        const hasStudent = !!(seat.studentName || student?.name);
+        const isExpired = hasStudent && (membershipTill ? new Date(membershipTill) < new Date() : true); // null means expired if student exists
+        
         const processedSeat = {
           ...seat,
           // Preserve backend data when available, fallback to student lookup
@@ -513,8 +535,11 @@ function Students() {
           studentId: seat.studentId || student?.id || '',
           contact: seat.contactNumber || student?.contact_number || '',
           gender: seat.gender || student?.sex || '',
+          membership_till: membershipTill,
           // Fix: Determine if seat is occupied based on whether there's a student assigned
-          occupied: !!(seat.studentName || student?.name)
+          occupied: !!(seat.studentName || student?.name),
+          // Add expired status
+          expired: isExpired
         };
         
         // Log occupied seats for debugging
@@ -602,6 +627,18 @@ function Students() {
         data = data.filter(item => item.occupied);
       } else if (statusFilter === 'deactivated') {
         data = data.filter(item => item.status === 'inactive');
+      } else if (statusFilter === 'expired') {
+        data = data.filter(item => {
+          // For seats view, check if seat has expired membership
+          if (currentTab === 0) {
+            return item.expired;
+          }
+          // For students view, check if membership is expired
+          if (!item.membership_till) return true; // No membership end date means expired
+          const expiryDate = new Date(item.membership_till);
+          const today = new Date();
+          return expiryDate < today;
+        });
       }
     }
     
@@ -1910,6 +1947,7 @@ function Students() {
                 <MenuItem value="occupied">Occupied</MenuItem>
                 <MenuItem value="available">Available</MenuItem>
                 <MenuItem value="expiring">Expiring</MenuItem>
+                <MenuItem value="expired">Expired</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" fullWidth>
@@ -1946,6 +1984,7 @@ function Students() {
                 <MenuItem value="">All</MenuItem>
                 <MenuItem value="assigned">Assigned</MenuItem>
                 <MenuItem value="unassigned">Unassigned</MenuItem>
+                <MenuItem value="expired">Expired</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" fullWidth>
@@ -1979,6 +2018,17 @@ function Students() {
               onChange={(e) => setStudentNameFilter(e.target.value)}
               fullWidth
             />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="expired">Expired</MenuItem>
+              </Select>
+            </FormControl>
             <FormControl size="small" fullWidth>
               <InputLabel>Gender</InputLabel>
               <Select
@@ -2024,17 +2074,15 @@ function Students() {
         <TableHead>
           <TableRow>
             <TableCell sx={{ 
-              position: isMobile ? 'sticky' : 'static',
-              left: 0,
-              bgcolor: 'background.paper',
-              zIndex: isMobile ? 10 : 'auto',
-              minWidth: 120
+              minWidth: 24,
+              width: 24,
+              maxWidth: 32
             }}>
               <strong>Seat#</strong>
             </TableCell>
             <TableCell sx={{ 
               position: isMobile ? 'sticky' : 'static',
-              left: isMobile ? 120 : 'auto',
+              left: isMobile ? 40 : 'auto',
               bgcolor: 'background.paper',
               zIndex: isMobile ? 10 : 'auto',
               minWidth: 200,
@@ -2057,12 +2105,7 @@ function Students() {
         <TableBody>
           {filteredData.filter(seat => seat && seat.seatNumber).map((seat) => (
             <TableRow key={seat.seatNumber}>
-              <TableCell sx={{ 
-                position: isMobile ? 'sticky' : 'static',
-                left: 0,
-                bgcolor: 'background.paper',
-                zIndex: isMobile ? 5 : 'auto'
-              }}>
+              <TableCell>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <EventSeatIcon 
@@ -2083,8 +2126,25 @@ function Students() {
                       #{seat.seatNumber}
                     </Typography>
                   </Box>
-                  {seat.expiring ? (
-                    <Chip label="Expiring" color="warning" size="small" />
+                  {seat.expired ? (
+                    <Chip 
+                      label={
+                        seat.membershipExpiry || seat.membership_till ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <span>Expired</span>
+                            <span style={{ fontSize: '0.7rem' }}>{formatDateForDisplay(seat.membershipExpiry || seat.membership_till)}</span>
+                          </Box>
+                        ) : "Expired"
+                      }
+                      color="error" 
+                      size="small" 
+                    />
+                  ) : seat.expiring ? (
+                    <Chip 
+                      label="Expiring"
+                      color="warning" 
+                      size="small" 
+                    />
                   ) : seat.occupied ? (
                     <Chip label="Occupied" color="success" size="small" />
                   ) : (
@@ -2094,7 +2154,7 @@ function Students() {
               </TableCell>
               <TableCell sx={{ 
                 position: isMobile ? 'sticky' : 'static',
-                left: isMobile ? 120 : 'auto',
+                left: isMobile ? 40 : 'auto',
                 bgcolor: 'background.paper',
                 zIndex: isMobile ? 5 : 'auto',
                 borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
@@ -2156,6 +2216,16 @@ function Students() {
                     <Typography variant="caption" color="text.secondary" sx={{ ml: 3 }}>
                       ID: {seat.studentId || 'N/A'}
                     </Typography>
+                    {seat.expiring && seat.membershipExpiry && (
+                      <Typography variant="caption" color="warning.main" sx={{ ml: 3 }}>
+                        Expiring: {formatDateForDisplay(seat.membershipExpiry)}
+                      </Typography>
+                    )}
+                    {seat.expired && (seat.membershipExpiry || seat.membership_till) && (
+                      <Typography variant="caption" color="error.main" sx={{ ml: 3 }}>
+                        Expired: {formatDateForDisplay(seat.membershipExpiry || seat.membership_till)}
+                      </Typography>
+                    )}
                   </Box>
                 ) : (
                   <Typography variant="body2" color="text.secondary">Empty</Typography>
@@ -2197,13 +2267,13 @@ function Students() {
               left: 0,
               bgcolor: 'background.paper',
               zIndex: isMobile ? 10 : 'auto',
-              minWidth: 120
+              minWidth: 40
             }}>
               <strong>Student ID</strong>
             </TableCell>
             <TableCell sx={{ 
               position: isMobile ? 'sticky' : 'static',
-              left: isMobile ? 120 : 'auto',
+              left: isMobile ? 40 : 'auto',
               bgcolor: 'background.paper',
               zIndex: isMobile ? 10 : 'auto',
               minWidth: 250,
@@ -2285,7 +2355,7 @@ function Students() {
               </TableCell>
               <TableCell sx={{ 
                 position: isMobile ? 'sticky' : 'static',
-                left: isMobile ? 120 : 'auto',
+                left: isMobile ? 40 : 'auto',
                 bgcolor: 'background.paper',
                 zIndex: isMobile ? 5 : 'auto',
                 borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'

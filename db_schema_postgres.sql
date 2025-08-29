@@ -46,6 +46,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin')),
     permissions JSONB DEFAULT '{}',
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -73,6 +74,9 @@ CREATE TABLE students (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     modified_by INTEGER REFERENCES users(id)
 );
+
+-- Set student ID sequence to start from 20250001
+ALTER SEQUENCE students_id_seq RESTART WITH 20250001;
 
 CREATE TABLE payments (
     id SERIAL PRIMARY KEY,

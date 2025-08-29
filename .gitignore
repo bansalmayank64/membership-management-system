@@ -6,6 +6,7 @@ backend/node_modules/
 # Build outputs
 frontend/dist/
 frontend/.vite/
+public/assets/*
 
 # Environment variables
 .env
