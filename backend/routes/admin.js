@@ -43,33 +43,40 @@ const requireAdmin = (req, res, next) => {
 router.get('/full-report', auth, requireAdmin, async (req, res) => {
   try {
     // Fetch all data
-    const users = await db.any('SELECT id, username, role, status, created_at FROM users ORDER BY id');
-    const students = await db.any('SELECT * FROM students ORDER BY id');
-    const payments = await db.any('SELECT * FROM payments ORDER BY id');
-    const seats = await db.any('SELECT * FROM seats ORDER BY seat_number');
-    const expenses = await db.any('SELECT * FROM expenses ORDER BY id');
+    const users = await pool.query('SELECT id, username, role, status, created_at FROM users ORDER BY id');
+    const students = await pool.query('SELECT * FROM students ORDER BY id');
+    let payments;
+    try {
+      payments = await pool.query('SELECT * FROM payments ORDER BY id');
+    } catch (paymentError) {
+      // If payments table has issues, try basic columns
+      payments = await pool.query('SELECT id, student_id, amount, payment_date, payment_mode, payment_type, description, created_at, updated_at, modified_by FROM payments ORDER BY id');
+    }
+    const seats = await pool.query('SELECT * FROM seats ORDER BY seat_number');
+    const expenses = await pool.query('SELECT * FROM expenses ORDER BY id');
     // History: seat assignment, payment, and status changes (if tracked)
     let seatHistory = [];
     try {
-      seatHistory = await db.any('SELECT * FROM seat_history ORDER BY id');
+      const historyResult = await pool.query('SELECT * FROM seat_history ORDER BY id');
+      seatHistory = historyResult.rows;
     } catch (e) { /* ignore if not present */ }
 
     // Format data for sheets
     const sheets = {};
-    if (users.length) {
-      sheets['Users'] = users;
+    if (users.rows.length) {
+      sheets['Users'] = users.rows;
     }
-    if (students.length) {
-      sheets['Students'] = students;
+    if (students.rows.length) {
+      sheets['Students'] = students.rows;
     }
-    if (payments.length) {
-      sheets['Payments'] = payments;
+    if (payments.rows.length) {
+      sheets['Payments'] = payments.rows;
     }
-    if (seats.length) {
-      sheets['Seats'] = seats;
+    if (seats.rows.length) {
+      sheets['Seats'] = seats.rows;
     }
-    if (expenses.length) {
-      sheets['Expenses'] = expenses;
+    if (expenses.rows.length) {
+      sheets['Expenses'] = expenses.rows;
     }
     if (seatHistory.length) {
       sheets['Seat History'] = seatHistory;
@@ -137,6 +144,15 @@ router.post('/restore', auth, requireAdmin, upload.single('file'), async (req, r
   const client = await pool.connect();
   try {
     const backup = JSON.parse(req.file.buffer.toString());
+    
+    // Check if payments table has remarks column
+    const paymentsColumns = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'payments' AND table_schema = 'public'
+    `);
+    const hasRemarksColumn = paymentsColumns.rows.some(row => row.column_name === 'remarks');
+    
     await client.query('BEGIN');
     // Clean tables (except users if you want to keep admin)
     await client.query('DELETE FROM payments');
@@ -145,6 +161,7 @@ router.post('/restore', auth, requireAdmin, upload.single('file'), async (req, r
     await client.query('DELETE FROM seats');
     await client.query('DELETE FROM student_fees_config');
     // Optionally: await client.query('DELETE FROM users WHERE username != \'admin\'');
+    
     // Restore seats
     for (const row of backup.seats || []) {
       await client.query(`INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (seat_number) DO NOTHING`, [row.seat_number, row.occupant_sex, row.created_at, row.updated_at, row.modified_by]);
@@ -161,7 +178,11 @@ router.post('/restore', auth, requireAdmin, upload.single('file'), async (req, r
     }
     // Restore payments
     for (const row of backup.payments || []) {
-      await client.query(`INSERT INTO payments (id, student_id, amount, payment_date, payment_mode, payment_type, description, remarks, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`, [row.id, row.student_id, row.amount, row.payment_date, row.payment_mode, row.payment_type, row.description, row.remarks, row.created_at, row.updated_at, row.modified_by]);
+      if (hasRemarksColumn) {
+        await client.query(`INSERT INTO payments (id, student_id, amount, payment_date, payment_mode, payment_type, description, remarks, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`, [row.id, row.student_id, row.amount, row.payment_date, row.payment_mode, row.payment_type, row.description, row.remarks, row.created_at, row.updated_at, row.modified_by]);
+      } else {
+        await client.query(`INSERT INTO payments (id, student_id, amount, payment_date, payment_mode, payment_type, description, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`, [row.id, row.student_id, row.amount, row.payment_date, row.payment_mode, row.payment_type, row.description, row.created_at, row.updated_at, row.modified_by]);
+      }
     }
     // Restore expenses
     for (const row of backup.expenses || []) {
