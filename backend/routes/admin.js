@@ -802,32 +802,78 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
 });
 
 // Clean database (except users)
+
+// Clean database (delete all data from all tables except users, and restart all sequences)
 router.post('/clean-database', auth, requireAdmin, async (req, res) => {
   const client = await pool.connect();
-  
   try {
     await client.query('BEGIN');
 
-    // Clear all data tables but keep users and seats structure
-    await client.query('DELETE FROM payments');
-    await client.query('DELETE FROM expenses');
-    await client.query('DELETE FROM students');
-    await client.query('DELETE FROM seats');
-    
-    // Note: We don't modify seats.occupant_sex as it represents gender restrictions, not current occupants
+    // Get all table names in public schema except users
+    const tablesResult = await client.query(`
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_type = 'BASE TABLE'
+        AND table_name != 'users'
+    `);
+    const tableNames = tablesResult.rows.map(row => row.table_name);
 
-    // Reset auto-increment sequences
-    await client.query('ALTER SEQUENCE students_id_seq RESTART WITH 1');
-    await client.query('ALTER SEQUENCE payments_id_seq RESTART WITH 1');
-    await client.query('ALTER SEQUENCE expenses_id_seq RESTART WITH 1');
+    // Disable only user-defined triggers (not system triggers) for referential integrity
+    for (const table of tableNames) {
+      const triggersResult = await client.query(`
+        SELECT tgname FROM pg_trigger 
+        WHERE tgrelid = 'public."${table}"'::regclass 
+          AND NOT tgisinternal 
+          AND tgname NOT LIKE 'RI_ConstraintTrigger%'
+      `);
+      for (const trig of triggersResult.rows) {
+        await client.query(`ALTER TABLE "${table}" DISABLE TRIGGER "${trig.tgname}"`);
+      }
+    }
+
+    // Delete all data from each table in dependency order to avoid FK errors
+    // 1. payments, 2. expenses, 3. students, 4. others
+    const ordered = [];
+    if (tableNames.includes('payments')) ordered.push('payments');
+    if (tableNames.includes('expenses')) ordered.push('expenses');
+    if (tableNames.includes('students')) ordered.push('students');
+    // Add all other tables not already in the list
+    for (const t of tableNames) {
+      if (!ordered.includes(t)) ordered.push(t);
+    }
+    for (const table of ordered) {
+      await client.query(`DELETE FROM "${table}"`);
+    }
+
+    // Enable user-defined triggers back
+    for (const table of tableNames) {
+      const triggersResult = await client.query(`
+        SELECT tgname FROM pg_trigger 
+        WHERE tgrelid = 'public."${table}"'::regclass 
+          AND NOT tgisinternal 
+          AND tgname NOT LIKE 'RI_ConstraintTrigger%'
+      `);
+      for (const trig of triggersResult.rows) {
+        await client.query(`ALTER TABLE "${table}" ENABLE TRIGGER "${trig.tgname}"`);
+      }
+    }
+
+    // Restart all sequences in public schema
+    const seqResult = await client.query(`
+      SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'
+    `);
+    for (const seq of seqResult.rows) {
+      await client.query(`ALTER SEQUENCE "${seq.sequence_name}" RESTART WITH 1`);
+    }
+    
+    await client.query(`ALTER SEQUENCE students_id_seq RESTART WITH 20250001`);
 
     await client.query('COMMIT');
-    
-    res.json({ message: 'Database cleaned successfully' });
+    res.json({ message: 'Database cleaned successfully (all tables except users, all sequences reset)' });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error cleaning database:', error);
-    res.status(500).json({ error: 'Failed to clean database' });
+    res.status(500).json({ error: 'Failed to clean database', details: error.message });
   } finally {
     client.release();
   }
