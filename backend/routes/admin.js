@@ -451,7 +451,9 @@ router.post('/clean-database', auth, requireAdmin, async (req, res) => {
     await client.query('DELETE FROM payments');
     await client.query('DELETE FROM expenses');
     await client.query('DELETE FROM students');
-    await client.query('UPDATE seats SET occupant_sex = NULL, updated_at = CURRENT_TIMESTAMP');
+    await client.query('DELETE FROM seats');
+    
+    // Note: We don't modify seats.occupant_sex as it represents gender restrictions, not current occupants
 
     // Reset auto-increment sequences
     await client.query('ALTER SEQUENCE students_id_seq RESTART WITH 1');
@@ -508,8 +510,8 @@ router.post('/seats', auth, requireAdmin, async (req, res) => {
     }
 
     const result = await pool.query(`
-      INSERT INTO seats (seat_number, occupant_sex, status, modified_by, created_at, updated_at)
-      VALUES ($1, $2, 'available', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO seats (seat_number, occupant_sex, modified_by, created_at, updated_at)
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING *
     `, [seatNumber.trim(), occupantSex || null, req.user.userId || req.user.id || 1]);
 
@@ -529,16 +531,38 @@ router.put('/seats/:seatNumber', auth, requireAdmin, async (req, res) => {
   const { occupantSex, status } = req.body;
 
   try {
+    // First check if seat exists and if it's occupied
+    const seatCheck = await pool.query(`
+      SELECT 
+        s.seat_number,
+        s.occupant_sex,
+        st.id as student_id,
+        st.name as student_name,
+        st.sex as student_gender
+      FROM seats s
+      LEFT JOIN students st ON s.seat_number = st.seat_number
+      WHERE s.seat_number = $1
+    `, [seatNumber]);
+
+    if (seatCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Seat not found' });
+    }
+
+    const seat = seatCheck.rows[0];
+    
+    // If seat is occupied and we're trying to change gender restriction
+    if (seat.student_id && occupantSex && seat.student_gender && occupantSex !== seat.student_gender) {
+      return res.status(400).json({ 
+        error: `Cannot change gender restriction to "${occupantSex}" - seat is occupied by a ${seat.student_gender} student (${seat.student_name})` 
+      });
+    }
+
     const result = await pool.query(`
       UPDATE seats 
       SET occupant_sex = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
       WHERE seat_number = $3
       RETURNING *
     `, [occupantSex || null, req.user.userId || req.user.id || 1, seatNumber]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Seat not found' });
-    }
 
     res.json(result.rows[0]);
   } catch (error) {
@@ -625,26 +649,12 @@ router.post('/change-seat', auth, requireAdmin, async (req, res) => {
       throw new Error(`Seat ${newSeatNumber} is restricted to ${newSeat.occupant_sex} students`);
     }
 
-    // Free up old seat by finding the student's current seat
-    await client.query(`
-      UPDATE seats 
-      SET occupant_sex = NULL, updated_at = CURRENT_TIMESTAMP, modified_by = $1
-      WHERE seat_number = (SELECT seat_number FROM students WHERE id = $2)
-    `, [req.user.userId || req.user.id || 1, studentId]);
-
     // Update student's seat assignment
     await client.query(`
       UPDATE students 
       SET seat_number = $1, updated_at = CURRENT_TIMESTAMP, modified_by = $2
       WHERE id = $3
     `, [newSeatNumber, req.user.userId || req.user.id || 1, studentId]);
-
-    // Assign new seat
-    await client.query(`
-      UPDATE seats 
-      SET occupant_sex = (SELECT sex FROM students WHERE id = $1), updated_at = CURRENT_TIMESTAMP, modified_by = $2
-      WHERE seat_number = $3
-    `, [studentId, req.user.userId || req.user.id || 1, newSeatNumber]);
 
     await client.query('COMMIT');
 
@@ -670,9 +680,12 @@ router.get('/seats', auth, requireAdmin, async (req, res) => {
     const result = await pool.query(`
       SELECT 
         s.seat_number,
-        s.status,
+        CASE 
+          WHEN st.seat_number IS NOT NULL THEN 'occupied'
+          ELSE 'available'
+        END as status,
         s.occupant_sex,
-        s.student_id,
+        st.id as student_id,
         st.name as student_name,
         st.father_name,
         st.contact_number,
@@ -693,6 +706,60 @@ router.get('/seats', auth, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error fetching seats:', error);
     res.status(500).json({ error: 'Failed to fetch seats' });
+  }
+});
+
+// Get fees configuration
+router.get('/fees-config', auth, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM student_fees_config 
+      ORDER BY gender
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching fees config:', error);
+    res.status(500).json({ error: 'Failed to fetch fees configuration' });
+  }
+});
+
+// Update fees configuration
+router.put('/fees-config/:gender', auth, requireAdmin, async (req, res) => {
+  const { gender } = req.params;
+  const { monthly_fees } = req.body;
+
+  try {
+    if (!['male', 'female'].includes(gender)) {
+      return res.status(400).json({ error: 'Invalid gender. Must be male or female' });
+    }
+
+    if (!monthly_fees || monthly_fees <= 0) {
+      return res.status(400).json({ error: 'Monthly fees must be a positive number' });
+    }
+
+    const result = await pool.query(`
+      UPDATE student_fees_config 
+      SET monthly_fees = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE gender = $2
+      RETURNING *
+    `, [monthly_fees, gender]);
+
+    if (result.rows.length === 0) {
+      // If no record exists, create one
+      const insertResult = await pool.query(`
+        INSERT INTO student_fees_config (gender, monthly_fees)
+        VALUES ($1, $2)
+        RETURNING *
+      `, [gender, monthly_fees]);
+      
+      return res.json(insertResult.rows[0]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating fees config:', error);
+    res.status(500).json({ error: 'Failed to update fees configuration' });
   }
 });
 

@@ -25,69 +25,90 @@ import {
 } from '@mui/material';
 import { Refresh as RefreshIcon } from '@mui/icons-material';
 import MobileFilters from '../components/MobileFilters';
+import Footer from '../components/Footer';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
 import api from '../services/api';
+
+// Utility function to convert GMT to IST
+const convertToIST = (dateString) => {
+  if (!dateString) return null;
+  const date = new Date(dateString);
+  // Convert to IST (GMT+5:30)
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  return new Date(date.getTime() + istOffset);
+};
 
 // PaymentCard component for mobile view
 const PaymentCard = ({ payment }) => {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    try {
+      // Convert GMT to IST first
+      const gmtDate = new Date(dateString);
+      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
+      
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      return formatter.format(istDate);
+    } catch (error) {
+      return 'N/A';
+    }
   };
 
   const formatCurrency = (amount) => {
-    return amount ? `₹${Number(amount).toLocaleString()}` : '₹0';
+    const numAmount = Number(amount) || 0;
+    return `₹${Math.abs(numAmount).toLocaleString()}`;
+  };
+
+  const getAmountColor = (amount) => {
+    const numAmount = Number(amount) || 0;
+    return numAmount < 0 ? 'error' : 'success';
+  };
+
+  const getPaymentModeIcon = (mode) => {
+    return mode === 'online' ? '💳' : '💵';
   };
 
   return (
-    <Card sx={{ mb: 2, boxShadow: 2 }}>
-      <CardContent>
-        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-          <Box>
-            <Typography variant="subtitle1" component="div" fontWeight="bold">
-              {payment.studentName || 'N/A'}
+    <Card sx={{ mb: 1.5, boxShadow: 1, borderRadius: 2 }}>
+      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+        {/* Header Row */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+          <Box flex={1}>
+            <Typography variant="subtitle2" component="div" fontWeight="600" noWrap>
+              {payment.student_name || 'N/A'}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              ID: {payment.studentId || 'N/A'} • Seat #{payment.seatNumber}
+            <Typography variant="caption" color="text.secondary">
+              #{payment.student_id} • 🪑{payment.seat_number || 'N/A'}
             </Typography>
           </Box>
           <Chip 
             label={formatCurrency(payment.amount)}
-            color="success"
+            color={getAmountColor(payment.amount)}
             variant="filled"
             size="small"
+            sx={{ minWidth: 80, fontWeight: 600 }}
           />
         </Box>
         
-        <Box display="flex" flexDirection="column" gap={0.5}>
-          <Typography variant="body2">
-            <strong>Contact:</strong> {payment.contact || 'N/A'}
-          </Typography>
-          
-          <Typography variant="body2">
-            <strong>Date:</strong> {formatDate(payment.date)}
-          </Typography>
-          
-          <Typography variant="body2">
-            <strong>Payment Mode:</strong> {payment.paymentMode || 'Cash'}
-          </Typography>
-          
-          {payment.month && (
-            <Typography variant="body2">
-              <strong>Month:</strong> {payment.month}
+        {/* Details Row */}
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box display="flex" alignItems="center" gap={1}>
+            <Typography variant="caption" color="text.secondary">
+              {getPaymentModeIcon(payment.payment_mode)} {payment.payment_mode || 'cash'}
             </Typography>
-          )}
-          
-          {payment.description && (
-            <Typography variant="body2">
-              <strong>Description:</strong> {payment.description}
+            <Typography variant="caption" color="text.secondary">
+              • {payment.payment_type || 'fee'}
             </Typography>
-          )}
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            📅 {formatDate(payment.payment_date)}
+          </Typography>
         </Box>
       </CardContent>
     </Card>
@@ -102,7 +123,7 @@ function Payments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 10 : 25);
+  const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 15 : 25);
   const [filters, setFilters] = useState({
     seatNumber: '',
     startDate: '',
@@ -150,25 +171,62 @@ function Payments() {
 
   const filteredPayments = payments?.filter(payment => {
     const matchesSeat = !filters.seatNumber || 
-      String(payment.seatNumber).toLowerCase().includes(filters.seatNumber.toLowerCase());
-    const paymentDate = new Date(payment.date);
-    const afterStart = !filters.startDate || paymentDate >= new Date(filters.startDate);
-    const beforeEnd = !filters.endDate || paymentDate <= new Date(filters.endDate);
+      String(payment.seat_number).toLowerCase().includes(filters.seatNumber.toLowerCase());
+    
+    // Convert payment date to IST for filtering
+    const paymentDate = new Date(payment.payment_date);
+    const paymentDateIST = new Date(paymentDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    
+    // Convert filter dates to IST for comparison
+    const startDateIST = filters.startDate ? new Date(filters.startDate + 'T00:00:00') : null;
+    const endDateIST = filters.endDate ? new Date(filters.endDate + 'T23:59:59') : null;
+    
+    const afterStart = !startDateIST || paymentDateIST >= startDateIST;
+    const beforeEnd = !endDateIST || paymentDateIST <= endDateIST;
+    
     return matchesSeat && afterStart && beforeEnd;
   })
-  // Sort by date - latest first
-  .sort((a, b) => new Date(b.date) - new Date(a.date)) || [];
+  // Sort by payment_date - latest first (descending order)
+  .sort((a, b) => {
+    const dateA = new Date(a.payment_date);
+    const dateB = new Date(b.payment_date);
+    return dateB - dateA; // Descending order (latest first)
+  }) || [];
 
   const displayedPayments = filteredPayments
     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
   const formatDate = (dateString) => {
     try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-GB'); // dd/mm/yyyy format
+      // Convert GMT to IST first
+      const gmtDate = new Date(dateString);
+      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
+      
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      return formatter.format(istDate);
     } catch (error) {
       return dateString;
     }
+  };
+
+  const formatCurrency = (amount) => {
+    const numAmount = Number(amount) || 0;
+    return `₹${numAmount.toLocaleString()}`;
+  };
+
+  const getAmountStyle = (amount) => {
+    const numAmount = Number(amount) || 0;
+    return {
+      color: numAmount < 0 ? theme.palette.error.main : theme.palette.success.main,
+      fontWeight: 600
+    };
   };
 
   const handleChangePage = (event, newPage) => {
@@ -184,14 +242,20 @@ function Payments() {
     <Container sx={pageStyles.container}>
       <div style={pageStyles.header}>
         <Typography 
-          variant={isMobile ? "h5" : "h4"}
+          variant={isMobile ? "h6" : "h4"}
           component="h1"
           fontWeight="bold"
+          sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 1,
+            fontSize: isMobile ? '1.1rem' : undefined 
+          }}
         >
-          Payment History
+          💰 Payments (Only last 30 Days)
         </Typography>
         <Tooltip title="Refresh data">
-          <IconButton onClick={fetchPayments} color="primary">
+          <IconButton onClick={fetchPayments} color="primary" size={isMobile ? "small" : "medium"}>
             <RefreshIcon />
           </IconButton>
         </Tooltip>
@@ -272,25 +336,29 @@ function Payments() {
                         <TableCell>Amount</TableCell>
                         <TableCell>Date</TableCell>
                         <TableCell>Payment Mode</TableCell>
+                        <TableCell>Type</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {displayedPayments.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} align="center">
+                          <TableCell colSpan={8} align="center">
                             No payments found
                           </TableCell>
                         </TableRow>
                       ) : (
                         displayedPayments.map((payment) => (
                           <TableRow key={payment.id} sx={tableStyles.tableRow}>
-                            <TableCell>{payment.studentId || 'N/A'}</TableCell>
-                            <TableCell>{payment.studentName || 'N/A'}</TableCell>
-                            <TableCell>{payment.contact || 'N/A'}</TableCell>
-                            <TableCell>{payment.seatNumber}</TableCell>
-                            <TableCell>₹{payment.amount}</TableCell>
-                            <TableCell>{formatDate(payment.date)}</TableCell>
-                            <TableCell>{payment.paymentMode}</TableCell>
+                            <TableCell>{payment.student_id || 'N/A'}</TableCell>
+                            <TableCell>{payment.student_name || 'N/A'}</TableCell>
+                            <TableCell>{payment.contact_number || 'N/A'}</TableCell>
+                            <TableCell>{payment.seat_number || 'N/A'}</TableCell>
+                            <TableCell sx={getAmountStyle(payment.amount)}>
+                              {formatCurrency(payment.amount)}
+                            </TableCell>
+                            <TableCell>{formatDate(payment.payment_date)}</TableCell>
+                            <TableCell>{payment.payment_mode || 'N/A'}</TableCell>
+                            <TableCell>{payment.payment_type || 'N/A'}</TableCell>
                           </TableRow>
                         ))
                       )}
@@ -329,7 +397,7 @@ function Payments() {
                 )}
                 
                 {/* Mobile Pagination */}
-                <Paper sx={{ mt: 2 }}>
+                <Paper sx={{ mt: 1 }}>
                   <TablePagination
                     component="div"
                     count={filteredPayments.length}
@@ -337,8 +405,23 @@ function Payments() {
                     onPageChange={handleChangePage}
                     rowsPerPage={rowsPerPage}
                     onRowsPerPageChange={handleChangeRowsPerPage}
-                    rowsPerPageOptions={[5, 10, 25]}
+                    rowsPerPageOptions={[10, 25, 50]}
                     labelRowsPerPage="Per page:"
+                    labelDisplayedRows={({ from, to, count }) => 
+                      `${from}-${to} of ${count}`
+                    }
+                    sx={{
+                      '& .MuiTablePagination-toolbar': {
+                        paddingLeft: 1,
+                        paddingRight: 1,
+                      },
+                      '& .MuiTablePagination-selectLabel': {
+                        fontSize: '0.875rem',
+                      },
+                      '& .MuiTablePagination-displayedRows': {
+                        fontSize: '0.875rem',
+                      }
+                    }}
                   />
                 </Paper>
               </Box>
@@ -346,6 +429,8 @@ function Payments() {
           </>
         )}
       </Paper>
+      
+      <Footer />
     </Container>
   );
 }

@@ -58,14 +58,17 @@ import {
   Close as CloseIcon,
   AccessTime as AccessTimeIcon,
   CalendarMonth as CalendarMonthIcon,
+  CalendarToday as CalendarTodayIcon,
   Clear as ClearIcon,
   History as HistoryIcon,
   AssignmentInd as AssignmentIcon,
   MoreVert as MoreVertIcon,
   PersonAdd as PersonAddIcon,
-  Visibility as VisibilityIcon
+  Visibility as VisibilityIcon,
+  CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import { getSeatChartData, markSeatAsVacant } from '../services/api';
+import Footer from '../components/Footer';
 
 // Helper function to format dates consistently in DD-MMM-YYYY format
 const formatDateForDisplay = (dateString) => {
@@ -78,7 +81,8 @@ const formatDateForDisplay = (dateString) => {
     return date.toLocaleDateString('en-GB', { 
       day: '2-digit', 
       month: 'short', 
-      year: 'numeric' 
+      year: 'numeric',
+      timeZone: 'Asia/Kolkata'
     }).replace(/ /g, '-');
   } catch (error) {
     return 'N/A';
@@ -109,7 +113,7 @@ function Students() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // View modes: 0=Seats, 1=Students (removed Available Seats)
+  // View modes: 0=Seats, 1=Active Students, 2=Deactivated Students
   const [currentTab, setCurrentTab] = useState(0);
   
   // Filters
@@ -128,6 +132,7 @@ function Students() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [reactivateConfirmOpen, setReactivateConfirmOpen] = useState(false);
   const [seatHistoryOpen, setSeatHistoryOpen] = useState(false);
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
   const [assignSeatOpen, setAssignSeatOpen] = useState(false);
@@ -301,9 +306,31 @@ function Students() {
     paymentDate: new Date().toISOString().split('T')[0]
   });
 
+  // Fee configuration states
+  const [feeConfig, setFeeConfig] = useState(null);
+  const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
+
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Effect to calculate membership extension days when payment amount changes
+  useEffect(() => {
+    if (paymentData.amount && feeConfig && feeConfig.monthly_fees) {
+      const amount = parseFloat(paymentData.amount);
+      const monthlyFee = feeConfig.monthly_fees;
+      
+      if (amount > 0 && monthlyFee > 0) {
+        const days = Math.floor((amount / monthlyFee) * 30);
+        setMembershipExtensionDays(days);
+        console.log(`📅 [membershipCalculation] Payment amount: ₹${amount}, Monthly fee: ₹${monthlyFee}, Extension days: ${days}`);
+      } else {
+        setMembershipExtensionDays(0);
+      }
+    } else {
+      setMembershipExtensionDays(0);
+    }
+  }, [paymentData.amount, feeConfig]);
 
   const fetchData = async () => {
     console.log('🔄 [fetchData] Starting data fetch...');
@@ -429,7 +456,7 @@ function Students() {
         clearAllFilters();
         break;
       case 'totalStudents':
-        setCurrentTab(1); // Students view
+        setCurrentTab(1); // Active Students view
         clearAllFilters();
         break;
       case 'available':
@@ -441,11 +468,11 @@ function Students() {
         setStatusFilter('expiring');
         break;
       case 'assigned':
-        setCurrentTab(1); // Students view
+        setCurrentTab(1); // Active Students view
         setStatusFilter('assigned');
         break;
       case 'unassigned':
-        setCurrentTab(1); // Students view
+        setCurrentTab(1); // Active Students view
         setStatusFilter('unassigned');
         break;
       case 'male':
@@ -503,11 +530,16 @@ function Students() {
       });
       
       console.log('Processed data sample:', data.filter(d => d.occupied).slice(0, 3));
-    } else if (currentTab === 1) { // Students View
-      console.log('🔍 DEBUG: Processing students data for Students View');
+    } else if (currentTab === 1) { // Active Students View
+      console.log('🔍 DEBUG: Processing active students data for Students View');
       console.log('Students data received:', students.slice(0, 3));
       
-      data = students.map(student => {
+      // Filter only active students (membership_status !== 'inactive')
+      const activeStudents = students.filter(student => 
+        student.membership_status !== 'inactive'
+      );
+      
+      data = activeStudents.map(student => {
         const processedStudent = {
           ...student,
           status: student.seat_number ? 'assigned' : 'unassigned',
@@ -517,12 +549,37 @@ function Students() {
         };
         
         // Log student processing
-        console.log(`👤 Processing student: ID=${student.id}, Name=${student.name}, Seat=${student.seat_number || 'UNASSIGNED'}`);
+        console.log(`👤 Processing active student: ID=${student.id}, Name=${student.name}, Seat=${student.seat_number || 'UNASSIGNED'}`);
         
         return processedStudent;
       });
       
-      console.log('Processed students data sample:', data.slice(0, 3));
+      console.log('Processed active students data sample:', data.slice(0, 3));
+    } else if (currentTab === 2) { // Deactivated Students View
+      console.log('🔍 DEBUG: Processing deactivated students data for Deactivated Students View');
+      console.log('Students data received:', students.slice(0, 3));
+      
+      // Filter only deactivated students (membership_status === 'inactive')
+      const deactivatedStudents = students.filter(student => 
+        student.membership_status === 'inactive'
+      );
+      
+      data = deactivatedStudents.map(student => {
+        const processedStudent = {
+          ...student,
+          status: 'deactivated',
+          gender: student.sex,
+          // Add consistent property for easier access
+          seatNumber: student.seat_number
+        };
+        
+        // Log student processing
+        console.log(`👤 Processing deactivated student: ID=${student.id}, Name=${student.name}, Status=DEACTIVATED`);
+        
+        return processedStudent;
+      });
+      
+      console.log('Processed deactivated students data sample:', data.slice(0, 3));
     }
 
     // Apply filters
@@ -543,6 +600,8 @@ function Students() {
         data = data.filter(item => !item.occupied);
       } else if (statusFilter === 'occupied') {
         data = data.filter(item => item.occupied);
+      } else if (statusFilter === 'deactivated') {
+        data = data.filter(item => item.status === 'inactive');
       }
     }
     
@@ -635,9 +694,18 @@ function Students() {
 
   // Action menu handlers
   const handleActionClick = (event, item) => {
+    console.log('📋 [handleActionClick] Called with event and item:', item);
+    console.log('📋 [handleActionClick] Item type:', typeof item);
+    console.log('📋 [handleActionClick] Item stringified:', JSON.stringify(item, null, 2));
+    console.log('📋 [handleActionClick] Item name:', item?.name);
+    console.log('📋 [handleActionClick] Item id:', item?.id);
+    console.log('📋 [handleActionClick] Current tab:', currentTab);
+    
     event.stopPropagation();
     setActionMenuAnchor(event.currentTarget);
     setSelectedItemForAction(item);
+    
+    console.log('📋 [handleActionClick] Set selectedItemForAction to:', item);
   };
 
   const handleActionClose = () => {
@@ -810,7 +878,7 @@ function Students() {
   };
 
   // Add payment handler
-  const handleAddPayment = () => {
+  const handleAddPayment = async () => {
     console.log('💰 [handleAddPayment] Add payment action initiated');
     console.log('📋 Selected item for action:', selectedItemForAction);
     
@@ -825,8 +893,34 @@ function Students() {
       name: selectedItemForAction.name,
       contact: selectedItemForAction.contact_number,
       seat: selectedItemForAction.seat_number,
-      membership_till: selectedItemForAction.membership_till
+      membership_till: selectedItemForAction.membership_till,
+      gender: selectedItemForAction.sex
     });
+    
+    // Fetch fee configuration for this student's gender
+    if (selectedItemForAction.sex) {
+      try {
+        console.log(`💰 [handleAddPayment] Fetching fee configuration for gender: ${selectedItemForAction.sex}`);
+        const response = await fetch(`/api/students/fee-config/${selectedItemForAction.sex}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const feeConfigData = await response.json();
+          console.log('💰 [handleAddPayment] Fee configuration received:', feeConfigData);
+          setFeeConfig(feeConfigData);
+        } else {
+          console.warn('⚠️ [handleAddPayment] Failed to fetch fee configuration');
+          setFeeConfig(null);
+        }
+      } catch (error) {
+        console.error('❌ [handleAddPayment] Error fetching fee configuration:', error);
+        setFeeConfig(null);
+      }
+    }
     
     const initialPaymentData = {
       amount: '',
@@ -838,15 +932,27 @@ function Students() {
     
     console.log('💳 [handleAddPayment] Setting initial payment form data:', initialPaymentData);
     setPaymentData(initialPaymentData);
+    setMembershipExtensionDays(0);
     setAddPaymentOpen(true);
     console.log('✅ [handleAddPayment] Add payment dialog opened successfully');
     // Note: handleActionClose() will be called after payment is confirmed or cancelled
   };
 
-  // Remove student handler
-  const handleRemoveStudent = () => {
+  // Deactivate student handler
+  const handleDeactivateStudent = () => {
+    console.log('🔴 [handleDeactivateStudent] Called');
+    console.log('🔴 [handleDeactivateStudent] selectedItemForAction:', selectedItemForAction);
+    console.log('🔴 [handleDeactivateStudent] selectedItemForAction stringified:', JSON.stringify(selectedItemForAction, null, 2));
+    console.log('🔴 [handleDeactivateStudent] Student name:', selectedItemForAction?.name);
+    
+    if (!selectedItemForAction) {
+      console.error('❌ [handleDeactivateStudent] No student selected for deactivation');
+      return;
+    }
+    
+    console.log('🔴 [handleDeactivateStudent] Opening delete confirmation dialog');
     setDeleteConfirmOpen(true);
-    handleActionClose();
+    // Don't call handleActionClose() here - keep selectedItemForAction for the confirmation
   };
 
   // View student details handler
@@ -958,27 +1064,133 @@ function Students() {
     console.log('✅ [handleEditFromView] Successfully transitioned from view to edit mode');
   };
 
-  // Confirm delete student
-  const confirmDeleteStudent = async () => {
-    if (!selectedItemForAction) return;
+  // Confirm deactivate student
+  const confirmDeactivateStudent = async () => {
+    console.log('🔴 [confirmDeactivateStudent] Called');
+    console.log('🔴 [confirmDeactivateStudent] selectedItemForAction:', selectedItemForAction);
+    console.log('🔴 [confirmDeactivateStudent] selectedItemForAction stringified:', JSON.stringify(selectedItemForAction, null, 2));
+    
+    if (!selectedItemForAction) {
+      console.error('❌ [confirmDeactivateStudent] No selected item for action, aborting');
+      return;
+    }
     
     try {
+      console.log('🔴 [confirmDeactivateStudent] Preparing to deactivate student:', selectedItemForAction.name);
+      console.log('🔴 [confirmDeactivateStudent] Student ID:', selectedItemForAction.id);
+      
+      // Update student's membership_status to 'inactive' instead of deleting
+      const requestBody = {
+        ...selectedItemForAction,
+        membership_status: 'inactive',
+        seat_number: null // Remove seat assignment when deactivating
+      };
+      
+      console.log('🔴 [confirmDeactivateStudent] Request body:', JSON.stringify(requestBody, null, 2));
+      
       const response = await fetch(`/api/students/${selectedItemForAction.id}`, {
-        method: 'DELETE',
+        method: 'PUT',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        }
+        },
+        body: JSON.stringify(requestBody)
       });
 
-      if (!response.ok) throw new Error('Failed to delete student');
+      console.log('🔴 [confirmDeactivateStudent] Response status:', response.status);
+      console.log('🔴 [confirmDeactivateStudent] Response ok:', response.ok);
 
-      setSnackbarMessage('Student removed successfully');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [confirmDeactivateStudent] Response error:', errorText);
+        throw new Error('Failed to deactivate student');
+      }
+
+      const responseData = await response.json();
+      console.log('✅ [confirmDeactivateStudent] Response data:', responseData);
+
+      setSnackbarMessage('Student deactivated successfully');
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setDeleteConfirmOpen(false);
+      handleActionClose(); // Close action menu after successful deactivation
       fetchData();
     } catch (err) {
-      handleApiError(err, 'Failed to remove student');
+      console.error('❌ [confirmDeactivateStudent] Error:', err);
+      handleApiError(err, 'Failed to deactivate student');
+    }
+  };
+
+  // Handle reactivate student
+  const handleReactivateStudent = () => {
+    console.log('🟢 [handleReactivateStudent] Called');
+    console.log('🟢 [handleReactivateStudent] selectedItemForAction:', selectedItemForAction);
+    console.log('🟢 [handleReactivateStudent] selectedItemForAction stringified:', JSON.stringify(selectedItemForAction, null, 2));
+    console.log('🟢 [handleReactivateStudent] Student name:', selectedItemForAction?.name);
+    
+    if (!selectedItemForAction) {
+      console.error('❌ [handleReactivateStudent] No student selected for reactivation');
+      return;
+    }
+    
+    console.log('🟢 [handleReactivateStudent] Opening reactivate confirmation dialog');
+    setReactivateConfirmOpen(true);
+    // Don't call handleActionClose() here - keep selectedItemForAction for the confirmation
+  };
+
+  // Confirm reactivate student
+  const confirmReactivateStudent = async () => {
+    console.log('🟢 [confirmReactivateStudent] Called');
+    console.log('🟢 [confirmReactivateStudent] selectedItemForAction:', selectedItemForAction);
+    console.log('🟢 [confirmReactivateStudent] selectedItemForAction stringified:', JSON.stringify(selectedItemForAction, null, 2));
+    
+    if (!selectedItemForAction) {
+      console.error('❌ [confirmReactivateStudent] No selected item for action, aborting');
+      return;
+    }
+    
+    try {
+      console.log('🟢 [confirmReactivateStudent] Preparing to reactivate student:', selectedItemForAction.name);
+      console.log('🟢 [confirmReactivateStudent] Student ID:', selectedItemForAction.id);
+      
+      // Update student's membership_status to 'active'
+      const requestBody = {
+        ...selectedItemForAction,
+        membership_status: 'active'
+      };
+      
+      console.log('🟢 [confirmReactivateStudent] Request body:', JSON.stringify(requestBody, null, 2));
+      
+      const response = await fetch(`/api/students/${selectedItemForAction.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('🟢 [confirmReactivateStudent] Response status:', response.status);
+      console.log('🟢 [confirmReactivateStudent] Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [confirmReactivateStudent] Response error:', errorText);
+        throw new Error('Failed to reactivate student');
+      }
+
+      const responseData = await response.json();
+      console.log('✅ [confirmReactivateStudent] Response data:', responseData);
+
+      setSnackbarMessage('Student reactivated successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setReactivateConfirmOpen(false);
+      handleActionClose(); // Close action menu after successful reactivation
+      fetchData();
+    } catch (err) {
+      console.error('❌ [confirmReactivateStudent] Error:', err);
+      handleApiError(err, 'Failed to reactivate student');
     }
   };
 
@@ -1012,16 +1224,24 @@ function Students() {
 
   // Confirm add payment
   const handleConfirmAddPayment = async () => {
-    console.log('💰✅ [handleConfirmAddPayment] Starting payment creation process');
+    await processPayment(false);
+  };
+
+  const handleConfirmAddPaymentWithMembership = async () => {
+    await processPayment(true);
+  };
+
+  const processPayment = async (extendMembership = false) => {
+    console.log(`💰✅ [processPayment] Starting payment creation process (extend membership: ${extendMembership})`);
     console.log('📋 Selected item for action:', selectedItemForAction);
     console.log('💳 Payment form data:', paymentData);
     
     if (!selectedItemForAction) {
-      console.warn('⚠️ [handleConfirmAddPayment] No selected item for action, aborting payment creation');
+      console.warn('⚠️ [processPayment] No selected item for action, aborting payment creation');
       return;
     }
     
-    console.log(`👤 [handleConfirmAddPayment] Creating payment for student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
+    console.log(`👤 [processPayment] Creating payment for student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
     
     // Frontend validation
     const validationErrors = [];
@@ -1039,7 +1259,7 @@ function Students() {
     }
     
     if (validationErrors.length > 0) {
-      console.error('❌ [handleConfirmAddPayment] Frontend validation failed:', validationErrors);
+      console.error('❌ [processPayment] Frontend validation failed:', validationErrors);
       setSnackbarMessage('Please fill in all required fields: ' + validationErrors.join(', '));
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
@@ -1054,15 +1274,17 @@ function Students() {
       payment_mode: paymentData.method, // Map method to payment_mode
       payment_type: paymentData.type, // Map type to payment_type
       remarks: paymentData.notes || `Payment for ${selectedItemForAction.name}`,
-      modified_by: 1 // Will be set by auth middleware but including for completeness
+      modified_by: 1, // Will be set by auth middleware but including for completeness
+      extend_membership: extendMembership
     };
     
-    console.log('📤 [handleConfirmAddPayment] Payment payload to send:', paymentPayload);
-    console.log(`💰 [handleConfirmAddPayment] Amount: ₹${paymentPayload.amount}, Method: ${paymentPayload.payment_mode}, Type: ${paymentPayload.payment_type}, Date: ${paymentPayload.payment_date}`);
+    console.log('📤 [processPayment] Payment payload to send:', paymentPayload);
+    console.log(`💰 [processPayment] Amount: ₹${paymentPayload.amount}, Method: ${paymentPayload.payment_mode}, Type: ${paymentPayload.payment_type}, Date: ${paymentPayload.payment_date}`);
+    console.log(`📅 [processPayment] Extend membership: ${extendMembership}, Extension days: ${membershipExtensionDays}`);
     
     try {
       setPaymentLoading(true);
-      console.log('🌐 [handleConfirmAddPayment] Sending POST request to /api/payments...');
+      console.log('🌐 [processPayment] Sending POST request to /api/payments...');
       
       const response = await fetch('/api/payments', {
         method: 'POST',
@@ -1073,20 +1295,24 @@ function Students() {
         body: JSON.stringify(paymentPayload)
       });
 
-      console.log(`📡 [handleConfirmAddPayment] API Response status: ${response.status}`);
-      console.log(`📡 [handleConfirmAddPayment] Response headers:`, Object.fromEntries(response.headers.entries()));
+      console.log(`📡 [processPayment] API Response status: ${response.status}`);
+      console.log(`📡 [processPayment] Response headers:`, Object.fromEntries(response.headers.entries()));
       
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('❌ [handleConfirmAddPayment] API request failed:', errorData);
+        console.error('❌ [processPayment] API request failed:', errorData);
         throw new Error(errorData.error || `Failed to add payment (Status: ${response.status})`);
       }
 
       const responseData = await response.json();
-      console.log('✅ [handleConfirmAddPayment] API Response data:', responseData);
-      console.log('🎉 [handleConfirmAddPayment] Payment created successfully');
+      console.log('✅ [processPayment] API Response data:', responseData);
+      console.log('🎉 [processPayment] Payment created successfully');
 
-      setSnackbarMessage('Payment added successfully');
+      const successMessage = extendMembership && membershipExtensionDays > 0 
+        ? `Payment added successfully! Membership extended by ${membershipExtensionDays} days.`
+        : 'Payment added successfully';
+      
+      setSnackbarMessage(successMessage);
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setAddPaymentOpen(false);
@@ -1099,17 +1325,19 @@ function Students() {
         date: new Date().toISOString().split('T')[0],
         notes: ''
       };
-      console.log('🔄 [handleConfirmAddPayment] Resetting payment form data:', resetData);
+      console.log('🔄 [processPayment] Resetting payment form data:', resetData);
       setPaymentData(resetData);
+      setFeeConfig(null);
+      setMembershipExtensionDays(0);
       
       // Close action menu after successful payment
       handleActionClose();
       
-      console.log('🔄 [handleConfirmAddPayment] Refreshing data...');
+      console.log('🔄 [processPayment] Refreshing data...');
       fetchData();
     } catch (err) {
-      console.error('❌ [handleConfirmAddPayment] Error occurred during payment creation:', err);
-      console.error('🔍 [handleConfirmAddPayment] Error details:', {
+      console.error('❌ [processPayment] Error occurred during payment creation:', err);
+      console.error('🔍 [processPayment] Error details:', {
         message: err.message,
         stack: err.stack,
         studentId: selectedItemForAction?.id,
@@ -1119,7 +1347,65 @@ function Students() {
       handleApiError(err, 'Failed to add payment');
     } finally {
       setPaymentLoading(false);
-      console.log('🔄 [handleConfirmAddPayment] Payment loading state set to false');
+      console.log('🔄 [processPayment] Payment loading state set to false');
+    }
+  };
+
+  // Handle student click in seat history dialog
+  const handleStudentClick = async (event, studentId, studentName) => {
+    event.stopPropagation();
+    event.preventDefault();
+    
+    console.log('🔍 [Seat History] Clicked on student:', { id: studentId, name: studentName });
+    console.log('🔍 [Seat History] Available students:', students.map(s => ({ id: s.id, name: s.name })));
+    
+    // Find the student by ID first (most reliable), then by name as fallback
+    let student = students.find(s => s.id === studentId);
+    if (!student && studentName) {
+      student = students.find(s => s.name === studentName);
+      console.log('🔍 [Seat History] Student not found by ID, trying by name:', student);
+    }
+    
+    console.log('🔍 [Seat History] Found student:', student);
+    
+    if (student) {
+      console.log('✅ [Seat History] Opening student details for:', student.name);
+      // Set selected item and trigger view directly
+      setSelectedItemForAction(student);
+      setViewStudentData({ ...student });
+      
+      // Calculate total paid amount inline
+      try {
+        const response = await fetch(`/api/payments/student/${student.id}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const payments = await response.json();
+          const totalPaid = payments.reduce((sum, payment) => {
+            const amount = parseFloat(payment.amount);
+            return sum + (isNaN(amount) ? 0 : amount);
+          }, 0);
+          setViewStudentTotalPaid(totalPaid);
+        } else {
+          setViewStudentTotalPaid(0);
+        }
+      } catch (error) {
+        console.error('Error fetching payment data:', error);
+        setViewStudentTotalPaid(0);
+      }
+      
+      setViewStudentOpen(true);
+    } else {
+      // Student not found in current list, show a message
+      console.warn('⚠️ [Seat History] Student not found:', { id: studentId, name: studentName });
+      const identifier = studentName || `ID: ${studentId}`;
+      setSnackbarMessage(`Student "${identifier}" not found in current student list. They may have been deactivated or removed.`);
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
     }
   };
 
@@ -1683,6 +1969,37 @@ function Students() {
             />
           </Stack>
         )}
+        
+        {currentTab === 2 && (
+          <Stack spacing={2}>
+            <TextField
+              size="small"
+              label="Student Name"
+              value={studentNameFilter}
+              onChange={(e) => setStudentNameFilter(e.target.value)}
+              fullWidth
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Gender</InputLabel>
+              <Select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value)}
+                label="Gender"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="Contact"
+              value={contactFilter}
+              onChange={(e) => setContactFilter(e.target.value)}
+              fullWidth
+            />
+          </Stack>
+        )}
       </>
     );
 
@@ -1799,12 +2116,37 @@ function Students() {
                             textDecoration: 'underline'
                           }
                         }}
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           // Find the student by ID or name to set as selected item
                           const student = students.find(s => s.id === seat.studentId);
                           if (student) {
+                            // Set selected item and trigger view directly
                             setSelectedItemForAction(student);
-                            handleViewStudent();
+                            setViewStudentData({ ...student });
+                            
+                            // Calculate total paid amount inline
+                            fetch(`/api/payments/student/${student.id}`, {
+                              headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                                'Content-Type': 'application/json'
+                              }
+                            }).then(response => {
+                              if (response.ok) {
+                                return response.json();
+                              }
+                              return [];
+                            }).then(payments => {
+                              const totalPaid = payments.reduce((sum, payment) => {
+                                const amount = parseFloat(payment.amount);
+                                return sum + (isNaN(amount) ? 0 : amount);
+                              }, 0);
+                              setViewStudentTotalPaid(totalPaid);
+                            }).catch(() => {
+                              setViewStudentTotalPaid(0);
+                            });
+                            
+                            setViewStudentOpen(true);
                           }
                         }}
                       >
@@ -1901,9 +2243,34 @@ function Students() {
                         textDecoration: 'underline'
                       }
                     }}
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      // Set selected item and trigger view directly
                       setSelectedItemForAction(student);
-                      handleViewStudent();
+                      setViewStudentData({ ...student });
+                      
+                      // Calculate total paid amount inline
+                      fetch(`/api/payments/student/${student.id}`, {
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                          'Content-Type': 'application/json'
+                        }
+                      }).then(response => {
+                        if (response.ok) {
+                          return response.json();
+                        }
+                        return [];
+                      }).then(payments => {
+                        const totalPaid = payments.reduce((sum, payment) => {
+                          const amount = parseFloat(payment.amount);
+                          return sum + (isNaN(amount) ? 0 : amount);
+                        }, 0);
+                        setViewStudentTotalPaid(totalPaid);
+                      }).catch(() => {
+                        setViewStudentTotalPaid(0);
+                      });
+                      
+                      setViewStudentOpen(true);
                     }}
                   >
                     {student.id}
@@ -1939,9 +2306,34 @@ function Students() {
                           textDecoration: 'underline'
                         }
                       }}
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        // Set selected item and trigger view directly
                         setSelectedItemForAction(student);
-                        handleViewStudent();
+                        setViewStudentData({ ...student });
+                        
+                        // Calculate total paid amount inline
+                        fetch(`/api/payments/student/${student.id}`, {
+                          headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                            'Content-Type': 'application/json'
+                          }
+                        }).then(response => {
+                          if (response.ok) {
+                            return response.json();
+                          }
+                          return [];
+                        }).then(payments => {
+                          const totalPaid = payments.reduce((sum, payment) => {
+                            const amount = parseFloat(payment.amount);
+                            return sum + (isNaN(amount) ? 0 : amount);
+                          }, 0);
+                          setViewStudentTotalPaid(totalPaid);
+                        }).catch(() => {
+                          setViewStudentTotalPaid(0);
+                        });
+                        
+                        setViewStudentOpen(true);
                       }}
                     >
                       {student.name}
@@ -2039,7 +2431,8 @@ function Students() {
           variant={isMobile ? "fullWidth" : "standard"}
         >
           <Tab label="Seats View" />
-          <Tab label="Students View" />
+          <Tab label="Active Students" />
+          <Tab label="Inactive Students" />
         </Tabs>
       </Paper>
 
@@ -2049,6 +2442,7 @@ function Students() {
       {/* Content */}
       {currentTab === 0 && renderSeatsView()}
       {currentTab === 1 && renderStudentsView()}
+      {currentTab === 2 && renderStudentsView()}
 
       {/* Action Menu */}
       <Menu
@@ -2073,7 +2467,7 @@ function Students() {
           </MenuItem>
         ]}
         
-        {currentTab === 1 && selectedItemForAction && [ // Students View Actions
+        {currentTab === 1 && selectedItemForAction && [ // Active Students View Actions
           <MenuItem key="viewStudent" onClick={handleViewStudent}>
             <ListItemIcon>
               <VisibilityIcon fontSize="small" />
@@ -2105,11 +2499,39 @@ function Students() {
             <ListItemText>Seat Change History</ListItemText>
           </MenuItem>,
           <Divider key="divider" />,
-          <MenuItem key="remove" onClick={handleRemoveStudent} sx={{ color: 'error.main' }}>
+          <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
             <ListItemIcon>
               <DeleteIcon fontSize="small" color="error" />
             </ListItemIcon>
-            <ListItemText>Remove Student</ListItemText>
+            <ListItemText>Deactivate Student</ListItemText>
+          </MenuItem>
+        ]}
+
+        {currentTab === 2 && selectedItemForAction && [ // Deactivated Students View Actions
+          <MenuItem key="viewStudent" onClick={handleViewStudent}>
+            <ListItemIcon>
+              <VisibilityIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>View Student Details</ListItemText>
+          </MenuItem>,
+          <MenuItem key="paymentHistory" onClick={handlePaymentHistory}>
+            <ListItemIcon>
+              <HistoryIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Payment History</ListItemText>
+          </MenuItem>,
+          <MenuItem key="seatHistory" onClick={handleSeatHistory}>
+            <ListItemIcon>
+              <EventSeatIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Seat Change History</ListItemText>
+          </MenuItem>,
+          <Divider key="divider" />,
+          <MenuItem key="reactivate" onClick={handleReactivateStudent} sx={{ color: 'success.main' }}>
+            <ListItemIcon>
+              <CheckCircleIcon fontSize="small" color="success" />
+            </ListItemIcon>
+            <ListItemText>Reactivate Student</ListItemText>
           </MenuItem>
         ]}
       </Menu>
@@ -2265,7 +2687,61 @@ function Students() {
                     <TableRow key={index}>
                       <TableCell>
                         {seatHistoryContext?.contextTab === 0 
-                          ? (entry.student_name || 'N/A')
+                          ? (entry.student_name ? (
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                {/* Student Name - Clickable */}
+                                <Typography 
+                                  variant="body2" 
+                                  component="span"
+                                  sx={{ 
+                                    fontWeight: 'medium',
+                                    cursor: 'pointer',
+                                    color: 'primary.main',
+                                    display: 'inline-block',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    transition: 'all 0.2s ease',
+                                    '&:hover': {
+                                      textDecoration: 'underline',
+                                      backgroundColor: 'primary.light',
+                                      color: 'primary.contrastText'
+                                    }
+                                  }}
+                                  onClick={async (event) => {
+                                    await handleStudentClick(event, entry.student_id, entry.student_name);
+                                  }}
+                                >
+                                  {entry.student_name}
+                                </Typography>
+                                
+                                {/* Student ID - Clickable */}
+                                {entry.student_id && (
+                                  <Typography 
+                                    variant="caption" 
+                                    component="span"
+                                    sx={{ 
+                                      color: 'text.secondary',
+                                      cursor: 'pointer',
+                                      display: 'inline-block',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px',
+                                      fontSize: '0.7rem',
+                                      transition: 'all 0.2s ease',
+                                      '&:hover': {
+                                        textDecoration: 'underline',
+                                        backgroundColor: 'grey.200',
+                                        color: 'primary.main'
+                                      }
+                                    }}
+                                    onClick={async (event) => {
+                                      await handleStudentClick(event, entry.student_id, entry.student_name);
+                                    }}
+                                  >
+                                    ID: {entry.student_id}
+                                  </Typography>
+                                )}
+                              </Box>
+                            ) : 'N/A')
                           : (entry.seat_number || 'N/A')
                         }
                       </TableCell>
@@ -2443,6 +2919,35 @@ function Students() {
               onChange={(e) => setPaymentData({ ...paymentData, date: e.target.value })}
               InputLabelProps={{ shrink: true }}
             />
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={paymentData.notes}
+              onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })}
+            />
+            
+            {/* Membership Extension Information */}
+            {feeConfig && membershipExtensionDays > 0 && (
+              <Box sx={{ 
+                p: 2, 
+                bgcolor: 'info.light', 
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'info.main'
+              }}>
+                <Typography variant="body2" color="info.contrastText" sx={{ fontWeight: 'medium' }}>
+                  📅 Membership Extension Available
+                </Typography>
+                <Typography variant="body2" color="info.contrastText">
+                  Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
+                </Typography>
+                <Typography variant="body2" color="info.contrastText">
+                  Extension Days: {membershipExtensionDays} days
+                </Typography>
+              </Box>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -2453,10 +2958,20 @@ function Students() {
           <Button 
             variant="contained" 
             onClick={handleConfirmAddPayment}
-            disabled={!paymentData.amount || !paymentData.method}
+            disabled={!paymentData.amount || !paymentData.method || paymentLoading}
           >
             Add Payment
           </Button>
+          {feeConfig && membershipExtensionDays > 0 && paymentData.type === 'monthly_fee' && (
+            <Button 
+              variant="contained" 
+              onClick={handleConfirmAddPaymentWithMembership}
+              disabled={!paymentData.amount || !paymentData.method || paymentLoading}
+              startIcon={<CalendarTodayIcon />}
+            >
+              Add Payment & Extend {membershipExtensionDays} Days
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -2665,22 +3180,63 @@ function Students() {
         </DialogActions>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
-        <DialogTitle>Confirm Delete</DialogTitle>
+      {/* Deactivate Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onClose={() => {
+        setDeleteConfirmOpen(false);
+        handleActionClose(); // Close action menu when dialog is cancelled
+      }}>
+        <DialogTitle>Confirm Deactivation</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to remove student "{selectedItemForAction?.name}"? This action cannot be undone.
+            Are you sure you want to deactivate student "{selectedItemForAction?.name || 'Unknown'}"? 
+            This will remove their seat assignment and move them to the deactivated students list.
+            Their data will be preserved and they can be reactivated later.
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            Student ID: {selectedItemForAction?.id || 'N/A'}, Name: {selectedItemForAction?.name || 'N/A'}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+          <Button onClick={() => {
+            setDeleteConfirmOpen(false);
+            handleActionClose(); // Close action menu when cancelled
+          }}>Cancel</Button>
           <Button 
             variant="contained" 
             color="error"
-            onClick={confirmDeleteStudent}
+            onClick={confirmDeactivateStudent}
           >
-            Delete Student
+            Deactivate Student
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Reactivate Confirmation Dialog */}
+      <Dialog open={reactivateConfirmOpen} onClose={() => {
+        setReactivateConfirmOpen(false);
+        handleActionClose(); // Close action menu when dialog is cancelled
+      }}>
+        <DialogTitle>Confirm Reactivation</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to reactivate student "{selectedItemForAction?.name || 'Unknown'}"? 
+            This will move them back to the active students list.
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            Student ID: {selectedItemForAction?.id || 'N/A'}, Name: {selectedItemForAction?.name || 'N/A'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setReactivateConfirmOpen(false);
+            handleActionClose(); // Close action menu when cancelled
+          }}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            color="success"
+            onClick={confirmReactivateStudent}
+          >
+            Reactivate Student
           </Button>
         </DialogActions>
       </Dialog>
@@ -2695,6 +3251,8 @@ function Students() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+      
+      <Footer />
     </Box>
   );
 }

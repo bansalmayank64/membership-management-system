@@ -68,7 +68,7 @@ CREATE TABLE students (
     seat_number VARCHAR(20),
     membership_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     membership_till TIMESTAMP,
-    membership_status VARCHAR(30) CHECK (membership_status IN ('active','expired','suspended')) DEFAULT 'active',
+    membership_status VARCHAR(30) CHECK (membership_status IN ('active','expired','suspended','inactive')) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     modified_by INTEGER REFERENCES users(id)
@@ -82,6 +82,7 @@ CREATE TABLE payments (
     payment_mode VARCHAR(20) CHECK (payment_mode IN ('cash','online')) DEFAULT 'cash',
     payment_type VARCHAR(50) CHECK (payment_type IN ('monthly_fee','refund')) DEFAULT 'monthly_fee',
     description TEXT,
+    remarks TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     modified_by INTEGER REFERENCES users(id)
@@ -96,6 +97,16 @@ CREATE TABLE expenses (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     modified_by INTEGER REFERENCES users(id)
+);
+
+-- Student fees configuration table for membership extension
+CREATE TABLE student_fees_config (
+    id SERIAL PRIMARY KEY,
+    gender VARCHAR(10) NOT NULL CHECK (gender IN ('male', 'female')),
+    monthly_fees NUMERIC(10,2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(gender)
 );
 
 -- History tables to track all changes
@@ -302,3 +313,9 @@ INSERT INTO users (username, password_hash, role, permissions) VALUES
 ('admin', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj92OBLKdZy6', 'admin', 
  '{"canManageUsers": true, "canImportData": true, "canExportData": true, "canDeleteData": true, "canManageSeats": true, "canManageStudents": true, "canManagePayments": true, "canManageExpenses": true}')
 ON CONFLICT (username) DO NOTHING;
+
+-- Insert default fee configuration for membership extension
+INSERT INTO student_fees_config (gender, monthly_fees) VALUES 
+('male', 600.00),
+('female', 550.00)
+ON CONFLICT (gender) DO UPDATE SET monthly_fees = EXCLUDED.monthly_fees;

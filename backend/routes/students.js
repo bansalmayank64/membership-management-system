@@ -953,4 +953,62 @@ router.get('/:id/history', async (req, res) => {
   }
 });
 
+// GET /api/students/fee-config/:gender - Get fee configuration for a gender
+router.get('/fee-config/:gender', async (req, res) => {
+  const requestId = `student-fee-config-${Date.now()}`;
+  const startTime = Date.now();
+  
+  try {
+    console.log(`💰 [${new Date().toISOString()}] Starting GET /api/students/fee-config/:gender [${requestId}]`);
+    
+    const { gender } = req.params;
+    console.log(`📊 Request params: gender="${gender}"`);
+    
+    // Validate gender parameter
+    if (!gender || !['male', 'female'].includes(gender.toLowerCase())) {
+      console.log('❌ Validation failed: Invalid gender parameter');
+      return res.status(400).json({ 
+        error: 'Valid gender (male/female) is required',
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    console.log('🔍 Step 1: Fetching fee configuration from database...');
+    const query = 'SELECT * FROM student_fees_config WHERE gender = $1';
+    const result = await pool.query(query, [gender.toLowerCase()]);
+    
+    if (result.rows.length === 0) {
+      console.log('❌ Fee configuration not found for gender:', gender);
+      return res.status(404).json({ 
+        error: `Fee configuration not found for gender: ${gender}`,
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const feeConfig = result.rows[0];
+    console.log('✅ Fee configuration found:', feeConfig);
+    
+    const totalTime = Date.now() - startTime;
+    console.log(`🎯 [${new Date().toISOString()}] GET /api/students/fee-config/:gender completed successfully in ${totalTime}ms [${requestId}]`);
+    
+    res.json(feeConfig);
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`❌ [${new Date().toISOString()}] GET /api/students/fee-config/:gender FAILED after ${totalTime}ms [${requestId}]`);
+    console.error('💥 Error details:', {
+      message: error.message,
+      stack: error.stack,
+      gender: req.params.gender
+    });
+    
+    res.status(500).json({ 
+      error: 'Failed to fetch fee configuration',
+      requestId: requestId,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;

@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+// import LanguageSwitcher from './LanguageSwitcher'; // Disabled for now
+import { useAuth } from '../contexts/AuthContext';
 import { Link, useLocation } from 'react-router-dom';
 import {
   AppBar,
@@ -32,9 +35,6 @@ import {
   AccountCircle as AccountIcon,
   AdminPanelSettings as AdminIcon
 } from '@mui/icons-material';
-import { useTranslation } from 'react-i18next';
-import LanguageSwitcher from './LanguageSwitcher';
-import { useAuth } from '../contexts/AuthContext';
 
 function Navigation() {
   const { t } = useTranslation();
@@ -153,7 +153,7 @@ function Navigation() {
             </Typography>
           </Box>
 
-          <LanguageSwitcher />
+          {/* <LanguageSwitcher /> */} {/* Disabled for now */}
 
           {isAuthenticated && (
             <>

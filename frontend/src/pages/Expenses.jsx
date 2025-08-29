@@ -56,6 +56,7 @@ import {
   Download as DownloadIcon
 } from '@mui/icons-material';
 import { pageStyles } from '../styles/commonStyles';
+import Footer from '../components/Footer';
 import api from '../services/api';
 
 function Expenses() {
@@ -989,6 +990,8 @@ function Expenses() {
           <AddIcon />
         </Fab>
       )}
+      
+      <Footer />
     </Container>
   );
 }

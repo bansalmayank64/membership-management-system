@@ -18,7 +18,8 @@ router.get('/', async (req, res) => {
       SELECT 
         p.*,
         s.name as student_name,
-        s.seat_number
+        s.seat_number,
+        s.contact_number
       FROM payments p
       LEFT JOIN students s ON p.student_id = s.id
       ORDER BY p.payment_date DESC
@@ -85,7 +86,8 @@ router.get('/student/:studentId', async (req, res) => {
       SELECT 
         p.*,
         s.name as student_name,
-        s.seat_number
+        s.seat_number,
+        s.contact_number
       FROM payments p
       LEFT JOIN students s ON p.student_id = s.id
       WHERE p.student_id = $1
@@ -140,7 +142,8 @@ router.post('/', async (req, res) => {
       payment_mode,
       payment_type,
       remarks,
-      modified_by
+      modified_by,
+      extend_membership = false // New field for membership extension
     } = req.body;
     
     console.log('🔍 Step 1: Validating payment data with database constraints...');
@@ -223,8 +226,8 @@ router.post('/', async (req, res) => {
       // Normalize payment mode to lowercase for database consistency
       const normalizedPaymentMode = payment_mode.toLowerCase();
       
-      console.log('🔍 Step 3: Verifying student exists...');
-      const studentCheckQuery = 'SELECT id, name FROM students WHERE id = $1';
+      console.log('🔍 Step 3: Verifying student exists and getting details...');
+      const studentCheckQuery = 'SELECT id, name, sex, membership_till FROM students WHERE id = $1';
       const studentCheck = await client.query(studentCheckQuery, [student_id]);
       
       if (studentCheck.rows.length === 0) {
@@ -233,7 +236,44 @@ router.post('/', async (req, res) => {
       }
       
       const student = studentCheck.rows[0];
-      console.log('✅ Student verified:', { id: student.id, name: student.name });
+      console.log('✅ Student verified:', { id: student.id, name: student.name, gender: student.sex });
+
+      // Step 3.5: Handle membership extension if requested
+      let membershipExtensionDays = 0;
+      if (extend_membership && payment_type === 'monthly_fee') {
+        console.log('📅 Step 3.5: Processing membership extension...');
+        
+        // Get fee configuration for this gender
+        const feeConfigQuery = 'SELECT monthly_fees FROM student_fees_config WHERE gender = $1';
+        const feeConfigResult = await client.query(feeConfigQuery, [student.sex]);
+        
+        if (feeConfigResult.rows.length > 0) {
+          const monthlyFees = parseFloat(feeConfigResult.rows[0].monthly_fees);
+          const paymentAmount = Math.abs(parseFloat(amount));
+          
+          // Calculate days to extend: (payment_amount / monthly_fees) * 30 days
+          membershipExtensionDays = Math.floor((paymentAmount / monthlyFees) * 30);
+          
+          console.log(`💰 Monthly fees for ${student.sex}: ₹${monthlyFees}`);
+          console.log(`💳 Payment amount: ₹${paymentAmount}`);
+          console.log(`📅 Calculated extension days: ${membershipExtensionDays}`);
+          
+          if (membershipExtensionDays > 0) {
+            // Calculate new membership end date
+            const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+            const newMembershipTill = new Date(currentMembershipTill);
+            newMembershipTill.setDate(newMembershipTill.getDate() + membershipExtensionDays);
+            
+            // Update student's membership_till
+            const updateMembershipQuery = 'UPDATE students SET membership_till = $1 WHERE id = $2';
+            await client.query(updateMembershipQuery, [newMembershipTill, student_id]);
+            
+            console.log(`✅ Extended membership by ${membershipExtensionDays} days until: ${newMembershipTill.toISOString()}`);
+          }
+        } else {
+          console.warn(`⚠️ No fee configuration found for gender: ${student.sex}`);
+        }
+      }
 
       console.log('💾 Step 4: Processing payment amount based on type...');
       
@@ -255,17 +295,16 @@ router.post('/', async (req, res) => {
           student_id, amount, payment_date, payment_mode, payment_type, description, modified_by,
           created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `;
       
       const paymentValues = [
         student_id, 
         finalAmount, 
-        payment_date, 
         normalizedPaymentMode, 
         payment_type,
-        remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}`, // Default description if remarks empty
+        remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : ''}`, // Default description with extension info
         req.user?.userId || req.user?.id || 1
       ];
       

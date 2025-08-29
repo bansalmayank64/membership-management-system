@@ -32,8 +32,7 @@ router.get('/', async (req, res) => {
         CASE 
           WHEN st.id IS NOT NULL AND st.membership_till IS NOT NULL THEN
             CASE 
-              WHEN st.membership_till < NOW() THEN true 
-              WHEN st.membership_till <= NOW() + INTERVAL '7 days' THEN true
+              WHEN st.membership_till <= NOW() + INTERVAL '7 days' AND st.membership_till > NOW() THEN true
               ELSE false 
             END
           ELSE false 
@@ -41,8 +40,8 @@ router.get('/', async (req, res) => {
         -- Enhanced occupancy logic with better validation
         CASE 
           WHEN st.id IS NOT NULL 
-            AND st.membership_status = 'active'
-            AND (st.membership_till IS NULL OR st.membership_till >= NOW()) THEN true
+            AND st.membership_status != 'inactive'
+            AND (st.membership_till IS NULL OR st.membership_till >= NOW() - INTERVAL '7 days') THEN true
           ELSE false 
         END as is_truly_occupied,
         -- Additional computed fields for better frontend handling
@@ -102,7 +101,7 @@ router.get('/', async (req, res) => {
       contactNumber: row.contact_number,
       membershipExpiry: row.membership_till ? row.membership_till.toISOString().split('T')[0] : null,
       lastPayment: row.last_payment_date ? row.last_payment_date.toISOString().split('T')[0] : null,
-      expiring: row.expiring && row.is_truly_occupied, // Only show expiring if truly occupied
+      expiring: row.expiring, // Show expiring status directly from calculation
       removed: false, // Status field removed - seats are either present or deleted
       maintenance: false, // Status field removed - maintenance should be handled separately
       membershipStatus: row.membership_status, // Add membership status for better validation
