@@ -39,7 +39,6 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
-// Download full data report (XLSX, all tables, presentable)
 router.get('/full-report', auth, requireAdmin, async (req, res) => {
   try {
     // Get all table names from the database metadata
@@ -272,6 +271,17 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
     return null;
   };
 
+  // Helper to normalize gender/sex values (flexible input: M/F/Male/Female in any case)
+  const parseGender = (val) => {
+    if (val === null || val === undefined) return null;
+    const s = String(val).trim().toLowerCase();
+    if (!s) return null;
+    // Accept values that start with m -> male, f -> female
+    if (s === 'm' || s === 'male' || s.startsWith('m')) return 'male';
+    if (s === 'f' || s === 'female' || s.startsWith('f')) return 'female';
+    return null;
+  };
+
   // Column mapping definitions for flexible import
   const memberColumnMappings = {
     id: ['ID', 'id', 'Id', 'Student_ID', 'Student ID', 'student_id', 'StudentID'],
@@ -393,10 +403,11 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
         const memberName = getColumnValue(member, memberColumnMappings.name) || 'Unknown';
         console.log(`👤 Processing member ${i + 1}/${membersData.length}: ${memberName}`);
         
-        // Extract values using flexible column mapping
-        const memberId = getColumnValue(member, memberColumnMappings.id);
-        const memberSex = getColumnValue(member, memberColumnMappings.sex);
-        const seatNumber = getColumnValue(member, memberColumnMappings.seat_number);
+  // Extract values using flexible column mapping
+  const memberId = getColumnValue(member, memberColumnMappings.id);
+  const memberSexRaw = getColumnValue(member, memberColumnMappings.sex);
+  const memberSex = parseGender(memberSexRaw); // normalized to 'male'|'female' or null
+  const seatNumber = getColumnValue(member, memberColumnMappings.seat_number);
         const membershipStatus = getColumnValue(member, memberColumnMappings.membership_status);
         
         // Validate required fields - skip invalid records instead of aborting
@@ -436,7 +447,7 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
           (memberName || '').toString().substring(0, 100).toUpperCase(), // Store in uppercase
           (getColumnValue(member, memberColumnMappings.father_name) || '').toString().substring(0, 100).toUpperCase(), // Store in uppercase
           (getColumnValue(member, memberColumnMappings.contact_number) || '').toString().substring(0, 20), // Respect VARCHAR(20) constraint
-          (memberSex || '').toString().toLowerCase() === 'male' ? 'male' : 'female', // Ensure valid enum
+          memberSex || null, // Use normalized gender if present, otherwise NULL (no restriction)
           (seatNumber || '').toString().substring(0, 20), // Convert to string first, then respect VARCHAR(20) constraint
           parseExcelDate(getColumnValue(member, memberColumnMappings.membership_date)),
           parseExcelDate(getColumnValue(member, memberColumnMappings.membership_till)),
@@ -450,7 +461,7 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
         if (seatNumber && studentResult.rows[0]) {
           const cleanSeatNumber = String(seatNumber).substring(0, 20);
           // Properly map gender values to database constraints
-          const studentGender = (memberSex || '').toString().toLowerCase() === 'M' ? 'male' : 'female';
+          const studentGender = memberSex || null; // 'male'|'female' or null
           console.log(`🪑 Assigning seat ${cleanSeatNumber} to student ${studentResult.rows[0].id} (${studentGender})`);
           
           // First, check if seat exists
@@ -458,13 +469,13 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
             SELECT seat_number, occupant_sex FROM seats WHERE seat_number = $1
           `, [cleanSeatNumber]);
           
-          if (seatExistsResult.rows.length === 0) {
-            // Seat doesn't exist, create it with appropriate gender restriction
-            console.log(`🆕 Creating new seat ${cleanSeatNumber} for ${studentGender} student`);
+            if (seatExistsResult.rows.length === 0) {
+            // Seat doesn't exist, create it with appropriate gender restriction (or NULL if unknown)
+            console.log(`🆕 Creating new seat ${cleanSeatNumber} with occupant_sex=${studentGender}`);
             await client.query(`
               INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by)
               VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)
-            `, [cleanSeatNumber, studentGender, req.user.userId || req.user.id]);
+            `, [cleanSeatNumber, studentGender || null, req.user.userId || req.user.id]);
             
             console.log(`✅ Seat ${cleanSeatNumber} created successfully`);
           } else {
