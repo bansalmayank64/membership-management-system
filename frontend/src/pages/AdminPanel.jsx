@@ -91,6 +91,10 @@ function AdminPanel() {
     seatNumber: '',
     occupantSex: ''
   });
+  // Seat range support
+  const [seatRangeMode, setSeatRangeMode] = useState(false);
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
 
   // Import state
   const [importFile, setImportFile] = useState(null);
@@ -408,7 +412,12 @@ function AdminPanel() {
   const handleSeatDialog = (type, seat = null) => {
     setDialogType(type === 'add' ? 'addSeat' : 'editSeat');
     setSelectedSeat(seat);
-    if (seat) {
+  // reset range inputs when opening dialog
+  setSeatRangeMode(false);
+  setRangeStart('');
+  setRangeEnd('');
+
+  if (seat) {
       setSeatForm({
         seatNumber: seat.seat_number,
         occupantSex: seat.occupant_sex || ''
@@ -440,26 +449,60 @@ function AdminPanel() {
 
     setLoading(true);
     try {
+      if (!selectedSeat && seatRangeMode) {
+        // Add a numeric range of seats (inclusive)
+        const start = parseInt(rangeStart, 10);
+        const end = parseInt(rangeEnd, 10);
+        if (isNaN(start) || isNaN(end) || start <= 0 || end < start) {
+          setMessage({ type: 'error', text: 'Please provide a valid numeric start and end (start <= end).' });
+          setLoading(false);
+          return;
+        }
+
+        let added = 0;
+        for (let n = start; n <= end; n++) {
+          const payload = { seatNumber: String(n), occupantSex: seatForm.occupantSex };
+          const resp = await fetch(`/api/admin/seats`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to add seat ${n}`);
+          }
+          added++;
+        }
+
+        setMessage({ type: 'success', text: `Added ${added} seats (${start} to ${end}) successfully.` });
+        setDialogOpen(false);
+        fetchSeats();
+        setLoading(false);
+        return;
+      }
+
+      // Single seat add/update
       const url = selectedSeat 
-  ? `/api/admin/seats/${selectedSeat.seat_number}`
-  : `/api/admin/seats`;
-      
+        ? `/api/admin/seats/${selectedSeat.seat_number}`
+        : `/api/admin/seats`;
       const method = selectedSeat ? 'PUT' : 'POST';
-      
+  const bodyPayload = selectedSeat ? { ...seatForm } : { seatNumber: seatForm.seatNumber, occupantSex: seatForm.occupantSex };
+
       const response = await fetch(url, {
         method,
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(seatForm)
+        body: JSON.stringify(bodyPayload)
       });
 
       if (response.ok) {
-        setMessage({ 
-          type: 'success', 
-          text: `Seat ${selectedSeat ? 'updated' : 'added'} successfully!` 
-        });
+        setMessage({ type: 'success', text: `Seat ${selectedSeat ? 'updated' : 'added'} successfully!` });
         setDialogOpen(false);
         fetchSeats();
       } else {
@@ -1257,15 +1300,47 @@ function AdminPanel() {
           </DialogTitle>
           <DialogContent>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-              <TextField
-                label="Seat Number"
-                value={seatForm.seatNumber}
-                onChange={(e) => setSeatForm({ ...seatForm, seatNumber: e.target.value })}
-                fullWidth
-                required
-                disabled={!!selectedSeat}
-                helperText="Examples: 1, 2, 5-A, 5-B, 10-A"
-              />
+              <Box sx={{ mb: 2 }}>
+                <FormControlLabel
+                  control={<Switch checked={seatRangeMode} onChange={(e) => setSeatRangeMode(e.target.checked)} />}
+                  label="Add range"
+                />
+
+                {!seatRangeMode ? (
+                  <TextField
+                    label="Seat Number"
+                    value={seatForm.seatNumber}
+                    onChange={(e) => setSeatForm({ ...seatForm, seatNumber: e.target.value })}
+                    fullWidth
+                    required
+                    disabled={!!selectedSeat}
+                    helperText="Examples: 1, 2, 5-A, 5-B, 10-A"
+                  />
+                ) : (
+                  <Grid container spacing={2} sx={{ mt: 1 }}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        label="Start (numeric)"
+                        value={rangeStart}
+                        onChange={(e) => setRangeStart(e.target.value)}
+                        type="number"
+                        fullWidth
+                        required
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        label="End (numeric)"
+                        value={rangeEnd}
+                        onChange={(e) => setRangeEnd(e.target.value)}
+                        type="number"
+                        fullWidth
+                        required
+                      />
+                    </Grid>
+                  </Grid>
+                )}
+              </Box>
               
               {/* Show warning if seat is occupied */}
               {dialogType === 'editSeat' && selectedSeat && selectedSeat.status === 'occupied' && selectedSeat.student_name && (
@@ -1302,8 +1377,8 @@ function AdminPanel() {
               onClick={handleSaveSeat} 
               variant="contained"
               disabled={
-                loading || 
-                !seatForm.seatNumber || 
+                loading ||
+                (dialogType === 'addSeat' && (seatRangeMode ? (!rangeStart || !rangeEnd) : !seatForm.seatNumber)) ||
                 (dialogType === 'editSeat' && selectedSeat && selectedSeat.status === 'occupied' && selectedSeat.student_name)
               }
             >
