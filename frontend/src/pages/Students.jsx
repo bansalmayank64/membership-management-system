@@ -621,12 +621,30 @@ function Students() {
       );
       
       data = activeStudents.map(student => {
+        // Compute expiry flags using IST-adjusted view (consistent with Seats view)
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        let membershipTillIST = null;
+        if (student.membership_till) {
+          const raw = new Date(student.membership_till);
+          if (!isNaN(raw.getTime())) {
+            membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
+          }
+        }
+        const now = new Date();
+        const sevenDaysFromNow = new Date();
+        sevenDaysFromNow.setDate(now.getDate() + 7);
+
+        const isExpired = membershipTillIST ? (membershipTillIST < now) : true; // no end date => expired
+        const isExpiring = membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false;
+
         const processedStudent = {
           ...student,
           status: student.seat_number ? 'assigned' : 'unassigned',
           gender: student.sex,
           // Add consistent property for easier access
-          seatNumber: student.seat_number
+          seatNumber: student.seat_number,
+          expiring: isExpiring,
+          expired: isExpired
         };
         
         // Log student processing
@@ -2126,6 +2144,7 @@ function Students() {
               >
                 <MenuItem value="">All</MenuItem>
                 <MenuItem value="assigned">Assigned</MenuItem>
+                <MenuItem value="expiring">Expiring</MenuItem>
                 <MenuItem value="unassigned">Unassigned</MenuItem>
                 <MenuItem value="expired">Expired</MenuItem>
               </Select>
@@ -2430,7 +2449,26 @@ function Students() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {filteredData.filter(student => student && student.id).map((student) => (
+          {filteredData.filter(student => student && student.id).map((student) => {
+            // Compute IST-adjusted membership expiry flags so UI matches Seats view behavior
+            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+            const now = new Date();
+            const sevenDaysFromNow = new Date();
+            sevenDaysFromNow.setDate(now.getDate() + 7);
+            let membershipTillIST = null;
+            if (student.membership_till) {
+              const raw = new Date(student.membership_till);
+              if (!isNaN(raw.getTime())) {
+                membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
+              }
+            }
+            const isExpired = membershipTillIST ? (membershipTillIST < now) : true; // no end date => treat as expired
+            const isExpiring = membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false;
+
+            // Determine chip color similar to Seats view
+            const seatChipColor = student.seat_number ? (isExpired ? 'error' : (isExpiring ? 'warning' : 'success')) : 'default';
+
+            return (
             <TableRow key={student.id}>
               <TableCell sx={{ 
                 position: isMobile ? 'sticky' : 'static',
@@ -2484,7 +2522,7 @@ function Students() {
                   <Chip 
                     icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
                     label={student.seat_number || 'Unassigned'} 
-                    color={student.seat_number ? 'success' : 'error'}
+                    color={seatChipColor}
                     size="small"
                     onClick={!student.seat_number && student.membership_status !== 'inactive' ? (event) => {
                       event.stopPropagation();
@@ -2561,7 +2599,10 @@ function Students() {
                   {student.membership_till && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <AccessTimeIcon sx={{ color: 'grey.600', fontSize: 16 }} />
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography 
+                        variant="caption" 
+                        sx={{ color: isExpired ? 'error.main' : (isExpiring ? 'warning.main' : 'text.secondary') }}
+                      >
                         Until: {formatDateForDisplay(student.membership_till)}
                       </Typography>
                     </Box>
@@ -2587,7 +2628,8 @@ function Students() {
                 </IconButton>
               </TableCell>
             </TableRow>
-          ))}
+          );
+          })}
         </TableBody>
       </Table>
     </TableContainer>

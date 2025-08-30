@@ -21,6 +21,23 @@ import {
   Divider
 } from '@mui/material';
 
+// Local helper to format dates to IST for display
+const formatDateForDisplay = (dateString) => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'Asia/Kolkata'
+    }).replace(/ /g, '-');
+  } catch (err) {
+    return 'N/A';
+  }
+};
+
 function StudentProfile() {
   const { seatNumber } = useParams();
   const [student, setStudent] = useState(null);
@@ -57,8 +74,8 @@ function StudentProfile() {
             <Typography variant="subtitle1">Father's Name: {student.father_name}</Typography>
           </Grid>
           <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1">Start Date: {student.membership_date}</Typography>
-            <Typography variant="subtitle1">Membership Till: {student.membership_till}</Typography>
+            <Typography variant="subtitle1">Start Date: {formatDateForDisplay(student.membership_date)}</Typography>
+            <Typography variant="subtitle1">Membership Till: {formatDateForDisplay(student.membership_till)}</Typography>
             <Typography variant="subtitle1">Total Paid: ₹{student.total_paid}</Typography>
             <Typography variant="subtitle1">Last Payment: {student.last_payment_date}</Typography>
           </Grid>

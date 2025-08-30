@@ -92,6 +92,7 @@ router.get('/with-unassigned-seats', async (req, res) => {
         'student' as record_type
       FROM students s
       LEFT JOIN seats ON s.seat_number = seats.seat_number
+      where s.status = 'active'
       ORDER BY s.created_at DESC
     `;
     

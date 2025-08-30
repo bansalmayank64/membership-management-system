@@ -248,26 +248,36 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
 
   // Helper function to parse Excel dates
   const parseExcelDate = (value) => {
-    if (!value) return null;
-    
+    if (value === null || value === undefined) return null;
+
+    // We'll treat all incoming Excel dates as being in IST (UTC+5:30).
+    // Convert the parsed date/time (whatever the source) from IST to UTC before returning.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5.5 hours in ms
+
     // If it's already a Date object
-    if (value instanceof Date) return value;
-    
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return new Date(t - IST_OFFSET_MS);
+    }
+
     // If it's a string that looks like a date
     if (typeof value === 'string') {
       const parsed = new Date(value);
-      if (!isNaN(parsed.getTime())) return parsed;
+      if (!isNaN(parsed.getTime())) {
+        return new Date(parsed.getTime() - IST_OFFSET_MS);
+      }
     }
-    
+
     // If it's a number (Excel serial date)
     if (typeof value === 'number' && value > 1) {
       // Excel date serial number (days since January 1, 1900)
       // Note: Excel incorrectly treats 1900 as a leap year, so we need to adjust
-      const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
-      const date = new Date(excelEpoch.getTime() + (value * 24 * 60 * 60 * 1000));
-      return date;
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // use UTC epoch for consistency
+      const dateUtc = new Date(excelEpoch.getTime() + (value * 24 * 60 * 60 * 1000));
+      // The computed dateUtc represents the date in local terms of the Excel serial; treat it as IST origin and convert to UTC
+      return new Date(dateUtc.getTime() - IST_OFFSET_MS);
     }
-    
+
     return null;
   };
 

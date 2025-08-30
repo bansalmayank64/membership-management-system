@@ -32,7 +32,8 @@ router.get('/', async (req, res) => {
         CASE 
           WHEN st.id IS NOT NULL AND st.membership_till IS NOT NULL THEN
             CASE 
-              WHEN st.membership_till <= NOW() + INTERVAL '7 days' AND st.membership_till > NOW() THEN true
+              -- Compare membership_till in IST by adding 5 hours 30 minutes before comparing to NOW()
+              WHEN (st.membership_till + INTERVAL '5 hours 30 minutes') <= NOW() + INTERVAL '7 days' AND (st.membership_till + INTERVAL '5 hours 30 minutes') > NOW() THEN true
               ELSE false 
             END
           ELSE false 
@@ -46,7 +47,7 @@ router.get('/', async (req, res) => {
         END as is_truly_occupied,
         -- Additional computed fields for better frontend handling
         CASE 
-          WHEN st.id IS NOT NULL AND st.membership_till IS NOT NULL AND st.membership_till < NOW() THEN true
+          WHEN st.id IS NOT NULL AND st.membership_till IS NOT NULL AND (st.membership_till + INTERVAL '5 hours 30 minutes') < NOW() THEN true
           ELSE false
         END as membership_expired,
         CASE 
@@ -99,8 +100,8 @@ router.get('/', async (req, res) => {
       gender: row.student_sex,
       studentId: row.student_id,
       contactNumber: row.contact_number,
-      membershipExpiry: row.membership_till ? row.membership_till.toISOString().split('T')[0] : null,
-      lastPayment: row.last_payment_date ? row.last_payment_date.toISOString().split('T')[0] : null,
+  membershipExpiry: row.membership_till ? new Date(row.membership_till.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0] : null,
+  lastPayment: row.last_payment_date ? new Date(row.last_payment_date.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0] : null,
       expiring: row.expiring, // Show expiring status directly from calculation
       removed: false, // Status field removed - seats are either present or deleted
       maintenance: false, // Status field removed - maintenance should be handled separately
