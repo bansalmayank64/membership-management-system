@@ -23,9 +23,11 @@ import {
   CardContent,
   Chip
 } from '@mui/material';
-import { Refresh as RefreshIcon } from '@mui/icons-material';
+import { Refresh as RefreshIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import { useAuth } from '../contexts/AuthContext';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
 import api from '../services/api';
 
@@ -39,7 +41,8 @@ const convertToIST = (dateString) => {
 };
 
 // PaymentCard component for mobile view
-const PaymentCard = ({ payment }) => {
+const PaymentCard = ({ payment, onDelete }) => {
+  const { user } = useAuth();
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     try {
@@ -106,9 +109,16 @@ const PaymentCard = ({ payment }) => {
               • {payment.payment_type || 'fee'}
             </Typography>
           </Box>
-          <Typography variant="caption" color="text.secondary">
-            📅 {formatDate(payment.payment_date)}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              📅 {formatDate(payment.payment_date)}
+            </Typography>
+            {user && user.role === 'admin' && (
+              <IconButton size="small" color="error" onClick={() => onDelete && onDelete(payment.id)}>
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            )}
+          </Box>
         </Box>
       </CardContent>
     </Card>
@@ -122,13 +132,28 @@ function Payments() {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { user } = useAuth();
+  // Students list for Add Payment dropdown
+  const [students, setStudents] = useState([]);
+  const [addPaymentOpen, setAddPaymentOpen] = useState(false);
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [paymentDataLocal, setPaymentDataLocal] = useState({ amount: '', method: 'cash', type: 'monthly_fee', date: new Date().toISOString().split('T')[0], notes: '' });
+  const [paymentLoadingLocal, setPaymentLoadingLocal] = useState(false);
+  const [feeConfig, setFeeConfig] = useState(null);
+  const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 15 : 25);
   const [filters, setFilters] = useState({
     seatNumber: '',
+    studentName: '',
+    studentId: '',
     startDate: '',
     endDate: ''
   });
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [paymentToDelete, setPaymentToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Global error handler for API calls
   const handleApiError = (error, fallbackMessage = 'An error occurred') => {
@@ -141,7 +166,26 @@ function Payments() {
 
   useEffect(() => {
     fetchPayments();
+    // Prefetch students for dropdown
+    fetchStudentsForDropdown();
   }, []);
+
+  const fetchStudentsForDropdown = async () => {
+    try {
+      const resp = await fetch(`/api/students/with-unassigned-seats`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setStudents((data && data.students) || []);
+    } catch (err) {
+      // ignore silently
+      console.warn('Failed to load students for dropdown', err);
+    }
+  };
 
   const fetchPayments = async () => {
     setLoading(true);
@@ -172,6 +216,10 @@ function Payments() {
   const filteredPayments = payments?.filter(payment => {
     const matchesSeat = !filters.seatNumber || 
       String(payment.seat_number).toLowerCase().includes(filters.seatNumber.toLowerCase());
+    const matchesStudentName = !filters.studentName || 
+      String(payment.student_name || '').toLowerCase().includes(filters.studentName.toLowerCase());
+    const matchesStudentId = !filters.studentId || 
+      String(payment.student_id || '').toLowerCase().includes(filters.studentId.toLowerCase());
     
     // Convert payment date to IST for filtering
     const paymentDate = new Date(payment.payment_date);
@@ -184,7 +232,7 @@ function Payments() {
     const afterStart = !startDateIST || paymentDateIST >= startDateIST;
     const beforeEnd = !endDateIST || paymentDateIST <= endDateIST;
     
-    return matchesSeat && afterStart && beforeEnd;
+  return matchesSeat && matchesStudentName && matchesStudentId && afterStart && beforeEnd;
   })
   // Sort by payment_date - latest first (descending order)
   .sort((a, b) => {
@@ -221,12 +269,164 @@ function Payments() {
     return `₹${numAmount.toLocaleString()}`;
   };
 
+  // Open Add Payment dialog
+  const handleOpenAddPayment = () => {
+    setSelectedStudentId('');
+    setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: new Date().toISOString().split('T')[0], notes: '' });
+    setFeeConfig(null);
+    setMembershipExtensionDays(0);
+    setAddPaymentOpen(true);
+  };
+
+  // When student selected, fetch fee config to compute extension days
+  const handleStudentSelect = async (studentId) => {
+    setSelectedStudentId(studentId);
+    const student = students.find(s => s.id === studentId);
+    if (!student || !student.sex) {
+      setFeeConfig(null);
+      setMembershipExtensionDays(0);
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/students/fee-config/${student.sex}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!resp.ok) {
+        setFeeConfig(null);
+        setMembershipExtensionDays(0);
+        return;
+      }
+      const cfg = await resp.json();
+      setFeeConfig(cfg);
+      // compute membership extension days if amount present
+      const amount = parseFloat(paymentDataLocal.amount || 0);
+      if (amount > 0 && cfg && cfg.monthly_fees) {
+        const days = Math.floor((amount / cfg.monthly_fees) * 30);
+        setMembershipExtensionDays(days);
+      } else {
+        setMembershipExtensionDays(0);
+      }
+    } catch (err) {
+      setFeeConfig(null);
+      setMembershipExtensionDays(0);
+    }
+  };
+
+  // Update amount and recompute extension
+  const handleLocalAmountChange = (val) => {
+    setPaymentDataLocal(prev => ({ ...prev, amount: val }));
+    const amount = parseFloat(val || 0);
+    if (amount > 0 && feeConfig && feeConfig.monthly_fees) {
+      const days = Math.floor((amount / feeConfig.monthly_fees) * 30);
+      setMembershipExtensionDays(days);
+    } else {
+      setMembershipExtensionDays(0);
+    }
+  };
+
+  const processLocalPayment = async (extendMembership = false) => {
+    if (!selectedStudentId) {
+      setError('Please select a student');
+      return;
+    }
+    // basic validation
+    if (!paymentDataLocal.amount || isNaN(paymentDataLocal.amount) || parseFloat(paymentDataLocal.amount) <= 0) {
+      setError('Valid payment amount is required');
+      return;
+    }
+
+    const payload = {
+      student_id: selectedStudentId,
+      amount: parseFloat(paymentDataLocal.amount),
+      payment_date: paymentDataLocal.date,
+      payment_mode: paymentDataLocal.method,
+      payment_type: paymentDataLocal.type,
+      remarks: paymentDataLocal.notes || '',
+      extend_membership: extendMembership
+    };
+
+    try {
+      setPaymentLoadingLocal(true);
+      const resp = await fetch('/api/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to add payment');
+      }
+      // success
+      setAddPaymentOpen(false);
+      setSelectedStudentId('');
+      setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: new Date().toISOString().split('T')[0], notes: '' });
+      setFeeConfig(null);
+      setMembershipExtensionDays(0);
+      fetchPayments();
+    } catch (err) {
+      setError(err.message || 'Failed to add payment');
+    } finally {
+      setPaymentLoadingLocal(false);
+    }
+  };
+
   const getAmountStyle = (amount) => {
     const numAmount = Number(amount) || 0;
     return {
       color: numAmount < 0 ? theme.palette.error.main : theme.palette.success.main,
       fontWeight: 600
     };
+  };
+
+  // Open delete confirmation (admin-only)
+  const openDeleteDialog = (paymentId) => {
+    if (!paymentId) return;
+    if (!user || user.role !== 'admin') {
+      setError('You do not have permission to delete payments');
+      return;
+    }
+    setPaymentToDelete(paymentId);
+    setDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setPaymentToDelete(null);
+  };
+
+  // Perform delete (called after confirmation)
+  const handleDeletePayment = async (paymentId) => {
+    if (!paymentId) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const resp = await fetch(`/api/payments/${paymentId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to delete payment');
+      }
+
+      // Refresh list
+      await fetchPayments();
+      closeDeleteDialog();
+    } catch (err) {
+      console.error('Failed to delete payment:', err);
+      setError(err.message || 'Failed to delete payment');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleChangePage = (event, newPage) => {
@@ -240,7 +440,7 @@ function Payments() {
 
   return (
     <Container sx={pageStyles.container}>
-      <div style={pageStyles.header}>
+      <Box sx={pageStyles.header}>
         <Typography 
           variant={isMobile ? "h6" : "h4"}
           component="h1"
@@ -254,12 +454,24 @@ function Payments() {
         >
           💰 Payments (Only last 30 Days)
         </Typography>
-        <Tooltip title="Refresh data">
-          <IconButton onClick={fetchPayments} color="primary" size={isMobile ? "small" : "medium"}>
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
-      </div>
+        <Box sx={pageStyles.actions}>
+          <Tooltip title="Refresh data">
+            <IconButton onClick={fetchPayments} color="primary" size={isMobile ? "small" : "medium"}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Button
+            variant="contained"
+            color="primary"
+            size={isMobile ? 'small' : 'medium'}
+            sx={{ ml: 1, ...pageStyles.actionButton }}
+            onClick={handleOpenAddPayment}
+          >
+            Add Payment
+          </Button>
+        </Box>
+  </Box>
 
       <Paper sx={tableStyles.paper}>
         {/* Filters */}
@@ -269,6 +481,8 @@ function Payments() {
           onClearAll={() => setFilters({ seatNumber: '', startDate: '', endDate: '' })}
           activeFilters={{
             seat: filters.seatNumber,
+            name: filters.studentName,
+            id: filters.studentId,
             start: filters.startDate,
             end: filters.endDate
           }}
@@ -276,6 +490,8 @@ function Payments() {
             const newFilters = { ...filters };
             switch (key) {
               case 'seat': newFilters.seatNumber = ''; break;
+              case 'name': newFilters.studentName = ''; break;
+              case 'id': newFilters.studentId = ''; break;
               case 'start': newFilters.startDate = ''; break;
               case 'end': newFilters.endDate = ''; break;
             }
@@ -287,6 +503,20 @@ function Payments() {
             fullWidth
             value={filters.seatNumber}
             onChange={(e) => setFilters({ ...filters, seatNumber: e.target.value })}
+            size="small"
+          />
+          <TextField
+            label="Search by Student Name"
+            fullWidth
+            value={filters.studentName}
+            onChange={(e) => setFilters({ ...filters, studentName: e.target.value })}
+            size="small"
+          />
+          <TextField
+            label="Search by Student ID"
+            fullWidth
+            value={filters.studentId}
+            onChange={(e) => setFilters({ ...filters, studentId: e.target.value })}
             size="small"
           />
           <TextField
@@ -337,12 +567,13 @@ function Payments() {
                         <TableCell>Date</TableCell>
                         <TableCell>Payment Mode</TableCell>
                         <TableCell>Type</TableCell>
+                        <TableCell align="center">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {displayedPayments.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} align="center">
+                          <TableCell colSpan={9} align="center">
                             No payments found
                           </TableCell>
                         </TableRow>
@@ -359,13 +590,20 @@ function Payments() {
                             <TableCell>{formatDate(payment.payment_date)}</TableCell>
                             <TableCell>{payment.payment_mode || 'N/A'}</TableCell>
                             <TableCell>{payment.payment_type || 'N/A'}</TableCell>
+                            <TableCell align="center">
+                              {user && user.role === 'admin' && (
+                                <IconButton size="small" color="error" onClick={() => openDeleteDialog(payment.id)}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
                     </TableBody>
                   </Table>
                 </TableContainer>
-                
+
                 {/* Desktop Pagination */}
                 <TablePagination
                   rowsPerPageOptions={[10, 25, 50, 100]}
@@ -392,10 +630,10 @@ function Payments() {
                   </Paper>
                 ) : (
                   displayedPayments.map((payment) => (
-                    <PaymentCard key={payment.id} payment={payment} />
+                    <PaymentCard key={payment.id} payment={payment} onDelete={openDeleteDialog} />
                   ))
                 )}
-                
+
                 {/* Mobile Pagination */}
                 <Paper sx={{ mt: 1 }}>
                   <TablePagination
@@ -429,7 +667,111 @@ function Payments() {
           </>
         )}
       </Paper>
-      
+      {/* Add Payment Dialog (select student + amount) */}
+      <Dialog open={addPaymentOpen} onClose={() => setAddPaymentOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Payment</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth>
+              <InputLabel>Select Student</InputLabel>
+              <Select
+                value={selectedStudentId}
+                onChange={(e) => handleStudentSelect(e.target.value)}
+                label="Select Student"
+              >
+                <MenuItem value="">
+                  <em>Choose student</em>
+                </MenuItem>
+                {students.filter(s => s && s.id).map(student => (
+                  <MenuItem key={student.id} value={student.id}>
+                    {/* Compact but informative label: Name · ID · Mobile · Father */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{student.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">#{student.id}</Typography>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" noWrap>
+                        {student.contact_number || 'No contact'} · {student.father_name || 'No father name'}
+                      </Typography>
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              label="Amount"
+              type="number"
+              value={paymentDataLocal.amount}
+              onChange={(e) => handleLocalAmountChange(e.target.value)}
+            />
+            <FormControl fullWidth>
+              <InputLabel>Payment Method</InputLabel>
+              <Select
+                value={paymentDataLocal.method}
+                onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, method: e.target.value }))}
+                label="Payment Method"
+              >
+                <MenuItem value="cash">Cash</MenuItem>
+                <MenuItem value="online">Online</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Payment Type</InputLabel>
+              <Select
+                value={paymentDataLocal.type}
+                onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, type: e.target.value }))}
+                label="Payment Type"
+              >
+                <MenuItem value="monthly_fee">Monthly Fee</MenuItem>
+                <MenuItem value="refund">Refund</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddPaymentOpen(false)}>Cancel</Button>
+          {user && user.role === 'admin' && (
+            <Button
+              variant="contained"
+              onClick={() => processLocalPayment(false)}
+              disabled={!selectedStudentId || !paymentDataLocal.amount || paymentLoadingLocal}
+            >
+              Add Payment
+            </Button>
+          )}
+          {feeConfig && membershipExtensionDays > 0 && (
+            <Button
+              variant="contained"
+              onClick={() => processLocalPayment(true)}
+              disabled={!selectedStudentId || !paymentDataLocal.amount || paymentLoadingLocal}
+            >
+              Add Payment & Extend {membershipExtensionDays} Days
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Confirm delete</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this payment? This action cannot be undone.</Typography>
+          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog} disabled={deleting}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => handleDeletePayment(paymentToDelete)}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Footer />
     </Container>
   );

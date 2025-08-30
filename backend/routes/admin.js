@@ -450,7 +450,7 @@ router.post('/import-excel', auth, requireAdmin, upload.single('file'), async (r
         if (seatNumber && studentResult.rows[0]) {
           const cleanSeatNumber = String(seatNumber).substring(0, 20);
           // Properly map gender values to database constraints
-          const studentGender = (memberSex || '').toString().toLowerCase() === 'male' ? 'male' : 'female';
+          const studentGender = (memberSex || '').toString().toLowerCase() === 'M' ? 'male' : 'female';
           console.log(`🪑 Assigning seat ${cleanSeatNumber} to student ${studentResult.rows[0].id} (${studentGender})`);
           
           // First, check if seat exists
@@ -803,13 +803,17 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
 
 // Clean database (except users)
 
-// Clean database (delete all data from all tables except users, and restart all sequences)
+// Clean database (delete all data from all tables except users, and restart all sequences, then run setup-database.js)
+const { spawn } = require('child_process');
 router.post('/clean-database', auth, requireAdmin, async (req, res) => {
+  const requestId = `clean-db-${Date.now()}`;
+  console.log(`\n🧹 [${new Date().toISOString()}] Starting clean-database [${requestId}]`);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // Get all table names in public schema except users
+    console.log('🔎 Fetching all table names (except users)...');
     const tablesResult = await client.query(`
       SELECT table_name FROM information_schema.tables 
       WHERE table_schema = 'public' 
@@ -817,6 +821,7 @@ router.post('/clean-database', auth, requireAdmin, async (req, res) => {
         AND table_name != 'users'
     `);
     const tableNames = tablesResult.rows.map(row => row.table_name);
+    console.log(`📋 Tables to clean: ${tableNames.join(', ')}`);
 
     // Disable only user-defined triggers (not system triggers) for referential integrity
     for (const table of tableNames) {
@@ -827,6 +832,7 @@ router.post('/clean-database', auth, requireAdmin, async (req, res) => {
           AND tgname NOT LIKE 'RI_ConstraintTrigger%'
       `);
       for (const trig of triggersResult.rows) {
+        console.log(`🚫 Disabling trigger '${trig.tgname}' on table '${table}'`);
         await client.query(`ALTER TABLE "${table}" DISABLE TRIGGER "${trig.tgname}"`);
       }
     }
@@ -842,6 +848,7 @@ router.post('/clean-database', auth, requireAdmin, async (req, res) => {
       if (!ordered.includes(t)) ordered.push(t);
     }
     for (const table of ordered) {
+      console.log(`🗑️ Deleting all data from table '${table}'...`);
       await client.query(`DELETE FROM "${table}"`);
     }
 
@@ -854,28 +861,59 @@ router.post('/clean-database', auth, requireAdmin, async (req, res) => {
           AND tgname NOT LIKE 'RI_ConstraintTrigger%'
       `);
       for (const trig of triggersResult.rows) {
+        console.log(`✅ Enabling trigger '${trig.tgname}' on table '${table}'`);
         await client.query(`ALTER TABLE "${table}" ENABLE TRIGGER "${trig.tgname}"`);
       }
     }
 
     // Restart all sequences in public schema
+    console.log('🔄 Restarting all sequences...');
     const seqResult = await client.query(`
       SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'
     `);
     for (const seq of seqResult.rows) {
+      console.log(`🔢 Restarting sequence '${seq.sequence_name}' to 1`);
       await client.query(`ALTER SEQUENCE "${seq.sequence_name}" RESTART WITH 1`);
     }
     
+    console.log('🔢 Restarting students_id_seq to 20250001');
     await client.query(`ALTER SEQUENCE students_id_seq RESTART WITH 20250001`);
 
     await client.query('COMMIT');
-    res.json({ message: 'Database cleaned successfully (all tables except users, all sequences reset)' });
+    console.log('✅ Database cleaned. Now running setup-database.js...');
+
+    // Now call setup-database.js as a child process
+    const setupProcess = spawn('node', ['setup-database.js'], {
+      cwd: require('path').resolve(__dirname, '..'),
+      shell: true
+    });
+
+    let output = '';
+    let errorOutput = '';
+    setupProcess.stdout.on('data', (data) => {
+      output += data.toString();
+      process.stdout.write(`[setup-database.js] ${data}`);
+    });
+    setupProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+      process.stderr.write(`[setup-database.js ERROR] ${data}`);
+    });
+    setupProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('🎉 setup-database.js executed successfully.');
+        res.json({ message: 'Database cleaned and setup-database.js executed successfully', setupOutput: output });
+      } else {
+        console.error('❌ setup-database.js failed:', errorOutput);
+        res.status(500).json({ error: 'Database cleaned but setup-database.js failed', setupError: errorOutput });
+      }
+    });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error cleaning database:', error);
     res.status(500).json({ error: 'Failed to clean database', details: error.message });
   } finally {
     client.release();
+    console.log(`🧹 clean-database [${requestId}] finished`);
   }
 });
 

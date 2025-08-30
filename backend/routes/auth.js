@@ -397,8 +397,8 @@ router.get('/users', authenticateToken, async (req, res) => {
     console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
     
     console.log(`📝 Step 1: Preparing users query...`);
-    const query = 'SELECT id, username, role, permissions, created_at FROM users ORDER BY created_at DESC';
-    
+    const query = "SELECT id, username, role, permissions, created_at FROM users WHERE status = 'active' ORDER BY created_at DESC";
+
     console.log(`🔧 Step 2: Executing users query...`);
     const queryStart = Date.now();
     const result = await pool.query(query);

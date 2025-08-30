@@ -69,6 +69,7 @@ import {
 } from '@mui/icons-material';
 import { getSeatChartData, markSeatAsVacant } from '../services/api';
 import Footer from '../components/Footer';
+import { useAuth } from '../contexts/AuthContext';
 
 // Helper function to format dates consistently in DD-MMM-YYYY format
 const formatDateForDisplay = (dateString) => {
@@ -92,6 +93,7 @@ const formatDateForDisplay = (dateString) => {
 function Students() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { user } = useAuth();
   
   // Helper function to handle API errors, especially token expiration
   const handleApiError = (error, defaultMessage = 'An error occurred') => {
@@ -319,7 +321,7 @@ function Students() {
     seatNumber: '',
     contact: '',
     sex: '',
-    fatherName: '',
+  fatherName: '',
     membershipDate: '',
     membershipTill: '',
   });
@@ -877,38 +879,64 @@ function Students() {
     handleActionClose();
   };
 
-  // Payment history handler
-  const handlePaymentHistory = async () => {
-    console.log('💰📚 [handlePaymentHistory] Payment history action initiated');
-    console.log('📋 Selected item for action:', selectedItemForAction);
-    
-    if (!selectedItemForAction?.id) {
-      console.warn('⚠️ [handlePaymentHistory] No student ID available, aborting payment history fetch');
+  // Payment history handler (accept optional student argument or handle being invoked as a menu click event)
+  const handlePaymentHistory = async (studentArg = null) => {
+    // studentArg may be:
+    // - a student object (contains id)
+    // - a click event (when passed directly as onClick handler)
+    // - null (use selectedItemForAction)
+    let student = null;
+    console.log('💰📚 [handlePaymentHistory] invoked with:', studentArg);
+
+    if (studentArg && typeof studentArg === 'object') {
+      // event-like objects usually have target/currentTarget
+      if ('id' in studentArg && studentArg.id) {
+        student = studentArg;
+      } else if (studentArg.currentTarget || studentArg.target) {
+        // likely an event from MenuItem onClick
+        try { studentArg.stopPropagation && studentArg.stopPropagation(); } catch (e) {}
+        student = selectedItemForAction;
+      } else {
+        // fallback: treat as student-like if it has id property truthy
+        student = studentArg;
+      }
+    } else {
+      student = selectedItemForAction;
+    }
+
+    console.log('📋 [handlePaymentHistory] Resolved student:', student);
+
+    if (!student || !student.id) {
+      console.warn('[handlePaymentHistory] No student ID available, aborting payment history fetch');
+      setSnackbarMessage('No student selected for payment history');
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
+      handleActionClose();
       return;
     }
-    
-    console.log(`👤 [handlePaymentHistory] Fetching payment history for student: ID=${selectedItemForAction.id}, Name="${selectedItemForAction.name}"`);
-    
+
+    console.log(`👤 [handlePaymentHistory] Fetching payment history for student: ID=${student.id}, Name="${student.name}"`);
+
     setHistoryLoading(true);
     try {
       console.log('🌐 [handlePaymentHistory] Sending GET request to /api/payments/student/:studentId...');
-      const response = await fetch(`/api/payments/student/${selectedItemForAction.id}`, {
+      const response = await fetch(`/api/payments/student/${student.id}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         }
       });
-      
+
       console.log(`📡 [handlePaymentHistory] API Response status: ${response.status}`);
-      
+
       if (!response.ok) {
         console.error('❌ [handlePaymentHistory] API request failed');
         throw new Error('Failed to fetch payment history');
       }
-      
+
       const historyData = await response.json();
       console.log('✅ [handlePaymentHistory] Payment history received:', historyData);
       console.log(`📊 [handlePaymentHistory] Number of payment records: ${historyData.length}`);
-      
+
       setPaymentHistory(historyData || []);
       setPaymentHistoryOpen(true);
       console.log('✅ [handlePaymentHistory] Payment history dialog opened successfully');
@@ -916,8 +944,8 @@ function Students() {
       console.error('❌ [handlePaymentHistory] Error occurred during payment history fetch:', err);
       console.error('🔍 [handlePaymentHistory] Error details:', {
         message: err.message,
-        studentId: selectedItemForAction?.id,
-        studentName: selectedItemForAction?.name
+        studentId: student?.id,
+        studentName: student?.name
       });
       handleApiError(err, 'Failed to load payment history');
     } finally {
@@ -949,6 +977,7 @@ function Students() {
       contactNumber: selectedItemForAction.contact_number,
       sex: selectedItemForAction.sex,
       seatNumber: selectedItemForAction.seat_number || '',
+  fatherName: selectedItemForAction.father_name || selectedItemForAction.fatherName || '',
       membershipDate: selectedItemForAction.membership_date ? selectedItemForAction.membership_date.split('T')[0] : '',
       membershipTill: selectedItemForAction.membership_till ? selectedItemForAction.membership_till.split('T')[0] : ''
     };
@@ -1133,6 +1162,7 @@ function Students() {
       contactNumber: viewStudentData.contact_number,
       sex: viewStudentData.sex,
       seatNumber: viewStudentData.seat_number || '',
+  fatherName: viewStudentData.father_name || viewStudentData.fatherName || '',
       membershipDate: viewStudentData.membership_date ? viewStudentData.membership_date.split('T')[0] : '',
       membershipTill: viewStudentData.membership_till ? viewStudentData.membership_till.split('T')[0] : ''
     };
@@ -1582,6 +1612,7 @@ function Students() {
     const updateData = {
       name: editStudent.name,
       contact_number: editStudent.contactNumber,
+  father_name: editStudent.fatherName || null,
       sex: editStudent.sex,
       seat_number: editStudent.seatNumber || null,
       membership_date: editStudent.membershipDate || null,
@@ -2455,13 +2486,13 @@ function Students() {
                     label={student.seat_number || 'Unassigned'} 
                     color={student.seat_number ? 'success' : 'error'}
                     size="small"
-                    onClick={!student.seat_number ? (event) => {
+                    onClick={!student.seat_number && student.membership_status !== 'inactive' ? (event) => {
                       event.stopPropagation();
                       handleAssignSeatToStudent(student);
                     } : undefined}
                     sx={{
-                      cursor: !student.seat_number ? 'pointer' : 'default',
-                      '&:hover': !student.seat_number ? {
+                      cursor: !student.seat_number && student.membership_status !== 'inactive' ? 'pointer' : 'default',
+                      '&:hover': !student.seat_number && student.membership_status !== 'inactive' ? {
                         backgroundColor: 'error.dark',
                         '& .MuiChip-label': {
                           color: 'white'
@@ -3143,13 +3174,13 @@ function Students() {
             setAddPaymentOpen(false);
             handleActionClose();
           }}>Cancel</Button>
-          <Button 
+          {user && user.role === 'admin' && (<Button 
             variant="contained" 
             onClick={handleConfirmAddPayment}
             disabled={!paymentData.amount || !paymentData.method || paymentLoading}
           >
             Add Payment
-          </Button>
+          </Button>)}
           {feeConfig && membershipExtensionDays > 0 && paymentData.type === 'monthly_fee' && (
             <Button 
               variant="contained" 
@@ -3182,6 +3213,12 @@ function Students() {
               label="Contact Number"
               value={editStudent.contactNumber}
               onChange={(e) => setEditStudent({ ...editStudent, contactNumber: e.target.value })}
+            />
+            <TextField
+              fullWidth
+              label="Father's Name"
+              value={editStudent.fatherName}
+              onChange={(e) => setEditStudent({ ...editStudent, fatherName: e.target.value })}
             />
             <FormControl fullWidth>
               <InputLabel>Gender</InputLabel>
@@ -3344,7 +3381,23 @@ function Students() {
                 <Grid item xs={6}>
                   <Typography variant="subtitle2" color="text.secondary">Total Paid</Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                    <Typography variant="body1" sx={{ fontWeight: 600, color: 'success.main' }}>
+                    <Typography
+                      variant="body1"
+                      sx={{
+                        fontWeight: 600,
+                        color: 'success.main',
+                        cursor: viewStudentData?.id ? 'pointer' : 'default',
+                        textDecoration: viewStudentData?.id ? 'underline' : 'none'
+                      }}
+                      onClick={() => {
+                        if (!viewStudentData?.id) return;
+                        // Set selectedItemForAction for consistency
+                        setSelectedItemForAction({ ...viewStudentData });
+                        // Pass the student directly to avoid relying on state being updated
+                        handlePaymentHistory(viewStudentData);
+                        // Keep the view dialog open; payment history opens on top
+                      }}
+                    >
                       ₹{viewStudentTotalPaid.toLocaleString()}
                     </Typography>
                   </Box>
@@ -3358,13 +3411,15 @@ function Students() {
             setViewStudentOpen(false);
             setViewStudentTotalPaid(0);
           }}>Close</Button>
-          <Button 
-            variant="contained" 
-            onClick={handleEditFromView}
-            startIcon={<EditIcon />}
-          >
-            Edit Student
-          </Button>
+          {viewStudentData?.membership_status !== 'inactive' && (
+            <Button 
+              variant="contained" 
+              onClick={handleEditFromView}
+              startIcon={<EditIcon />}
+            >
+              Edit Student
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

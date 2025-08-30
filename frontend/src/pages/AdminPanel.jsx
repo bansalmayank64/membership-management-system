@@ -30,7 +30,8 @@ import {
   MenuItem,
   Switch,
   FormControlLabel,
-  CircularProgress
+  CircularProgress,
+  LinearProgress
 } from '@mui/material';
 import {
   Upload as UploadIcon,
@@ -475,7 +476,47 @@ function AdminPanel() {
   const handleDeleteSeat = async (seatNumber) => {
     setLoading(true);
     try {
-  const response = await fetch(`/api/admin/seats/${seatNumber}`, {
+      // Find seat object to check if occupied and get student id
+      const seatObj = seats.find(s => s.seat_number === seatNumber);
+
+      // If seat is occupied and has a linked student, unassign that student first
+      if (seatObj && seatObj.status === 'occupied' && seatObj.student_id) {
+        try {
+          // Fetch full student record (PUT requires full payload)
+          const getResp = await fetch(`/api/students/${seatObj.student_id}`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!getResp.ok) {
+            const err = await getResp.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch student record before unassign');
+          }
+
+          const studentData = await getResp.json();
+          const updatedStudent = { ...studentData, seat_number: null };
+
+          const stuResp = await fetch(`/api/students/${seatObj.student_id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updatedStudent)
+          });
+
+          if (!stuResp.ok) {
+            const err = await stuResp.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to unassign student from seat');
+          }
+        } catch (err) {
+          throw err;
+        }
+      }
+
+      const response = await fetch(`/api/admin/seats/${seatNumber}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
@@ -497,10 +538,16 @@ function AdminPanel() {
     }
   };
 
+  // Clean Database progress state
+  const [cleanDbProgress, setCleanDbProgress] = useState({ running: false, status: '' });
   const handleCleanDatabase = async () => {
     setLoading(true);
+    setCleanDbProgress({ running: true, status: 'Cleaning database and running setup...' });
+    // Ensure progress bar is visible before fetch
+    await new Promise(resolve => setTimeout(resolve, 100));
+    let fetchSuccess = false;
     try {
-  const response = await fetch(`/api/admin/clean-database`, {
+      const response = await fetch(`/api/admin/clean-database`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
@@ -509,15 +556,22 @@ function AdminPanel() {
 
       if (response.ok) {
         setMessage({ type: 'success', text: 'Database cleaned successfully! Fresh start completed.' });
+        setCleanDbProgress({ running: false, status: 'Database cleaned successfully.' });
+        fetchSuccess = true;
       } else {
         const error = await response.json();
+        setCleanDbProgress({ running: false, status: 'Failed to clean database.' });
         throw new Error(error.error || 'Clean operation failed');
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
+      setCleanDbProgress({ running: false, status: 'Failed to clean database.' });
     } finally {
+      // Keep progress bar visible for at least 1s after fetch
+      await new Promise(resolve => setTimeout(resolve, 1000));
       setLoading(false);
       setConfirmDialog({ open: false, action: '', data: null });
+      setTimeout(() => setCleanDbProgress({ running: false, status: '' }), 2000);
     }
   };
 
@@ -978,22 +1032,22 @@ function AdminPanel() {
                                 >
                                   <EditIcon />
                                 </IconButton>
-                                {seat.status === 'available' && (
-                                  <IconButton
-                                    onClick={() => setConfirmDialog({
-                                      open: true,
-                                      action: 'deleteSeat',
-                                      data: seat.seat_number,
-                                      title: 'Delete Seat',
-                                      content: `Are you sure you want to delete seat "${seat.seat_number}"? This action cannot be undone.`
-                                    })}
-                                    color="error"
-                                    size="small"
-                                    title="Delete Seat"
-                                  >
-                                    <DeleteIcon />
-                                  </IconButton>
-                                )}
+                                <IconButton
+                                  onClick={() => setConfirmDialog({
+                                    open: true,
+                                    action: 'deleteSeat',
+                                    data: seat.seat_number,
+                                    title: 'Delete Seat',
+                                    content: seat.status === 'occupied'
+                                      ? `Seat "${seat.seat_number}" is currently assigned to ${seat.student_name || 'a student'}. Deleting will first unassign the student and then remove the seat. Proceed?`
+                                      : `Are you sure you want to delete seat "${seat.seat_number}"? This action cannot be undone.`
+                                  })}
+                                  color="error"
+                                  size="small"
+                                  title={seat.status === 'occupied' ? 'Delete Seat (will unassign student)' : 'Delete Seat'}
+                                >
+                                  <DeleteIcon />
+                                </IconButton>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1089,21 +1143,31 @@ function AdminPanel() {
                     Clean the entire database and start fresh. This will remove all data except admin users.
                   </Typography>
                   
-                  <Button
-                    variant="contained"
-                    color="warning"
-                    onClick={() => setConfirmDialog({
-                      open: true,
-                      action: 'cleanDatabase',
-                      title: 'Clean Database',
-                      content: 'This will permanently delete ALL data (students, payments, expenses, seats) but keep user accounts. Are you absolutely sure?'
-                    })}
-                    disabled={loading}
-                    fullWidth
-                    startIcon={<CleanIcon />}
-                  >
-                    Clean Database
-                  </Button>
+                  <Box sx={{ mb: 2 }}>
+                    {cleanDbProgress.running && (
+                      <Box sx={{ width: '100%', mb: 2 }}>
+                        <LinearProgress color="warning" />
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
+                          {cleanDbProgress.status}
+                        </Typography>
+                      </Box>
+                    )}
+                    <Button
+                      variant="contained"
+                      color="warning"
+                      onClick={() => setConfirmDialog({
+                        open: true,
+                        action: 'cleanDatabase',
+                        title: 'Clean Database',
+                        content: 'This will permanently delete ALL data (students, payments, expenses, seats) but keep user accounts. Are you absolutely sure?'
+                      })}
+                      disabled={loading || cleanDbProgress.running}
+                      fullWidth
+                      startIcon={cleanDbProgress.running ? <CircularProgress size={20} color="inherit" /> : <CleanIcon />}
+                    >
+                      {cleanDbProgress.running ? 'Cleaning...' : 'Clean Database'}
+                    </Button>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>
@@ -1254,12 +1318,17 @@ function AdminPanel() {
           title={confirmDialog.title}
           content={confirmDialog.content}
           onConfirm={() => {
-            if (confirmDialog.action === 'deleteUser') {
-              handleDeleteUser(confirmDialog.data);
-            } else if (confirmDialog.action === 'cleanDatabase') {
+            // Capture current action/data, close dialog immediately to avoid flicker/reopen,
+            // then call the appropriate handler.
+            const action = confirmDialog.action;
+            const data = confirmDialog.data;
+            setConfirmDialog({ open: false, action: '', data: null });
+            if (action === 'deleteUser') {
+              handleDeleteUser(data);
+            } else if (action === 'cleanDatabase') {
               handleCleanDatabase();
-            } else if (confirmDialog.action === 'deleteSeat') {
-              handleDeleteSeat(confirmDialog.data);
+            } else if (action === 'deleteSeat') {
+              handleDeleteSeat(data);
             }
           }}
           onCancel={() => setConfirmDialog({ open: false, action: '', data: null })}

@@ -38,6 +38,7 @@ DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS students;
 DROP TABLE IF EXISTS seats;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS student_fees_config;
 
 -- Users table (must be first for foreign key references)
 CREATE TABLE users (
@@ -268,15 +269,15 @@ BEGIN
 END $$;
 
 -- Create default seat records
-INSERT INTO seats (seat_number, occupant_sex) 
-SELECT s::text, 'male'
-FROM generate_series(1,100) s
-WHERE NOT EXISTS (SELECT 1 FROM seats WHERE seat_number = s::text);
+-- INSERT INTO seats (seat_number, occupant_sex) 
+-- SELECT s::text, 'male'
+-- FROM generate_series(1,100) s
+-- WHERE NOT EXISTS (SELECT 1 FROM seats WHERE seat_number = s::text);
 
-INSERT INTO seats (seat_number, occupant_sex) 
-SELECT s::text, 'female'
-FROM generate_series(101,120) s
-WHERE NOT EXISTS (SELECT 1 FROM seats WHERE seat_number = s::text);
+-- INSERT INTO seats (seat_number, occupant_sex) 
+-- SELECT s::text, 'female'
+-- FROM generate_series(101,120) s
+-- WHERE NOT EXISTS (SELECT 1 FROM seats WHERE seat_number = s::text);
 
 -- Add foreign key constraint for seats.student_id after students table exists
 -- No longer needed as student_id field has been removed from seats table
@@ -314,7 +315,7 @@ LEFT JOIN students st ON s.seat_number = st.seat_number;
 
 -- Create default admin user (password: admin123)
 INSERT INTO users (username, password_hash, role, permissions) VALUES 
-('admin', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj92OBLKdZy6', 'admin', 
+('admin', '$2a$12$OwZfLUjJlc39xuV6JCpE/.fBrPNb1hBxPL/n/yNNn1OYvMEZsyW4C', 'admin', 
  '{"canManageUsers": true, "canImportData": true, "canExportData": true, "canDeleteData": true, "canManageSeats": true, "canManageStudents": true, "canManagePayments": true, "canManageExpenses": true}')
 ON CONFLICT (username) DO NOTHING;
 
