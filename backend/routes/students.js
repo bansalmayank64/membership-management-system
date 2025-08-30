@@ -90,9 +90,9 @@ router.get('/with-unassigned-seats', async (req, res) => {
           ELSE 'available'
         END as seat_status,
         'student' as record_type
-      FROM students s
-      LEFT JOIN seats ON s.seat_number = seats.seat_number
-      where s.status = 'active'
+  FROM students s
+  LEFT JOIN seats ON s.seat_number = seats.seat_number
+  WHERE s.membership_status = 'active'
       ORDER BY s.created_at DESC
     `;
     
