@@ -167,6 +167,15 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
       return null;
     };
 
+    // Generate a pseudo-unique 12-digit Aadhaar-like number when missing
+    const generateAadhaar = () => {
+      // Use timestamp + random to reduce collision probability, then trim/pad to 12 digits
+      const ts = Date.now().toString().slice(-8); // last 8 digits of ms timestamp
+      const rand = Math.floor(Math.random() * 1e4).toString().padStart(4, '0');
+      const candidate = (ts + rand).slice(0, 12);
+      return candidate;
+    };
+
     // Column mappings (same as before)
     const memberColumnMappings = {
       id: ['ID', 'id', 'Id', 'Student_ID', 'Student ID', 'student_id', 'StudentID'],
@@ -180,6 +189,9 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
       membership_till: ['Membership_Till', 'membership_till', 'Membership Till', 'MembershipTill', 'End_Date', 'End Date', 'Expiry_Date', 'Expiry Date'],
       membership_status: ['Membership_Status', 'membership_status', 'Membership Status', 'Status', 'Active_Status'],
       last_payment_date: ['Last_Payment_date', 'last_payment_date', 'Last Payment Date', 'LastPaymentDate', 'Recent_Payment']
+  ,
+  aadhaar_number: ['Aadhaar', 'Aadhar', 'Aadhaar Number', 'AADHAR', 'aadhaar', 'Aadhaar_Number'],
+  address: ['Address', 'address', 'Residential Address', 'Address_Line']
     };
 
     const renewalColumnMappings = {
@@ -245,18 +257,43 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
         const memberSex = parseGender(memberSexRaw);
         const seatNumber = getColumnValue(member, memberColumnMappings.seat_number);
         const membershipStatus = getColumnValue(member, memberColumnMappings.membership_status);
+        // New fields: aadhaar_number and address. Provide defaults when missing.
+        let aadhaarNumber = (getColumnValue(member, memberColumnMappings.aadhaar_number) || '').toString().replace(/\D/g, '');
+        if (!aadhaarNumber || aadhaarNumber.length !== 12) {
+          aadhaarNumber = generateAadhaar();
+        }
+        // Ensure Aadhaar is unique in students table to avoid unique constraint errors
+        try {
+          let attempts = 0;
+          while (attempts < 5) {
+            const existing = await client.query(`SELECT id FROM students WHERE aadhaar_number = $1 LIMIT 1`, [aadhaarNumber]);
+            if (existing.rows.length === 0) break;
+            // If found and belongs to same incoming id, break (we'll update). Otherwise regenerate.
+            if (existing.rows[0].id && String(existing.rows[0].id) === String(memberId)) break;
+            aadhaarNumber = generateAadhaar();
+            attempts++;
+          }
+        } catch (e) {
+          // If uniqueness check fails for any reason, keep the current aadhaarNumber (best effort)
+          logger.warn('Aadhaar uniqueness check failed during import', { requestId, error: e.message });
+        }
+        let addressVal = (getColumnValue(member, memberColumnMappings.address) || '').toString().trim();
+        if (!addressVal) addressVal = 'NA';
 
         if (!memberId || !memberName || memberName === 'Unknown') {
           memberSkipped++;
           continue;
         }
 
-        const studentResult = await client.query(`
+  // Ensure membership_date is not null; default to today when missing
+  const membershipDateVal = parseExcelDate(getColumnValue(member, memberColumnMappings.membership_date)) || new Date();
+
+  const studentResult = await client.query(`
           INSERT INTO students (
             id, name, father_name, contact_number, sex, 
             seat_number, membership_date, membership_till, membership_status,
-            modified_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            aadhaar_number, address, modified_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (id) DO UPDATE SET
             name = EXCLUDED.name,
             father_name = EXCLUDED.father_name,
@@ -272,6 +309,8 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
               WHEN EXCLUDED.membership_status IN ('active', 'expired', 'suspended') THEN EXCLUDED.membership_status 
               ELSE students.membership_status 
             END,
+            aadhaar_number = COALESCE(NULLIF(EXCLUDED.aadhaar_number, ''), students.aadhaar_number),
+            address = COALESCE(NULLIF(EXCLUDED.address, ''), students.address),
             modified_by = EXCLUDED.modified_by,
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
@@ -282,11 +321,13 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
           (getColumnValue(member, memberColumnMappings.contact_number) || '').toString().substring(0, 20),
           memberSex || null,
           (seatNumber || '').toString().substring(0, 20),
-          parseExcelDate(getColumnValue(member, memberColumnMappings.membership_date)),
+          membershipDateVal,
           parseExcelDate(getColumnValue(member, memberColumnMappings.membership_till)),
           ['active', 'expired', 'suspended'].includes(membershipStatus) 
             ? membershipStatus 
             : 'active',
+          aadhaarNumber,
+          addressVal,
           req.user.userId || req.user.id
         ]);
 
