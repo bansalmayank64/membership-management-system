@@ -1829,7 +1829,9 @@ function Students() {
   logger.debug('🪑 [handleConfirmEditStudent] Seat assignment', { seat: editStudent.seatNumber });
   logger.debug('📅 [handleConfirmEditStudent] Membership period', { from: editStudent.membershipDate, to: editStudent.membershipTill });
     
-    try {
+  // Show progress indicator while the update request is in-flight
+  setEditStudentLoading(true);
+  try {
   logger.debug('🌐 [handleConfirmEditStudent] Sending PUT request to API', { studentId });
       const response = await fetch(`/api/students/${studentId}`, {
         method: 'PUT',
