@@ -1,32 +1,32 @@
 const bcrypt = require('bcryptjs');
 const { pool } = require('./config/database');
+const logger = require('./utils/logger');
 
 async function resetAdminPassword() {
-  console.log('🔐 === ADMIN PASSWORD RESET UTILITY ===');
-  console.log('📅 Timestamp:', new Date().toISOString());
+  logger.info('🔐 === ADMIN PASSWORD RESET UTILITY ===');
+  logger.info('📅 Timestamp:', new Date().toISOString());
   
   try {
     // Default password
-    const newPassword = 'admin123';
+    const newPassword = process.env.ADMIN_RESET_PASSWORD || 'admin123';
     const username = 'admin';
     
-    console.log(`👤 Resetting password for user: ${username}`);
-    console.log(`🔑 New password will be: ${newPassword}`);
+    logger.info(`👤 Resetting password for user: ${username}`);
+    logger.info('🔑 New password will be set (not logged for security)');
     
     // Hash the new password
-    console.log('🔧 Generating password hash...');
+    logger.info('🔧 Generating password hash...');
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
     
-    console.log('✅ Password hash generated successfully');
-    console.log(`🔐 Hash: ${hashedPassword}`);
+    logger.info('✅ Password hash generated successfully');
     
     // Check if admin user exists
-    console.log('🔍 Checking if admin user exists...');
+    logger.info('🔍 Checking if admin user exists...');
     const userCheck = await pool.query('SELECT id, username, role FROM users WHERE username = $1', [username]);
     
     if (userCheck.rows.length === 0) {
-      console.log('❌ Admin user not found. Creating new admin user...');
+      logger.info('❌ Admin user not found. Creating new admin user...');
       
       // Create admin user
       const insertQuery = `
@@ -53,10 +53,10 @@ async function resetAdminPassword() {
         JSON.stringify(permissions)
       ]);
       
-      console.log('✅ Admin user created successfully:', result.rows[0]);
+      logger.info('✅ Admin user created successfully', { user: { id: result.rows[0].id, username: result.rows[0].username } });
     } else {
-      console.log('✅ Admin user found:', userCheck.rows[0]);
-      console.log('🔧 Updating password...');
+      logger.info('✅ Admin user found', { user: userCheck.rows[0] });
+      logger.info('🔧 Updating password...');
       
       // Update password
       const updateQuery = `
@@ -67,43 +67,40 @@ async function resetAdminPassword() {
       `;
       
       const result = await pool.query(updateQuery, [hashedPassword, username]);
-      console.log('✅ Password updated successfully:', result.rows[0]);
+      logger.info('✅ Password updated successfully', { user: result.rows[0] });
     }
     
-    // Verify the password works
-    console.log('🧪 Verifying new password...');
+    // Verify the password works (verify by hashing comparison, do not log hashes)
+    logger.info('🧪 Verifying new password...');
     const verifyQuery = await pool.query('SELECT password_hash FROM users WHERE username = $1', [username]);
     const storedHash = verifyQuery.rows[0].password_hash;
     
     const isValid = await bcrypt.compare(newPassword, storedHash);
     
     if (isValid) {
-      console.log('✅ Password verification successful!');
-      console.log('');
-      console.log('🎉 === RESET COMPLETE ===');
-      console.log(`👤 Username: ${username}`);
-      console.log(`🔑 Password: ${newPassword}`);
-      console.log('📝 You can now log in with these credentials');
+      logger.info('✅ Password verification successful!');
+      logger.info('🎉 === RESET COMPLETE ===');
+      logger.info('👤 Username: ' + username);
+      logger.info('🔑 Password has been set (not logged for security)');
     } else {
-      console.log('❌ Password verification failed!');
+      logger.warn('❌ Password verification failed!');
       throw new Error('Password verification failed after update');
     }
     
   } catch (error) {
-    console.error('💥 === ERROR OCCURRED ===');
-    console.error('📄 Error message:', error.message);
-    console.error('📍 Error stack:', error.stack);
+    logger.warn('💥 === ERROR OCCURRED ===', { message: error.message });
+    logger.warn('📍 Error stack available in server logs');
     process.exit(1);
   } finally {
-    console.log('🔌 Closing database connection...');
+    logger.info('🔌 Closing database connection...');
     await pool.end();
-    console.log('✅ Database connection closed');
+    logger.info('✅ Database connection closed');
     process.exit(0);
   }
 }
 
 // Run the reset
 resetAdminPassword().catch(error => {
-  console.error('💥 Unhandled error:', error);
+  logger.warn('💥 Unhandled error during admin reset', { error: error.message });
   process.exit(1);
 });

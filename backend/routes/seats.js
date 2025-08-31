@@ -1,18 +1,14 @@
 const express = require('express');
 const { pool } = require('../config/database');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
 // GET /api/seats - Get all seats with student information
 router.get('/', async (req, res) => {
-  const requestId = `seats-get-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('GET', '/api/seats', req);
   try {
-    console.log(`🪑 [${new Date().toISOString()}] Starting GET /api/seats [${requestId}]`);
-    console.log(`📊 Request details: IP=${req.ip}, User-Agent=${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`📝 Step 1: Preparing database query for all seats with student information`);
+    rl.businessLogic('Preparing database query for all seats with student information');
     const query = `
       SELECT 
         s.seat_number,
@@ -73,23 +69,15 @@ router.get('/', async (req, res) => {
         s.seat_number ASC
     `;
     
-    console.log(`🔍 Step 2: Executing database query...`);
-    const queryStart = Date.now();
-    const result = await pool.query(query);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ Query executed successfully in ${queryTime}ms, returned ${result.rows.length} rows`);
-    
-    // Show a more representative sample: first 2 rows + any seats with students
-    const seatsWithStudents = result.rows.filter(row => row.student_id !== null);
-    const sampleData = {
-      firstTwoSeats: result.rows.slice(0, 2),
-      seatsWithStudents: seatsWithStudents.slice(0, 3),
-      totalSeatsWithStudents: seatsWithStudents.length
-    };
-    console.log(`📋 Raw data sample:`, sampleData);
-    
-    console.log(`🔄 Step 3: Transforming data to match frontend expectations...`);
+  const queryStart = rl.queryStart('seats list', query);
+  const result = await pool.query(query);
+  rl.querySuccess('seats list', queryStart, result, false);
+
+  // Show a small sample in logs (not entire payload)
+  const seatsWithStudents = result.rows.filter(row => row.student_id !== null);
+  rl.info('Query result summary', { totalRows: result.rows.length, seatsWithStudents: Math.min(seatsWithStudents.length, 5) });
+
+  rl.businessLogic('Transforming data to match frontend expectations');
     const transformStart = Date.now();
     
     // Transform data to match frontend expectations with enhanced validation
@@ -118,18 +106,11 @@ router.get('/', async (req, res) => {
     }));
     
     const transformTime = Date.now() - transformStart;
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`🔧 Data transformation completed in ${transformTime}ms`);
-    console.log(`📊 Response statistics: ${seats.length} seats processed`);
-    
-    //console.log(`📊 Response seats final: ${JSON.stringify(seats, null, 2)}`);
-    console.log(`📈 Seat status breakdown:`, {
+    rl.info('Data transformation completed', { transformTimeMs: transformTime, seatsProcessed: seats.length });
+    rl.statistics('Seat status breakdown', {
       total: seats.length,
       occupied: seats.filter(s => s.occupied).length,
       vacant: seats.filter(s => !s.occupied && !s.maintenance && !s.removed).length,
-      maintenance: seats.filter(s => s.maintenance).length,
-      removed: seats.filter(s => s.removed).length,
       expiring: seats.filter(s => s.expiring).length,
       expired: seats.filter(s => s.membershipExpired).length,
       suspended: seats.filter(s => s.membershipSuspended).length,
@@ -138,168 +119,73 @@ router.get('/', async (req, res) => {
       withStudents: seats.filter(s => s.hasStudent).length,
       withGenderRestriction: seats.filter(s => s.occupantSexRestriction).length
     });
-    
-    console.log(`✨ Step 4: Sending response...`);
-    
-    // Log complete response data for debugging frontend display issues
-    console.log(`📤 COMPLETE RESPONSE DATA:`, JSON.stringify({
-      totalSeats: seats.length,
-      seatsWithStudents: seats.filter(s => s.hasStudent),
-      sampleTransformedSeats: seats.slice(0, 5),
-      occupiedSeatsDetails: seats.filter(s => s.occupied)
-    }, null, 2));
-    
-    console.log(`🎯 [${new Date().toISOString()}] GET /api/seats completed successfully in ${totalTime}ms [${requestId}]`);
-    
+
+    // Send response (do not log entire payload)
+    rl.success({ totalSeats: seats.length });
     res.json(seats);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] GET /api/seats FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      position: error.position,
-      internalPosition: error.internalPosition,
-      internalQuery: error.internalQuery,
-      where: error.where,
-      schema: error.schema,
-      table: error.table,
-      column: error.column,
-      dataType: error.dataType,
-      constraint: error.constraint
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch seats',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error);
+    res.status(500).json({ error: 'Failed to fetch seats', timestamp: new Date().toISOString() });
   }
 });
 
 // POST /api/seats - Create a new seat
 router.post('/', async (req, res) => {
-  const requestId = `seats-post-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('POST', '/api/seats', req);
   try {
-    console.log(`🪑➕ [${new Date().toISOString()}] Starting POST /api/seats [${requestId}]`);
-    console.log(`📊 Request body:`, req.body);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
     const { seat_number, occupant_sex, modified_by } = req.body;
-    
-    console.log(`🔍 Step 1: Validating input parameters...`);
-    console.log(`📋 Seat details: seat_number="${seat_number}", occupant_sex="${occupant_sex}", modified_by="${modified_by}"`);
+    rl.validationStart('Validating input parameters for create seat');
     
     if (!seat_number) {
-      console.log(`❌ Validation failed: seat_number is required`);
-      return res.status(400).json({ 
-        error: 'Seat number is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('seat_number', ['Seat number is required']);
+      return res.status(400).json({ error: 'Seat number is required', timestamp: new Date().toISOString() });
     }
     
     // Validate occupant_sex if provided
     if (occupant_sex && !['male', 'female'].includes(occupant_sex)) {
-      console.log(`❌ Validation failed: invalid occupant_sex value`);
-      return res.status(400).json({ 
-        error: 'Occupant sex must be either "male" or "female"',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('occupant_sex', ['Invalid occupant_sex value']);
+      return res.status(400).json({ error: 'Occupant sex must be either "male" or "female"', timestamp: new Date().toISOString() });
     }
     
     // Validate seat_number format (should be alphanumeric)
     if (!/^[A-Za-z0-9\-]+$/.test(seat_number)) {
-      console.log(`❌ Validation failed: invalid seat_number format`);
-      return res.status(400).json({ 
-        error: 'Seat number can only contain letters, numbers, and hyphens',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('seat_number_format', ['Invalid seat_number format']);
+      return res.status(400).json({ error: 'Seat number can only contain letters, numbers, and hyphens', timestamp: new Date().toISOString() });
     }
     
-    console.log(`📝 Step 2: Preparing database insertion query...`);
+  rl.businessLogic('Preparing database insertion for new seat');
     const query = `
       INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by)
       VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)
       RETURNING *
     `;
     
-    console.log(`🔧 Step 3: Executing database insertion...`);
-    const queryStart = Date.now();
+    const queryStart = rl.queryStart('Insert seat', query, [seat_number, occupant_sex, req.user?.userId || req.user?.id || 1]);
     const result = await pool.query(query, [seat_number, occupant_sex, req.user?.userId || req.user?.id || 1]);
-    const queryTime = Date.now() - queryStart;
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`✅ Seat created successfully in ${queryTime}ms`);
-    console.log(`📋 New seat data:`, result.rows[0]);
-    console.log(`🎯 [${new Date().toISOString()}] POST /api/seats completed successfully in ${totalTime}ms [${requestId}]`);
-    
+    rl.querySuccess('Insert seat', queryStart, result, true);
+    rl.success(result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] POST /api/seats FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      position: error.position,
-      constraint: error.constraint,
-      table: error.table,
-      column: error.column
-    });
-    
-    // Handle specific database errors
-    if (error.code === '23505') { // Unique violation
-      console.log(`🚫 Duplicate seat number detected: ${req.body.seat_number}`);
-      return res.status(409).json({ 
-        error: 'Seat number already exists',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+    rl.error(error);
+    if (error.code === '23505') {
+      rl.warn('Duplicate seat number', { seatNumber: req.body.seat_number });
+      return res.status(409).json({ error: 'Seat number already exists', timestamp: new Date().toISOString() });
     }
-    
-    res.status(500).json({ 
-      error: 'Failed to create seat',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    res.status(500).json({ error: 'Failed to create seat', timestamp: new Date().toISOString() });
   }
 });
 
 // GET /api/seats/:seatNumber/history - Get seat change history
 router.get('/:seatNumber/history', async (req, res) => {
-  const requestId = `seats-history-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('GET', '/api/seats/:seatNumber/history', req);
   try {
-    console.log(`🪑📚 [${new Date().toISOString()}] Starting GET /api/seats/:seatNumber/history [${requestId}]`);
-    
     const { seatNumber } = req.params;
-    console.log(`📊 Request params: seatNumber="${seatNumber}"`);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`🔍 Step 1: Validating seat number parameter...`);
+    rl.validationStart('Validating seatNumber parameter');
     if (!seatNumber) {
-      console.log(`❌ Validation failed: seatNumber parameter is required`);
-      return res.status(400).json({ 
-        error: 'Seat number parameter is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('seatNumber', ['Seat number parameter is required']);
+      return res.status(400).json({ error: 'Seat number parameter is required', timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Preparing seat history query...`);
+    rl.businessLogic('Preparing seat history query');
     const query = `
       SELECT 
         sh.*,
@@ -319,76 +205,33 @@ router.get('/:seatNumber/history', async (req, res) => {
       LIMIT 50
     `;
     
-    console.log(`🔧 Step 3: Executing seat history query...`);
-    const queryStart = Date.now();
-    const result = await pool.query(query, [seatNumber]);
-    const queryTime = Date.now() - queryStart;
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`✅ Seat history query executed successfully in ${queryTime}ms`);
-    console.log(`📋 History records found: ${result.rows.length}`);
-    console.log(`📊 Sample history data:`, result.rows.slice(0, 2));
-    
-    console.log(`🎯 [${new Date().toISOString()}] GET /api/seats/:seatNumber/history completed successfully in ${totalTime}ms [${requestId}]`);
-    
-    res.json(result.rows);
+  const queryStart = rl.queryStart('seat history', query, [seatNumber]);
+  const result = await pool.query(query, [seatNumber]);
+  rl.querySuccess('seat history', queryStart, result, true);
+  rl.success({ count: result.rows.length });
+  res.json(result.rows);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] GET /api/seats/:seatNumber/history FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      seatNumber: req.params.seatNumber
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch seat history',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+  rl.error(error, { seatNumber: req.params.seatNumber });
+  res.status(500).json({ error: 'Failed to fetch seat history', timestamp: new Date().toISOString() });
   }
 });
 
 // PUT /api/seats/:seatNumber - Update seat properties (Note: Status is now determined by student assignments)
 router.put('/:seatNumber', async (req, res) => {
-  const requestId = `seats-put-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('PUT', '/api/seats/:seatNumber', req);
   try {
-    console.log(`🪑🔄 [${new Date().toISOString()}] Starting PUT /api/seats/:seatNumber [${requestId}]`);
-    
     const { seatNumber } = req.params;
     const { occupant_sex, modified_by } = req.body;
-    
-    console.log(`📊 Request params: seatNumber="${seatNumber}"`);
-    console.log(`📊 Request body:`, req.body);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`🔍 Step 1: Validating input parameters...`);
+    rl.validationStart('Validating input parameters for seat update');
     if (!seatNumber) {
-      console.log(`❌ Validation failed: seatNumber parameter is required`);
-      return res.status(400).json({ 
-        error: 'Seat number parameter is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('seatNumber', ['Seat number parameter is required']);
+      return res.status(400).json({ error: 'Seat number parameter is required', timestamp: new Date().toISOString() });
     }
-    
-    // Validate occupant_sex if provided
     if (occupant_sex && !['male', 'female'].includes(occupant_sex)) {
-      console.log(`❌ Validation failed: invalid occupant_sex value`);
-      return res.status(400).json({ 
-        error: 'occupant_sex must be either "male" or "female"',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('occupant_sex', ['Invalid occupant_sex value']);
+      return res.status(400).json({ error: 'occupant_sex must be either "male" or "female"', timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Preparing seat update query...`);
+    rl.businessLogic('Preparing seat update query');
     const query = `
       UPDATE seats 
       SET occupant_sex = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
@@ -396,166 +239,76 @@ router.put('/:seatNumber', async (req, res) => {
       RETURNING *
     `;
     
-    console.log(`🔧 Step 3: Executing seat update...`);
-    const queryStart = Date.now();
+    const queryStart = rl.queryStart('Update seat', query, [occupant_sex, req.user?.userId || req.user?.id || 1, seatNumber]);
     const result = await pool.query(query, [occupant_sex, req.user?.userId || req.user?.id || 1, seatNumber]);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ Update query executed successfully in ${queryTime}ms`);
-    console.log(`📋 Rows affected: ${result.rowCount}`);
-    
+    rl.querySuccess('Update seat', queryStart, result, true);
+
     if (result.rows.length === 0) {
-      console.log(`❌ Seat not found: ${seatNumber}`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] PUT /api/seats/:seatNumber completed with 404 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(404).json({ 
-        error: 'Seat not found',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('Seat not found for update', { seatNumber });
+      return res.status(404).json({ error: 'Seat not found', timestamp: new Date().toISOString() });
     }
-    
-    const totalTime = Date.now() - startTime;
-    console.log(`📊 Updated seat data:`, result.rows[0]);
-    console.log(`🎯 [${new Date().toISOString()}] PUT /api/seats/:seatNumber completed successfully in ${totalTime}ms [${requestId}]`);
-    
+
+    rl.success(result.rows[0]);
     res.json(result.rows[0]);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] PUT /api/seats/:seatNumber FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      seatNumber: req.params.seatNumber,
-      requestBody: req.body
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to update seat',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { seatNumber: req.params.seatNumber, requestBody: req.body });
+    res.status(500).json({ error: 'Failed to update seat', timestamp: new Date().toISOString() });
   }
 });
 
 // DELETE /api/seats/:seatNumber - Mark seat as removed
 router.delete('/:seatNumber', async (req, res) => {
-  const requestId = `seats-delete-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('DELETE', '/api/seats/:seatNumber', req);
   try {
-    console.log(`🪑🗑️ [${new Date().toISOString()}] Starting DELETE /api/seats/:seatNumber [${requestId}]`);
-    
     const { seatNumber } = req.params;
     const { modified_by } = req.body;
-    
-    console.log(`📊 Request params: seatNumber="${seatNumber}"`);
-    console.log(`📊 Request body:`, req.body);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`🔍 Step 1: Validating input parameters...`);
+    rl.validationStart('Validating input parameters for seat delete');
     if (!seatNumber) {
-      console.log(`❌ Validation failed: seatNumber parameter is required`);
-      return res.status(400).json({ 
-        error: 'Seat number parameter is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('seatNumber', ['Seat number parameter is required']);
+      return res.status(400).json({ error: 'Seat number parameter is required', timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Preparing seat deletion query...`);
+    rl.businessLogic('Preparing seat deletion query');
     const query = `
       DELETE FROM seats 
       WHERE seat_number = $1
       RETURNING *
     `;
     
-    console.log(`🔧 Step 3: Executing seat deletion...`);
-    const queryStart = Date.now();
-    const result = await pool.query(query, [seatNumber]);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ Removal query executed successfully in ${queryTime}ms`);
-    console.log(`📋 Rows affected: ${result.rowCount}`);
-    
+  const queryStart = rl.queryStart('Delete seat', query, [seatNumber]);
+  const result = await pool.query(query, [seatNumber]);
+    rl.querySuccess('Delete seat', queryStart, result, true);
+
     if (result.rows.length === 0) {
-      console.log(`❌ Seat not found: ${seatNumber}`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] DELETE /api/seats/:seatNumber completed with 404 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(404).json({ 
-        error: 'Seat not found',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('Seat not found for delete', { seatNumber });
+      return res.status(404).json({ error: 'Seat not found', timestamp: new Date().toISOString() });
     }
-    
-    const totalTime = Date.now() - startTime;
-    console.log(`📊 Removed seat data:`, result.rows[0]);
-    console.log(`🎯 [${new Date().toISOString()}] DELETE /api/seats/:seatNumber completed successfully in ${totalTime}ms [${requestId}]`);
-    
+
+    rl.success(result.rows[0]);
     res.json({ message: 'Seat marked as removed', seat: result.rows[0] });
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] DELETE /api/seats/:seatNumber FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      seatNumber: req.params.seatNumber,
-      requestBody: req.body
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to remove seat',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { seatNumber: req.params.seatNumber, requestBody: req.body });
+    res.status(500).json({ error: 'Failed to remove seat', timestamp: new Date().toISOString() });
   }
 });
 
 // PUT /api/seats/:seatNumber/mark-vacant - Mark expired seat as vacant
 router.put('/:seatNumber/mark-vacant', async (req, res) => {
-  const requestId = `seats-mark-vacant-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('PUT', '/api/seats/:seatNumber/mark-vacant', req);
   try {
-    console.log(`🪑🔄 [${new Date().toISOString()}] Starting PUT /api/seats/:seatNumber/mark-vacant [${requestId}]`);
-    
     const { seatNumber } = req.params;
     const { modified_by } = req.body;
-    
-    console.log(`📊 Request params: seatNumber="${seatNumber}"`);
-    console.log(`📊 Request body:`, req.body);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`🔍 Step 1: Validating input parameters...`);
+    rl.validationStart('Validating input parameters for mark-vacant');
     if (!seatNumber) {
-      console.log(`❌ Validation failed: seatNumber parameter is required`);
-      return res.status(400).json({ 
-        error: 'Seat number parameter is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('seatNumber', ['Seat number parameter is required']);
+      return res.status(400).json({ error: 'Seat number parameter is required', timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Starting database transaction...`);
+    rl.businessLogic('Starting database transaction for mark-vacant');
     const client = await pool.connect();
-    
     try {
       await client.query('BEGIN');
-      console.log('✅ Transaction started successfully');
+      rl.info('Transaction started for mark-vacant');
 
-      // Get current seat and student information with proper validation
-      console.log(`🔍 Step 3: Fetching current seat and student information...`);
+      rl.businessLogic('Fetching current seat and student information');
       const seatQuery = `
         SELECT 
           s.seat_number,
@@ -574,68 +327,34 @@ router.put('/:seatNumber/mark-vacant', async (req, res) => {
       const seatResult = await client.query(seatQuery, [seatNumber]);
       
       if (seatResult.rows.length === 0) {
-        console.log(`❌ Seat not found: ${seatNumber}`);
         await client.query('ROLLBACK');
-        const totalTime = Date.now() - startTime;
-        console.log(`🎯 [${new Date().toISOString()}] PUT /api/seats/:seatNumber/mark-vacant completed with 404 in ${totalTime}ms [${requestId}]`);
-        
-        return res.status(404).json({ 
-          error: 'Seat not found',
-          requestId: requestId,
-          timestamp: new Date().toISOString()
-        });
+        rl.warn('Seat not found for mark-vacant', { seatNumber });
+        return res.status(404).json({ error: 'Seat not found', timestamp: new Date().toISOString() });
       }
 
       const seatInfo = seatResult.rows[0];
-      console.log(`📊 Current seat info:`, seatInfo);
+      rl.info('Current seat info', { seatInfo });
 
-      // Check if seat has a student assigned
       if (!seatInfo.student_id) {
-        console.log(`❌ Seat has no student assigned: ${seatNumber}`);
         await client.query('ROLLBACK');
-        return res.status(400).json({ 
-          error: 'Seat is not currently occupied or has no student assigned',
-          hasStudent: !!seatInfo.student_id,
-          requestId: requestId,
-          timestamp: new Date().toISOString()
-        });
+        rl.warn('Seat has no student assigned', { seatNumber });
+        return res.status(400).json({ error: 'Seat is not currently occupied or has no student assigned', hasStudent: !!seatInfo.student_id, timestamp: new Date().toISOString() });
       }
 
-      // Check if membership is expired
       const now = new Date();
       const membershipTill = new Date(seatInfo.membership_till);
       const isExpired = membershipTill < now;
+      rl.info('Membership validation', { student_name: seatInfo.student_name, membership_till: seatInfo.membership_till, membership_status: seatInfo.membership_status, is_expired: isExpired, current_time: now.toISOString() });
 
-      console.log(`📅 Membership validation:`, {
-        student_name: seatInfo.student_name,
-        membership_till: seatInfo.membership_till,
-        membership_status: seatInfo.membership_status,
-        is_expired: isExpired,
-        current_time: now.toISOString()
-      });
-
-      // Allow marking as vacant if:
-      // 1. Membership is expired (past due date), OR
-      // 2. Membership status is already 'expired' or 'suspended'
-      const canMarkVacant = isExpired || 
-                           seatInfo.membership_status === 'expired' || 
-                           seatInfo.membership_status === 'suspended';
+      const canMarkVacant = isExpired || seatInfo.membership_status === 'expired' || seatInfo.membership_status === 'suspended';
 
       if (!canMarkVacant) {
-        console.log(`❌ Student membership is still active: ${seatNumber}`);
         await client.query('ROLLBACK');
-        return res.status(400).json({ 
-          error: 'Student membership is still active. Can only mark expired or suspended memberships as vacant.',
-          membership_till: seatInfo.membership_till,
-          membership_status: seatInfo.membership_status,
-          requestId: requestId,
-          timestamp: new Date().toISOString()
-        });
+        rl.warn('Membership still active, cannot mark vacant', { seatNumber, membership_till: seatInfo.membership_till, membership_status: seatInfo.membership_status });
+        return res.status(400).json({ error: 'Student membership is still active. Can only mark expired or suspended memberships as vacant.', membership_till: seatInfo.membership_till, membership_status: seatInfo.membership_status, timestamp: new Date().toISOString() });
       }
 
-      console.log(`🔄 Step 4: Marking seat as vacant and updating student record...`);
-      
-      // Update seat status to available and clear occupant info
+      rl.businessLogic('Marking seat as vacant and updating student record');
       const updateSeatQuery = `
         UPDATE seats 
         SET occupant_sex = NULL, 
@@ -646,10 +365,10 @@ router.put('/:seatNumber/mark-vacant', async (req, res) => {
       `;
       
       const updateSeatResult = await client.query(updateSeatQuery, [req.user?.userId || req.user?.id || 1, seatNumber]);
-      console.log(`✅ Seat marked as vacant:`, updateSeatResult.rows[0]);
+  rl.info('Seat marked as vacant', { seat: updateSeatResult.rows[0] });
 
-      // Update student to remove seat assignment and set status to expired
-      console.log(`🔄 Step 5: Updating student record...`);
+  // Update student to remove seat assignment and set status to expired
+  rl.businessLogic('Updating student record to remove seat assignment');
       const updateStudentQuery = `
         UPDATE students 
         SET seat_number = NULL, 
@@ -661,54 +380,25 @@ router.put('/:seatNumber/mark-vacant', async (req, res) => {
       `;
       
       const updateStudentResult = await client.query(updateStudentQuery, [req.user?.userId || req.user?.id || 1, seatInfo.student_id]);
-      console.log(`✅ Student record updated:`, updateStudentResult.rows[0]);
+      rl.info('Student record updated', { student: updateStudentResult.rows[0] });
 
-      console.log(`💯 Step 6: Committing transaction...`);
       await client.query('COMMIT');
-      console.log('✅ Transaction committed successfully');
-      
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] PUT /api/seats/:seatNumber/mark-vacant completed successfully in ${totalTime}ms [${requestId}]`);
-      
-      res.json({ 
-        message: 'Seat marked as vacant successfully',
-        seat: updateSeatResult.rows[0],
-        student: updateStudentResult.rows[0],
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.info('Mark-vacant transaction committed');
+
+      res.json({ message: 'Seat marked as vacant successfully', seat: updateSeatResult.rows[0], student: updateStudentResult.rows[0], timestamp: new Date().toISOString() });
       
     } catch (error) {
-      console.log('🔄 Rolling back transaction due to error...');
       await client.query('ROLLBACK');
-      console.log('✅ Transaction rolled back');
+      rl.transactionRollback(error.message);
       throw error;
     } finally {
-      console.log('🔌 Releasing database connection...');
       client.release();
-      console.log('✅ Database connection released');
+      rl.info('Database connection released');
     }
 
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] PUT /api/seats/:seatNumber/mark-vacant FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      seatNumber: req.params.seatNumber,
-      requestBody: req.body
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to mark seat as vacant',
-      details: error.message,
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { seatNumber: req.params.seatNumber, requestBody: req.body });
+    res.status(500).json({ error: 'Failed to mark seat as vacant', details: error.message, timestamp: new Date().toISOString() });
   }
 });
 

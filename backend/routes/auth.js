@@ -7,73 +7,44 @@ const router = express.Router();
 
 // POST /api/auth/login - User login
 router.post('/login', async (req, res) => {
-  const requestId = `auth-login-${Date.now()}`;
+  const rl = require('../utils/logger').createRequestLogger('POST', '/api/auth/login', req);
   const startTime = Date.now();
   
   try {
-    console.log(`🔐 [${new Date().toISOString()}] Starting POST /api/auth/login [${requestId}]`);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
+    rl.requestStart(req);
     const { username, password } = req.body;
-    console.log(`📊 Login attempt for username: "${username}"`);
-    
-    console.log(`🔍 Step 1: Validating input parameters...`);
+    rl.info('Login attempt', { username });
+    rl.validationStart('Validating input parameters');
     if (!username || !password) {
-      console.log(`❌ Validation failed: Username or password missing`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/login completed with 400 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(400).json({ 
-        error: 'Username and password are required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('credentials', ['Username or password missing']);
+      return res.status(400).json({ error: 'Username and password are required', timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Searching for user in database...`);
+    rl.businessLogic('Searching for user in database');
     const query = 'SELECT * FROM users WHERE username = $1';
-    const queryStart = Date.now();
+    const queryStart = rl.queryStart('find user', query, [username]);
     const result = await pool.query(query, [username]);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ User query executed in ${queryTime}ms, found ${result.rows.length} users`);
-    
+    rl.querySuccess('find user', queryStart, result, true);
+
     if (result.rows.length === 0) {
-      console.log(`❌ User not found: ${username}`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/login completed with 401 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(401).json({ 
-        error: 'Invalid credentials',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('User not found', { username });
+      return res.status(401).json({ error: 'Invalid credentials', timestamp: new Date().toISOString() });
     }
-    
+
     const user = result.rows[0];
-    console.log(`👤 Found user: ID=${user.id}, Role=${user.role}, Username=${user.username}`);
+    rl.info('Found user', { id: user.id, username: user.username, role: user.role });
     
-    console.log(`🔧 Step 3: Verifying password...`);
+    rl.businessLogic('Verifying password');
     const passwordStart = Date.now();
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-    const passwordTime = Date.now() - passwordStart;
-    
-    console.log(`✅ Password verification completed in ${passwordTime}ms, result: ${isPasswordValid}`);
-    
+    rl.info('Password verification completed', { durationMs: Date.now() - passwordStart, valid: isPasswordValid });
+
     if (!isPasswordValid) {
-      console.log(`❌ Invalid password for user: ${username}`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/login completed with 401 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(401).json({ 
-        error: 'Invalid credentials',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('Invalid password', { username });
+      return res.status(401).json({ error: 'Invalid credentials', timestamp: new Date().toISOString() });
     }
     
-    console.log(`🎫 Step 4: Generating JWT token...`);
-    const tokenStart = Date.now();
+  rl.businessLogic('Generating JWT token');
+  const tokenStart = Date.now();
     const token = jwt.sign(
       { 
         userId: user.id, 
@@ -87,9 +58,8 @@ router.post('/login', async (req, res) => {
     const tokenTime = Date.now() - tokenStart;
     const totalTime = Date.now() - startTime;
     
-    console.log(`✅ JWT token generated in ${tokenTime}ms`);
-    console.log(`🎉 Login successful for user: ${username} (ID: ${user.id})`);
-    console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/login completed successfully in ${totalTime}ms [${requestId}]`);
+  rl.info('JWT token generated', { durationMs: tokenTime });
+  rl.success({ user: { id: user.id, username: user.username } });
     
     res.json({
       token,
@@ -101,47 +71,24 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] POST /api/auth/login FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      username: req.body.username
-    });
-    
-    res.status(500).json({ 
-      error: 'Login failed',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { username: req.body?.username });
+    res.status(500).json({ error: 'Login failed', timestamp: new Date().toISOString() });
   }
 });
 
 // POST /api/auth/register - User registration (admin only)
 router.post('/register', async (req, res) => {
-  const requestId = `auth-register-${Date.now()}`;
+  const rl = require('../utils/logger').createRequestLogger('POST', '/api/auth/register', req);
   const startTime = Date.now();
   
   try {
-    console.log(`🔐➕ [${new Date().toISOString()}] Starting POST /api/auth/register [${requestId}]`);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
+    rl.requestStart(req);
     const { username, password, role = 'user', permissions = {} } = req.body;
-    console.log(`📊 Registration attempt: username="${username}", role="${role}"`);
-    
-    console.log(`🔍 Step 1: Validating input parameters with security constraints...`);
+    rl.info('Registration attempt', { username, role });
+    rl.validationStart('Validating input parameters');
     if (!username || !password) {
-      console.log(`❌ Validation failed: Username or password missing`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/register completed with 400 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(400).json({ 
-        error: 'Username and password are required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('credentials', ['Username or password missing']);
+      return res.status(400).json({ error: 'Username and password are required', timestamp: new Date().toISOString() });
     }
     
     // Enhanced validation with database constraints
@@ -178,62 +125,38 @@ router.post('/register', async (req, res) => {
     }
 
     if (validationErrors.length > 0) {
-      console.log(`❌ Validation failed:`, validationErrors);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/register completed with 400 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(400).json({ 
-        error: 'Validation failed',
-        details: validationErrors,
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('register', validationErrors);
+      return res.status(400).json({ error: 'Validation failed', details: validationErrors, timestamp: new Date().toISOString() });
     }
-    
-    console.log(`🔍 Step 2: Checking if user already exists...`);
+
+    rl.businessLogic('Checking if user already exists');
     const existingUserQuery = 'SELECT id FROM users WHERE username = $1';
-    const queryStart = Date.now();
+    const queryStart = rl.queryStart('check user exists', existingUserQuery, [username]);
     const existingUser = await pool.query(existingUserQuery, [username]);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ User existence check completed in ${queryTime}ms, found ${existingUser.rows.length} users`);
-    
+    rl.querySuccess('check user exists', queryStart, existingUser, true);
+
     if (existingUser.rows.length > 0) {
-      console.log(`❌ Username already exists: ${username}`);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/register completed with 409 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(409).json({ 
-        error: 'Username already exists',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('Username already exists', { username });
+      return res.status(409).json({ error: 'Username already exists', timestamp: new Date().toISOString() });
     }
     
-    console.log(`🔐 Step 3: Hashing password...`);
-    const saltRounds = 12;
-    const hashStart = Date.now();
-    const passwordHash = await bcrypt.hash(password, saltRounds);
-    const hashTime = Date.now() - hashStart;
-    
-    console.log(`✅ Password hashed in ${hashTime}ms with ${saltRounds} salt rounds`);
-    
-    console.log(`📝 Step 4: Creating user in database...`);
+  rl.businessLogic('Hashing password and creating user');
+  const saltRounds = 12;
+  const hashStart = Date.now();
+  const passwordHash = await bcrypt.hash(password, saltRounds);
+  rl.info('Password hashed', { durationMs: Date.now() - hashStart, saltRounds });
+  rl.businessLogic('Creating user in database');
     const createUserQuery = `
       INSERT INTO users (username, password_hash, role, permissions, created_at, updated_at)
       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id, username, role, permissions, created_at
     `;
     
-    const insertStart = Date.now();
-    const result = await pool.query(createUserQuery, [username, passwordHash, role, JSON.stringify(permissions)]);
-    const insertTime = Date.now() - insertStart;
-    const newUser = result.rows[0];
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`✅ User created successfully in ${insertTime}ms`);
-    console.log(`👤 New user details: ID=${newUser.id}, Username=${newUser.username}, Role=${newUser.role}`);
-    console.log(`🎯 [${new Date().toISOString()}] POST /api/auth/register completed successfully in ${totalTime}ms [${requestId}]`);
+  const insertStart = rl.queryStart('insert user', createUserQuery, [username, '[REDACTED]', role, '[REDACTED]']);
+  const result = await pool.query(createUserQuery, [username, passwordHash, role, JSON.stringify(permissions)]);
+  rl.querySuccess('insert user', insertStart, result, true);
+  const newUser = result.rows[0];
+  rl.success({ user: { id: newUser.id, username: newUser.username, role: newUser.role } });
     
     res.status(201).json({
       message: 'User created successfully',
@@ -246,120 +169,53 @@ router.post('/register', async (req, res) => {
       }
     });
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] POST /api/auth/register FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      constraint: error.constraint,
-      username: req.body.username,
-      role: req.body.role
-    });
-    
-    res.status(500).json({ 
-      error: 'Registration failed',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { username: req.body?.username, role: req.body?.role });
+    res.status(500).json({ error: 'Registration failed', timestamp: new Date().toISOString() });
   }
 });
 
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
-  const requestId = `auth-verify-${Date.now()}`;
   const startTime = Date.now();
-  
-  console.log(`🔐🔍 [${new Date().toISOString()}] Starting token authentication [${requestId}]`);
-  console.log(`📝 Path: ${req.path}, Method: ${req.method}, IP: ${req.ip}`);
-  
+  const rl = require('../utils/logger').createRequestLogger('AUTH', 'authenticateToken', req);
+  rl.requestStart(req);
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-  
-  console.log(`🎫 Step 1: Checking for authorization token...`);
+  rl.businessLogic('Checking for authorization token');
   if (!token) {
-    console.log(`❌ No token provided in authorization header`);
-    const totalTime = Date.now() - startTime;
-    console.log(`🎯 [${new Date().toISOString()}] Token authentication completed with 401 in ${totalTime}ms [${requestId}]`);
-    
-    return res.status(401).json({ 
-      error: 'Access token is required',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.validationError('token', ['No token provided']);
+    return res.status(401).json({ error: 'Access token is required', timestamp: new Date().toISOString() });
   }
-  
-  console.log(`🔧 Step 2: Verifying JWT token...`);
+  rl.businessLogic('Verifying JWT token');
   const verifyStart = Date.now();
   
   jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
     const verifyTime = Date.now() - verifyStart;
     
     if (err) {
-      console.log(`❌ JWT verification failed in ${verifyTime}ms:`, err.message);
-      const totalTime = Date.now() - startTime;
-      console.log(`🎯 [${new Date().toISOString()}] Token authentication completed with 403 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(403).json({ 
-        error: 'Invalid or expired token',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('JWT verification failed', { message: err.message });
+      return res.status(403).json({ error: 'Invalid or expired token', timestamp: new Date().toISOString() });
     }
-    
-    console.log(`✅ JWT verified successfully in ${verifyTime}ms for user ID: ${decoded.userId}`);
-    
-    console.log(`📝 Step 3: Fetching latest user data...`);
+    rl.info('JWT verified', { durationMs: verifyTime, userId: decoded.userId });
+    rl.businessLogic('Fetching latest user data');
     try {
       const userQuery = 'SELECT id, username, role, permissions FROM users WHERE id = $1';
-      const userStart = Date.now();
+      const userStart = rl.queryStart('fetch user', userQuery, [decoded.userId]);
       const userResult = await pool.query(userQuery, [decoded.userId]);
-      const userTime = Date.now() - userStart;
-      
-      console.log(`✅ User data fetched in ${userTime}ms, found ${userResult.rows.length} users`);
-      
+      rl.querySuccess('fetch user', userStart, userResult, true);
+
       if (userResult.rows.length === 0) {
-        console.log(`❌ User not found in database: ID=${decoded.userId}`);
-        const totalTime = Date.now() - startTime;
-        console.log(`🎯 [${new Date().toISOString()}] Token authentication completed with 403 in ${totalTime}ms [${requestId}]`);
-        
-        return res.status(403).json({ 
-          error: 'User not found',
-          requestId: requestId,
-          timestamp: new Date().toISOString()
-        });
+        rl.warn('User not found for token', { userId: decoded.userId });
+        return res.status(403).json({ error: 'User not found', timestamp: new Date().toISOString() });
       }
-      
+
       const user = userResult.rows[0];
-      req.user = {
-        ...decoded,
-        role: user.role,
-        permissions: user.permissions
-      };
-      
-      const totalTime = Date.now() - startTime;
-      console.log(`👤 Authentication successful for: ${user.username} (ID: ${user.id}, Role: ${user.role})`);
-      console.log(`🎯 [${new Date().toISOString()}] Token authentication completed successfully in ${totalTime}ms [${requestId}]`);
-      
+      req.user = { ...decoded, role: user.role, permissions: user.permissions };
+      rl.success({ user: { id: user.id, username: user.username, role: user.role } });
       next();
     } catch (error) {
-      const totalTime = Date.now() - startTime;
-      console.error(`❌ [${new Date().toISOString()}] Token authentication FAILED after ${totalTime}ms [${requestId}]`);
-      console.error(`💥 Database error:`, {
-        message: error.message,
-        stack: error.stack,
-        code: error.code,
-        userId: decoded.userId
-      });
-      
-      return res.status(500).json({ 
-        error: 'Authentication failed',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.error(error, { userId: decoded.userId });
+      return res.status(500).json({ error: 'Authentication failed', timestamp: new Date().toISOString() });
     }
   });
 };
@@ -368,12 +224,9 @@ const authenticateToken = (req, res, next) => {
 router.get('/verify', authenticateToken, (req, res) => {
   const requestId = `auth-verify-endpoint-${Date.now()}`;
   const startTime = Date.now();
-  
-  console.log(`🔐✅ [${new Date().toISOString()}] Starting GET /api/auth/verify [${requestId}]`);
-  console.log(`👤 Verified user: ${req.user.username} (ID: ${req.user.userId}, Role: ${req.user.role})`);
-  
-  const totalTime = Date.now() - startTime;
-  console.log(`🎯 [${new Date().toISOString()}] GET /api/auth/verify completed successfully in ${totalTime}ms [${requestId}]`);
+  rl = require('../utils/logger').createRequestLogger('GET', '/api/auth/verify', req);
+  rl.requestStart(req);
+  rl.info('Verified user', { id: req.user.userId, username: req.user.username, role: req.user.role });
   
   res.json({
     valid: true,
@@ -392,41 +245,19 @@ router.get('/users', authenticateToken, async (req, res) => {
   const startTime = Date.now();
   
   try {
-    console.log(`🔐👥 [${new Date().toISOString()}] Starting GET /api/auth/users [${requestId}]`);
-    console.log(`👤 Requested by: ${req.user.username} (ID: ${req.user.userId}, Role: ${req.user.role})`);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`📝 Step 1: Preparing users query...`);
+  const rl = require('../utils/logger').createRequestLogger('GET', '/api/auth/users', req);
+  rl.requestStart(req);
+  rl.info('Get users requested', { requestedBy: req.user.username, userId: req.user.userId });
+  rl.businessLogic('Preparing users query');
     const query = "SELECT id, username, role, permissions, created_at FROM users WHERE status = 'active' ORDER BY created_at DESC";
-
-    console.log(`🔧 Step 2: Executing users query...`);
-    const queryStart = Date.now();
-    const result = await pool.query(query);
-    const queryTime = Date.now() - queryStart;
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`✅ Users query executed successfully in ${queryTime}ms`);
-    console.log(`📊 Found ${result.rows.length} users`);
-    console.log(`👥 User summary:`, result.rows.map(u => ({ id: u.id, username: u.username, role: u.role })));
-    console.log(`🎯 [${new Date().toISOString()}] GET /api/auth/users completed successfully in ${totalTime}ms [${requestId}]`);
-    
-    res.json(result.rows);
+  const queryStart = rl.queryStart('users list', query);
+  const result = await pool.query(query);
+  rl.querySuccess('users list', queryStart, result, true);
+  rl.success({ count: result.rows.length });
+  res.json(result.rows);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] GET /api/auth/users FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      requestedBy: req.user.username
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch users',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+  rl.error(error, { requestedBy: req.user.username });
+  res.status(500).json({ error: 'Failed to fetch users', timestamp: new Date().toISOString() });
   }
 });
 

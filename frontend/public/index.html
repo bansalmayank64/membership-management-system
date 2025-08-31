@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Goga Ji Library</title>
+    <!-- Early suppression of noisy console.log/debug in production. Use localStorage.debugLogs='true' to re-enable. -->
+    <script>
+      try {
+        var allow = false;
+        try { allow = window.localStorage && window.localStorage.getItem('debugLogs') === 'true'; } catch(e) {}
+        if (!allow) {
+          console.log = function(){};
+          console.debug = function(){};
+        }
+      } catch (e) { /* ignore */ }
+    </script>
     <script type="module" crossorigin src="/assets/index-66eb54f3.js"></script>
   </head>
   <body>

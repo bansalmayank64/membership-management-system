@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { pool } = require('./config/database');
+const logger = require('./utils/logger');
+const { requestLoggingMiddleware, errorLoggingMiddleware } = require('./middleware/logging');
 
 // Import routes
 const seatRoutes = require('./routes/seats');
@@ -23,6 +25,9 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Attach request logging middleware early
+app.use(requestLoggingMiddleware);
 
 // Serve static frontend files
 const path = require('path');
@@ -58,13 +63,8 @@ app.use('/api/payments', auth, paymentRoutes);
 app.use('/api/expenses', auth, expenseRoutes);
 
 // Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    error: 'Something went wrong!', 
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error' 
-  });
-});
+// Use enhanced error logging middleware
+app.use(errorLoggingMiddleware);
 
 
 // Fallback: serve frontend for any non-API route
@@ -76,8 +76,9 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV}`);
+  const logger = require('./utils/logger');
+  logger.info(`Server is running on port ${PORT}`);
+  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 module.exports = app;

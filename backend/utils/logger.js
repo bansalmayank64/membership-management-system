@@ -249,6 +249,22 @@ class APILogger {
   }
 
   /**
+   * Log errors (general-purpose)
+   * This mirrors the interface expected by middleware (logger.error(message, data))
+   */
+  error(message, data = null) {
+    console.error(`❌ ${message}`);
+    if (data) {
+      // Avoid dumping very large objects directly; show masked/summarized where possible
+      try {
+        console.error(`📋 Error data:`, data);
+      } catch (e) {
+        console.error(`📋 Error data (stringified):`, String(data));
+      }
+    }
+  }
+
+  /**
    * Get emoji for HTTP method
    */
   getMethodEmoji(method) {
@@ -323,6 +339,11 @@ class APILogger {
       statistics: (title, stats) => this.statistics(title, stats),
       info: (message, data) => this.info(message, data),
       warn: (message, data) => this.warn(message, data)
+  ,
+  // Backwards-compatible request-level helpers
+  requestStart: (req) => this.requestStart(method, endpoint, req, requestId),
+  requestSuccess: (result) => this.requestSuccess(method, endpoint, requestId, startTime, result),
+  requestError: (error, context) => this.requestError(method, endpoint, requestId, startTime, error, context)
     };
   }
 }

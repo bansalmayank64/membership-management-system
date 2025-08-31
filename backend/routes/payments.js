@@ -1,19 +1,14 @@
 const express = require('express');
 const { pool } = require('../config/database');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
 // GET /api/payments - Get all payments
 router.get('/', async (req, res) => {
-  const requestId = `payments-get-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('GET', '/api/payments', req);
   try {
-    console.log(`💰 [${new Date().toISOString()}] Starting GET /api/payments [${requestId}]`);
-    console.log(`📊 Request details: IP=${req.ip}, User-Agent=${req.get('User-Agent')?.substring(0, 50)}...`);
-    console.log(`📝 Query params:`, req.query);
-    
-    console.log(`📝 Step 1: Preparing database query for all payments...`);
+    rl.businessLogic('Preparing database query for all payments');
     const query = `
       SELECT 
         p.*,
@@ -24,64 +19,31 @@ router.get('/', async (req, res) => {
       LEFT JOIN students s ON p.student_id = s.id
       ORDER BY p.payment_date DESC
     `;
-    
-    console.log(`🔍 Step 2: Executing database query...`);
+    rl.queryStart('Execute payments query', query);
     const queryStart = Date.now();
     const result = await pool.query(query);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ Query executed successfully in ${queryTime}ms, returned ${result.rows.length} rows`);
-    console.log(`📋 Sample payment data:`, result.rows.slice(0, 2));
-    
-    const totalTime = Date.now() - startTime;
-    console.log(`🎯 [${new Date().toISOString()}] GET /api/payments completed successfully in ${totalTime}ms [${requestId}]`);
-    
+    rl.querySuccess('Execute payments query', queryStart, result, true);
+
+    rl.success(result.rows);
     res.json(result.rows);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] GET /api/payments FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      position: error.position,
-      constraint: error.constraint
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch payments',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+  rl.error(error);
+  res.status(500).json({ error: 'Failed to fetch payments', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
 // GET /api/payments/student/:studentId - Get payments for a specific student
 router.get('/student/:studentId', async (req, res) => {
-  const requestId = `payments-student-get-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('GET', '/api/payments/student/:studentId', req);
   try {
-    console.log(`💰👤 [${new Date().toISOString()}] Starting GET /api/payments/student/:studentId [${requestId}]`);
-    
     const { studentId } = req.params;
-    console.log(`📊 Request params: studentId="${studentId}"`);
-    console.log(`📝 IP: ${req.ip}, User-Agent: ${req.get('User-Agent')?.substring(0, 50)}...`);
-    
-    console.log(`🔍 Step 1: Validating student ID parameter...`);
+    rl.validationStart('Validating student ID parameter');
     if (!studentId || isNaN(studentId)) {
-      console.log(`❌ Validation failed: Invalid student ID`);
-      return res.status(400).json({ 
-        error: 'Valid student ID is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('studentId', ['Invalid student ID']);
+      return res.status(400).json({ error: 'Valid student ID is required', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Preparing database query for student payments...`);
+
+    rl.businessLogic('Preparing database query for student payments');
     const query = `
       SELECT 
         p.*,
@@ -93,47 +55,21 @@ router.get('/student/:studentId', async (req, res) => {
       WHERE p.student_id = $1
       ORDER BY p.payment_date DESC
     `;
-    
-    console.log(`🔍 Step 3: Executing database query...`);
-    const queryStart = Date.now();
+    const queryStart = rl.queryStart('Execute student payments query', query, [studentId]);
     const result = await pool.query(query, [studentId]);
-    const queryTime = Date.now() - queryStart;
-    
-    console.log(`✅ Query executed successfully in ${queryTime}ms, returned ${result.rows.length} rows`);
-    console.log(`📋 Payment records for student ${studentId}:`, result.rows.length);
-    
-    const totalTime = Date.now() - startTime;
-    console.log(`🎯 [${new Date().toISOString()}] GET /api/payments/student/:studentId completed successfully in ${totalTime}ms [${requestId}]`);
-    
+    rl.querySuccess('Execute student payments query', queryStart, result, true);
+
+    rl.success(result.rows);
     res.json(result.rows);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] GET /api/payments/student/:studentId FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      detail: error.detail,
-      hint: error.hint,
-      studentId: req.params.studentId
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch student payments',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error);
+    res.status(500).json({ error: 'Failed to fetch student payments', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
 // POST /api/payments - Create a new payment
 router.post('/', async (req, res) => {
-  const startTime = Date.now();
-  console.log('\n🔥 === PAYMENT CREATE REQUEST START ===');
-  console.log('📅 Timestamp:', new Date().toISOString());
-  console.log('📨 Request Body:', JSON.stringify(req.body, null, 2));
-  
+  const rl = logger.createRequestLogger('POST', '/api/payments', req);
   try {
     const {
       student_id,
@@ -145,8 +81,8 @@ router.post('/', async (req, res) => {
       modified_by,
       extend_membership = false // New field for membership extension
     } = req.body;
-    
-    console.log('🔍 Step 1: Validating payment data with database constraints...');
+
+    rl.validationStart('Validating payment data');
     
     // Enhanced validation with database schema constraints
     const validationErrors = [];
@@ -205,91 +141,82 @@ router.post('/', async (req, res) => {
     }
 
     if (validationErrors.length > 0) {
-      console.log('❌ Validation failed:', validationErrors);
-      return res.status(400).json({ 
-        error: 'Validation failed',
-        details: validationErrors,
-        received: { student_id, amount, payment_date, payment_mode, payment_type, remarks },
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('payment', validationErrors);
+      return res.status(400).json({ error: 'Validation failed', details: validationErrors, received: { student_id, amount, payment_date, payment_mode, payment_type, remarks }, timestamp: new Date().toISOString() });
     }
-    
-    console.log('🚀 Step 2: Starting database transaction...');
-    
-    // Start transaction
+
+    rl.transactionStart();
     const client = await pool.connect();
-    
     try {
       await client.query('BEGIN');
-      console.log('✅ Transaction started successfully');
 
-      // Normalize payment mode to lowercase for database consistency
       const normalizedPaymentMode = payment_mode.toLowerCase();
-      
-      console.log('🔍 Step 3: Verifying student exists and getting details...');
+      rl.businessLogic('Verifying student exists and getting details');
       const studentCheckQuery = 'SELECT id, name, sex, membership_till FROM students WHERE id = $1';
       const studentCheck = await client.query(studentCheckQuery, [student_id]);
-      
       if (studentCheck.rows.length === 0) {
-        console.log('❌ Student not found:', student_id);
         throw new Error(`Student with ID ${student_id} not found`);
       }
-      
       const student = studentCheck.rows[0];
-      console.log('✅ Student verified:', { id: student.id, name: student.name, gender: student.sex });
+      rl.info('Student verified', { studentId: student.id, name: student.name, gender: student.sex });
 
-      // Step 3.5: Handle membership extension if requested
       let membershipExtensionDays = 0;
+      // Handle membership extension for monthly fee payments
       if (extend_membership && payment_type === 'monthly_fee') {
-        console.log('📅 Step 3.5: Processing membership extension...');
-        
-        // Get fee configuration for this gender
+        rl.businessLogic('Processing membership extension');
         const feeConfigQuery = 'SELECT monthly_fees FROM student_fees_config WHERE gender = $1';
         const feeConfigResult = await client.query(feeConfigQuery, [student.sex]);
-        
         if (feeConfigResult.rows.length > 0) {
           const monthlyFees = parseFloat(feeConfigResult.rows[0].monthly_fees);
           const paymentAmount = Math.abs(parseFloat(amount));
-          
-          // Calculate days to extend: (payment_amount / monthly_fees) * 30 days
           membershipExtensionDays = Math.floor((paymentAmount / monthlyFees) * 30);
-          
-          console.log(`💰 Monthly fees for ${student.sex}: ₹${monthlyFees}`);
-          console.log(`💳 Payment amount: ₹${paymentAmount}`);
-          console.log(`📅 Calculated extension days: ${membershipExtensionDays}`);
-          
+          rl.info('Membership extension calculated', { monthlyFees, paymentAmount, membershipExtensionDays });
           if (membershipExtensionDays > 0) {
-            // Calculate new membership end date
             const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
             const newMembershipTill = new Date(currentMembershipTill);
             newMembershipTill.setDate(newMembershipTill.getDate() + membershipExtensionDays);
-            
-            // Update student's membership_till
             const updateMembershipQuery = 'UPDATE students SET membership_till = $1 WHERE id = $2';
             await client.query(updateMembershipQuery, [newMembershipTill, student_id]);
-            
-            console.log(`✅ Extended membership by ${membershipExtensionDays} days until: ${newMembershipTill.toISOString()}`);
+            rl.info('Extended membership', { studentId: student_id, newMembershipTill: newMembershipTill.toISOString(), membershipExtensionDays });
           }
         } else {
-          console.warn(`⚠️ No fee configuration found for gender: ${student.sex}`);
+          rl.warn('No fee configuration found for gender', { gender: student.sex });
         }
       }
 
-      console.log('💾 Step 4: Processing payment amount based on type...');
-      
-      // Apply payment type logic: positive for monthly_fee, negative for refund
+      // Handle membership reduction for refunds when requested
+      if (extend_membership && payment_type === 'refund') {
+        rl.businessLogic('Processing membership reduction for refund');
+        const feeConfigQuery = 'SELECT monthly_fees FROM student_fees_config WHERE gender = $1';
+        const feeConfigResult = await client.query(feeConfigQuery, [student.sex]);
+        if (feeConfigResult.rows.length > 0) {
+          const monthlyFees = parseFloat(feeConfigResult.rows[0].monthly_fees);
+          const paymentAmount = Math.abs(parseFloat(amount));
+          const membershipReductionDays = Math.floor((paymentAmount / monthlyFees) * 30);
+          rl.info('Membership reduction calculated', { monthlyFees, paymentAmount, membershipReductionDays });
+          if (membershipReductionDays > 0) {
+            const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+            const newMembershipTill = new Date(currentMembershipTill);
+            newMembershipTill.setDate(newMembershipTill.getDate() - membershipReductionDays);
+            const updateMembershipQuery = 'UPDATE students SET membership_till = $1 WHERE id = $2';
+            await client.query(updateMembershipQuery, [newMembershipTill, student_id]);
+            rl.info('Reduced membership', { studentId: student_id, newMembershipTill: newMembershipTill.toISOString(), membershipReductionDays });
+            // Store the reduction value in membershipExtensionDays for description reuse
+            membershipExtensionDays = -membershipReductionDays;
+          }
+        } else {
+          rl.warn('No fee configuration found for gender', { gender: student.sex });
+        }
+      }
+
       let finalAmount = parseFloat(amount);
       if (payment_type === 'monthly_fee') {
-        finalAmount = Math.abs(finalAmount); // Ensure positive
-        console.log(`💰 Monthly fee payment: ₹${finalAmount} (positive)`);
+        finalAmount = Math.abs(finalAmount);
       } else if (payment_type === 'refund') {
-        finalAmount = -Math.abs(finalAmount); // Ensure negative
-        console.log(`💸 Refund payment: ₹${finalAmount} (negative)`);
+        finalAmount = -Math.abs(finalAmount);
       }
-      
-      console.log('💾 Step 5: Inserting payment record...');
-      
-      // Insert payment
+
+      rl.businessLogic('Inserting payment record');
       const paymentQuery = `
         INSERT INTO payments (
           student_id, amount, payment_date, payment_mode, payment_type, description, modified_by,
@@ -298,62 +225,40 @@ router.post('/', async (req, res) => {
         VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `;
-      
       const paymentValues = [
-        student_id, 
-        finalAmount, 
-        normalizedPaymentMode, 
+        student_id,
+        finalAmount,
+        normalizedPaymentMode,
         payment_type,
-        remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : ''}`, // Default description with extension info
+        remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : ''}`,
         req.user?.userId || req.user?.id || 1
       ];
-      
-      console.log('📝 Payment query:', paymentQuery);
-      console.log('📝 Payment values:', paymentValues);
-      
+
+      rl.queryStart('Insert payment', paymentQuery, paymentValues);
       const paymentResult = await client.query(paymentQuery, paymentValues);
-      console.log('✅ Step 5: Payment record inserted:', paymentResult.rows[0]);
-      
-      console.log('💯 Step 6: Committing transaction...');
+      rl.transactionCommit();
       await client.query('COMMIT');
-      console.log('✅ Transaction committed successfully');
-      
-      const executionTime = Date.now() - startTime;
-      console.log('🎉 === PAYMENT CREATE SUCCESS ===');
-      console.log('⏱️ Total execution time:', executionTime + 'ms');
-      console.log('📤 Response:', JSON.stringify(paymentResult.rows[0], null, 2));
-      
+
+      rl.success(paymentResult.rows[0]);
       res.status(201).json(paymentResult.rows[0]);
-      
     } catch (error) {
-      console.log('💥 Database operation failed, rolling back...');
       await client.query('ROLLBACK');
-      console.log('✅ Transaction rolled back');
+      rl.transactionRollback(error.message);
       throw error;
     } finally {
-      console.log('🔌 Releasing database connection...');
       client.release();
-      console.log('✅ Database connection released');
     }
   } catch (error) {
-    const executionTime = Date.now() - startTime;
-    console.error('❌ === PAYMENT CREATE ERROR ===');
-    console.error('⏱️ Failed after:', executionTime + 'ms');
-    console.error('💥 Error details:', error);
-    console.error('📍 Stack trace:', error.stack);
-    
-    res.status(500).json({ error: 'Failed to create payment: ' + error.message });
+    rl.error(error);
+  logger.error('Error creating payment', { error: error.message, stack: error.stack });
+  res.status(500).json({ error: 'Failed to create payment: ' + error.message });
   }
 });
 
 // PUT /api/payments/:id - Update payment
 router.put('/:id', async (req, res) => {
-  const requestId = `payments-put-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('PUT', '/api/payments/:id', req);
   try {
-    console.log(`💰🔄 [${new Date().toISOString()}] Starting PUT /api/payments/:id [${requestId}]`);
-    
     const { id } = req.params;
     const {
       student_id,
@@ -363,11 +268,7 @@ router.put('/:id', async (req, res) => {
       description,
       modified_by
     } = req.body;
-    
-    console.log(`📊 Request params: id="${id}"`);
-    console.log(`📊 Request body:`, req.body);
-    
-    console.log(`🔍 Step 1: Validating input parameters...`);
+    rl.validationStart('Validating input parameters for payment update');
     
     // Enhanced validation with database constraints
     const validationErrors = [];
@@ -414,16 +315,11 @@ router.put('/:id', async (req, res) => {
     }
 
     if (validationErrors.length > 0) {
-      console.log('❌ Validation failed:', validationErrors);
-      return res.status(400).json({ 
-        error: 'Validation failed',
-        details: validationErrors,
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('update', validationErrors);
+      return res.status(400).json({ error: 'Validation failed', details: validationErrors, requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📝 Step 2: Preparing payment update query...`);
+
+    rl.businessLogic('Preparing payment update query');
     const query = `
       UPDATE payments 
       SET 
@@ -437,111 +333,50 @@ router.put('/:id', async (req, res) => {
       WHERE id = $1
       RETURNING *
     `;
-    
-    console.log(`🔧 Step 3: Executing payment update...`);
-    const queryStart = Date.now();
-    const result = await pool.query(query, [
-      id, student_id, parseFloat(amount), payment_date, payment_mode.toLowerCase(), description, req.user?.userId || req.user?.id || 1
-    ]);
-    const queryTime = Date.now() - queryStart;
-    const totalTime = Date.now() - startTime;
-    
-    console.log(`✅ Update query executed in ${queryTime}ms`);
-    
+    const queryStart = rl.queryStart('Execute payment update', query, [id, student_id, parseFloat(amount), payment_date, payment_mode.toLowerCase(), description, req.user?.userId || req.user?.id || 1]);
+    const result = await pool.query(query, [id, student_id, parseFloat(amount), payment_date, payment_mode.toLowerCase(), description, req.user?.userId || req.user?.id || 1]);
+    rl.querySuccess('Execute payment update', queryStart, result, true);
+
     if (result.rows.length === 0) {
-      console.log(`❌ Payment not found: ID=${id}`);
-      console.log(`🎯 [${new Date().toISOString()}] PUT /api/payments/:id completed with 404 in ${totalTime}ms [${requestId}]`);
-      
-      return res.status(404).json({ 
-        error: 'Payment not found',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('Payment not found for update', { paymentId: id });
+      return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
-    
-    console.log(`📊 Updated payment data:`, result.rows[0]);
-    console.log(`🎯 [${new Date().toISOString()}] PUT /api/payments/:id completed successfully in ${totalTime}ms [${requestId}]`);
-    
+
+    rl.success(result.rows[0]);
     res.json(result.rows[0]);
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] PUT /api/payments/:id FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      severity: error.severity,
-      paymentId: req.params.id,
-      requestBody: req.body
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to update payment',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { paymentId: req.params.id, requestBody: req.body });
+    res.status(500).json({ error: 'Failed to update payment', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
 // DELETE /api/payments/:id - Delete payment
 router.delete('/:id', async (req, res) => {
-  const requestId = `payments-delete-${Date.now()}`;
-  const startTime = Date.now();
-  
+  const rl = logger.createRequestLogger('DELETE', '/api/payments/:id', req);
   try {
-    console.log(`💰🗑️ [${new Date().toISOString()}] Starting DELETE /api/payments/:id [${requestId}]`);
-    
     const { id } = req.params;
-    console.log(`📊 Request params: id="${id}"`);
-    console.log(`👤 User: ${req.user?.userId || req.user?.id || 'unknown'}`);
-    
+    rl.info('Delete payment request', { paymentId: id, user: req.user?.userId || req.user?.id || 'unknown' });
+
     if (!id || isNaN(id)) {
-      return res.status(400).json({ 
-        error: 'Valid payment ID is required',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.validationError('delete', ['Invalid payment ID']);
+      return res.status(400).json({ error: 'Valid payment ID is required', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
-    
-    console.log(`🔍 Step 1: Deleting payment record...`);
+
     const query = 'DELETE FROM payments WHERE id = $1 RETURNING *';
+    const queryStart = rl.queryStart('Delete payment', query, [id]);
     const result = await pool.query(query, [id]);
-    
+    rl.querySuccess('Delete payment', queryStart, result, true);
+
     if (result.rows.length === 0) {
-      console.log(`❌ Payment not found: ID=${id}`);
-      return res.status(404).json({ 
-        error: 'Payment not found',
-        requestId: requestId,
-        timestamp: new Date().toISOString()
-      });
+      rl.warn('Payment not found for delete', { paymentId: id });
+      return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
-    
-    const totalTime = Date.now() - startTime;
-    console.log(`✅ Payment deleted successfully in ${totalTime}ms`);
-    console.log(`📊 Deleted payment:`, result.rows[0]);
-    console.log(`🎯 [${new Date().toISOString()}] DELETE /api/payments/:id completed successfully in ${totalTime}ms [${requestId}]`);
-    
-    res.json({ 
-      message: 'Payment deleted successfully', 
-      payment: result.rows[0],
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+
+    rl.success(result.rows[0]);
+    res.json({ message: 'Payment deleted successfully', payment: result.rows[0], requestId: rl.requestId, timestamp: new Date().toISOString() });
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [${new Date().toISOString()}] DELETE /api/payments/:id FAILED after ${totalTime}ms [${requestId}]`);
-    console.error(`💥 Error details:`, {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      paymentId: req.params.id
-    });
-    
-    res.status(500).json({ 
-      error: 'Failed to delete payment',
-      requestId: requestId,
-      timestamp: new Date().toISOString()
-    });
+    rl.error(error, { paymentId: req.params.id });
+    res.status(500).json({ error: 'Failed to delete payment', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
@@ -564,8 +399,8 @@ router.get('/summary/stats', async (req, res) => {
     const result = await pool.query(query);
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error fetching payment summary:', error);
-    res.status(500).json({ error: 'Failed to fetch payment summary' });
+  logger.error('Error fetching payment summary', { error: error.message, stack: error.stack });
+  res.status(500).json({ error: 'Failed to fetch payment summary' });
   }
 });
 

@@ -72,6 +72,8 @@ function StudentProfile() {
             <Typography variant="subtitle1">Seat Number: {student.seat_number}</Typography>
             <Typography variant="subtitle1">Contact: {student.contact_number}</Typography>
             <Typography variant="subtitle1">Father's Name: {student.father_name}</Typography>
+            <Typography variant="subtitle1">Aadhaar: {student.aadhaar_number || student.aadhaarNumber || 'N/A'}</Typography>
+            <Typography variant="subtitle1">Address: {student.address || 'N/A'}</Typography>
           </Grid>
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle1">Start Date: {formatDateForDisplay(student.membership_date)}</Typography>

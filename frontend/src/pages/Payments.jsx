@@ -23,6 +23,7 @@ import {
   CardContent,
   Chip
 } from '@mui/material';
+import { Autocomplete } from '@mui/material';
 import { Refresh as RefreshIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
@@ -468,7 +469,7 @@ function Payments() {
             sx={{ ml: 1, ...pageStyles.actionButton }}
             onClick={handleOpenAddPayment}
           >
-            Add Payment
+            Add/Refund Payment
           </Button>
         </Box>
   </Box>
@@ -669,34 +670,45 @@ function Payments() {
       </Paper>
       {/* Add Payment Dialog (select student + amount) */}
       <Dialog open={addPaymentOpen} onClose={() => setAddPaymentOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add Payment</DialogTitle>
+        <DialogTitle>Add/Refund Payment</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {/* Searchable student selector */}
             <FormControl fullWidth>
-              <InputLabel>Select Student</InputLabel>
-              <Select
-                value={selectedStudentId}
-                onChange={(e) => handleStudentSelect(e.target.value)}
-                label="Select Student"
-              >
-                <MenuItem value="">
-                  <em>Choose student</em>
-                </MenuItem>
-                {students.filter(s => s && s.id).map(student => (
-                  <MenuItem key={student.id} value={student.id}>
-                    {/* Compact but informative label: Name · ID · Mobile · Father */}
+              {/* Using Autocomplete for searchable dropdown by student name/ID */}
+              {/* eslint-disable-next-line react/jsx-no-undef */}
+              <Autocomplete
+                options={students.filter(s => s && s.id)}
+                getOptionLabel={(option) => {
+                  if (!option) return '';
+                  const seatPart = option.seat_number ? ` • 🪑${option.seat_number}` : '';
+                  return `${option.name || ''}${seatPart} (${option.id || ''})`;
+                }}
+                value={students.find(s => s.id === selectedStudentId) || null}
+                onChange={(e, value) => handleStudentSelect(value ? value.id : '')}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.id}>
                     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{student.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">#{student.id}</Typography>
+                        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{option.name}</Typography>
+                        {option.seat_number && (
+                          <Typography variant="caption" color="text.secondary">🪑{option.seat_number}</Typography>
+                        )}
+                        <Typography variant="caption" color="text.secondary">#{option.id}</Typography>
                       </Box>
                       <Typography variant="caption" color="text.secondary" noWrap>
-                        {student.contact_number || 'No contact'} · {student.father_name || 'No father name'}
+                        {option.contact_number || 'No contact'} · {option.father_name || 'No father name'}
                       </Typography>
                     </Box>
-                  </MenuItem>
-                ))}
-              </Select>
+                  </li>
+                )}
+                renderInput={(params) => (
+                  <TextField {...params} label="Select Student" placeholder="Search by name, ID or seat" />
+                )}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                clearOnEscape
+                fullWidth
+              />
             </FormControl>
             <TextField
               fullWidth
@@ -729,6 +741,52 @@ function Payments() {
             </FormControl>
           </Stack>
         </DialogContent>
+
+        {/* Membership Extension / Refund Information */}
+        {feeConfig && membershipExtensionDays > 0 && paymentDataLocal.type === 'monthly_fee' && (
+          <Box sx={{ 
+            p: 2, 
+            bgcolor: 'info.light', 
+            borderRadius: 1,
+            border: '1px solid',
+            borderColor: 'info.main',
+            mx: 3,
+            mb: 1
+          }}>
+            <Typography variant="body2" color="info.contrastText" sx={{ fontWeight: 'medium' }}>
+              📅 Membership Extension Available
+            </Typography>
+            <Typography variant="body2" color="info.contrastText">
+              Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
+            </Typography>
+            <Typography variant="body2" color="info.contrastText">
+              Extension Days: {membershipExtensionDays} days
+            </Typography>
+          </Box>
+        )}
+
+        {feeConfig && membershipExtensionDays > 0 && paymentDataLocal.type === 'refund' && (
+          <Box sx={{ 
+            p: 2, 
+            bgcolor: 'error.light', 
+            borderRadius: 1,
+            border: '1px solid',
+            borderColor: 'error.main',
+            mx: 3,
+            mb: 1
+          }}>
+            <Typography variant="body2" color="error.contrastText" sx={{ fontWeight: 'medium' }}>
+              🔄 Membership Refund Information
+            </Typography>
+            <Typography variant="body2" color="error.contrastText">
+              Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
+            </Typography>
+            <Typography variant="body2" color="error.contrastText">
+              This refund will reduce membership by {membershipExtensionDays} days
+            </Typography>
+          </Box>
+        )}
+
         <DialogActions>
           <Button onClick={() => setAddPaymentOpen(false)}>Cancel</Button>
           {user && user.role === 'admin' && (
@@ -737,7 +795,7 @@ function Payments() {
               onClick={() => processLocalPayment(false)}
               disabled={!selectedStudentId || !paymentDataLocal.amount || paymentLoadingLocal}
             >
-              Add Payment
+              {paymentDataLocal.type === 'refund' ? 'Refund Payment' : 'Add Payment'}
             </Button>
           )}
           {feeConfig && membershipExtensionDays > 0 && (
@@ -746,7 +804,9 @@ function Payments() {
               onClick={() => processLocalPayment(true)}
               disabled={!selectedStudentId || !paymentDataLocal.amount || paymentLoadingLocal}
             >
-              Add Payment & Extend {membershipExtensionDays} Days
+              {paymentDataLocal.type === 'refund'
+                ? `Refund Payment & Reduce ${membershipExtensionDays} Days`
+                : `Add Payment & Extend ${membershipExtensionDays} Days`}
             </Button>
           )}
         </DialogActions>
