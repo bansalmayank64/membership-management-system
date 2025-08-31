@@ -527,7 +527,6 @@ function Students() {
   // Log stats once when they change
   useEffect(() => {
     try {
-      setEditStudentLoading(true);
       logger.info('📈 [getStats] Statistics calculated', stats);
     } catch (e) {
       logger.debug('Failed to log stats', e);
