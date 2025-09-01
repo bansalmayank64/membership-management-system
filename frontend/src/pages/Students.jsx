@@ -39,6 +39,7 @@ import {
   ListItemIcon,
   ListItemText
 } from '@mui/material';
+import { Autocomplete } from '@mui/material';
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
 import logger from '../utils/clientLogger';
@@ -67,6 +68,7 @@ import {
   AccessTime as AccessTimeIcon,
   Person as PersonIcon
 } from '@mui/icons-material';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
  
 function Students() {
   // Theme and mobile breakpoint detection
@@ -2912,7 +2914,20 @@ function Students() {
                         </IconButton>
                       </>
                     ) : null}
-                    <IconButton size="small" onClick={(e) => handleActionClick(e, seat)}>
+                    {/* If seat is empty, show quick assign button before the action menu */}
+                    {!seat.studentName ? (
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction({ seatNumber: seat.seatNumber, seat_number: seat.seatNumber }); setAssignSeatData({ seatNumber: seat.seatNumber, studentId: '' }); setAssignSeatOpen(true); }} aria-label="Assign seat">
+                        <PersonAddIcon fontSize="small" />
+                      </IconButton>
+                    ) : null}
+                    <IconButton 
+                      size="small" 
+                      onClick={(e) => handleActionClick(e, seat)}
+                      sx={{ 
+                        zIndex: 100,
+                        position: 'relative'
+                      }}
+                    >
                       <MoreVertIcon />
                     </IconButton>
                   </Box>
@@ -3079,6 +3094,12 @@ function Students() {
                           <LinkOffIcon fontSize="small" />
                         </IconButton>
                       </>
+                    ) : null}
+                    {/* Quick assign button for empty seats */}
+                    {!seat.studentName ? (
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction({ seatNumber: seat.seatNumber, seat_number: seat.seatNumber }); setAssignSeatData({ seatNumber: seat.seatNumber, studentId: '' }); setAssignSeatOpen(true); }} aria-label="Assign seat">
+                        <PersonAddIcon fontSize="small" />
+                      </IconButton>
                     ) : null}
                     <IconButton 
                       size="small" 
@@ -3251,7 +3272,51 @@ function Students() {
                             ) : (
                               <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
                             )}
-                            <Typography variant="body1" sx={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{student.name}</Typography>
+                            <Typography
+                              variant="body1"
+                              sx={{
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                color: 'primary.main',
+                                cursor: 'pointer',
+                                '&:hover': { textDecoration: 'underline' }
+                              }}
+                              onClick={async (e) => {
+                                try {
+                                  e.stopPropagation();
+                                  setSelectedItemForAction(student);
+                                  setViewStudentData({ ...student });
+
+                                  const resp = await fetch(`/api/payments/student/${student.id}`, {
+                                    headers: {
+                                      'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                                      'Content-Type': 'application/json'
+                                    }
+                                  });
+
+                                  if (resp.ok) {
+                                    const payments = await resp.json();
+                                    const totalPaid = (payments || []).reduce((sum, p) => {
+                                      const amt = parseFloat(p.amount);
+                                      return sum + (isNaN(amt) ? 0 : amt);
+                                    }, 0);
+                                    setViewStudentTotalPaid(totalPaid);
+                                  } else {
+                                    setViewStudentTotalPaid(0);
+                                  }
+
+                                  setViewStudentOpen(true);
+                                } catch (err) {
+                                  logger.error('❌ [inactive mobile name click] Error fetching payments', err);
+                                  setViewStudentTotalPaid(0);
+                                  setViewStudentOpen(true);
+                                }
+                              }}
+                            >
+                              {student.name}
+                            </Typography>
                           </Box>
                           <Typography variant="caption" color="text.secondary" display="block">
                             {formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}
@@ -3306,7 +3371,41 @@ function Students() {
                 <TableCell>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                    <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
+                    {(student.membership_status === 'inactive' || student.status === 'inactive') ? (
+                      <Typography
+                        variant="body2"
+                        sx={{ fontWeight: 'medium', color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            setSelectedItemForAction(student);
+                            setViewStudentData({ ...student });
+                            const response = await fetch(`/api/payments/student/${student.id}`, {
+                              headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                                'Content-Type': 'application/json'
+                              }
+                            });
+                            if (response.ok) {
+                              const payments = await response.json();
+                              const totalPaid = (payments || []).reduce((sum, p) => { const a = parseFloat(p.amount); return sum + (isNaN(a) ? 0 : a); }, 0);
+                              setViewStudentTotalPaid(totalPaid);
+                            } else {
+                              setViewStudentTotalPaid(0);
+                            }
+                            setViewStudentOpen(true);
+                          } catch (err) {
+                            logger.error('❌ [desktop inactive name click] Error fetching payments', err);
+                            setViewStudentTotalPaid(0);
+                            setViewStudentOpen(true);
+                          }
+                        }}
+                      >
+                        {student.name}
+                      </Typography>
+                    ) : (
+                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
+                    )}
                   </Box>
                 </TableCell>
                 <TableCell align="center">
@@ -3482,61 +3581,94 @@ function Students() {
             <ListItemIcon>
               <HistoryIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>View Seat History</ListItemText>
+            <ListItemText>Seat Assignment History</ListItemText>
           </MenuItem>
         ) : null}
         
-        {currentTab === 1 && selectedItemForAction && [ // Active Students View Actions
-          <MenuItem key="viewStudent" onClick={handleViewStudent}>
-            <ListItemIcon>
-              <VisibilityIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>View Student Details</ListItemText>
-          </MenuItem>,
-          <MenuItem key="addPayment" onClick={handleAddPayment}>
-            <ListItemIcon>
-              <PaymentIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Add Payment</ListItemText>
-          </MenuItem>,
-          <MenuItem key="editStudent" onClick={handleEditStudent}>
-            <ListItemIcon>
-              <EditIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Edit Student</ListItemText>
-          </MenuItem>,
-          <MenuItem key="paymentHistory" onClick={handlePaymentHistory}>
-            <ListItemIcon>
-              <HistoryIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Payment History</ListItemText>
-          </MenuItem>,
-          <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
-            <ListItemIcon>
-              <HistoryIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Seat Assignment History</ListItemText>
-          </MenuItem>,
-          <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
-            <ListItemIcon>
-              <HistoryIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Seat Assignment History</ListItemText>
-          </MenuItem>,
-          <MenuItem key="seatHistory" onClick={handleStudentSeatHistory}>
-            <ListItemIcon>
-              <EventSeatIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Student Seat History</ListItemText>
-          </MenuItem>,
-          <Divider key="divider" />,
-          <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
-            <ListItemIcon>
-              <DeleteIcon fontSize="small" color="error" />
-            </ListItemIcon>
-            <ListItemText>Deactivate Student</ListItemText>
-          </MenuItem>
-        ]}
+        {currentTab === 1 && selectedItemForAction && (
+          // If selected student is inactive, expose only Reactivate
+          (selectedItemForAction.membership_status === 'inactive' || selectedItemForAction.status === 'inactive') ? (
+            [
+              <MenuItem key="viewStudent" onClick={handleViewStudent}>
+                <ListItemIcon>
+                  <VisibilityIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>View Student Details</ListItemText>
+              </MenuItem>,
+              <MenuItem key="paymentHistory" onClick={handlePaymentHistory}>
+                <ListItemIcon>
+                  <HistoryIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Payment History</ListItemText>
+              </MenuItem>,
+              <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
+                <ListItemIcon>
+                  <HistoryIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Seat Assignment History</ListItemText>
+              </MenuItem>,
+              <MenuItem key="seatHistory" onClick={handleStudentSeatHistory}>
+                <ListItemIcon>
+                  <EventSeatIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Student Seat History</ListItemText>
+              </MenuItem>,
+              <Divider key="divider" />,
+              <MenuItem key="reactivate" onClick={handleReactivateStudent} sx={{ color: 'success.main' }}>
+                <ListItemIcon>
+                  <CheckCircleIcon fontSize="small" color="success" />
+                </ListItemIcon>
+                <ListItemText>Reactivate Student</ListItemText>
+              </MenuItem>
+            ]
+          ) : (
+            [
+              <MenuItem key="viewStudent" onClick={handleViewStudent}>
+                <ListItemIcon>
+                  <VisibilityIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>View Student Details</ListItemText>
+              </MenuItem>,
+              <MenuItem key="addPayment" onClick={handleAddPayment}>
+                <ListItemIcon>
+                  <PaymentIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Add Payment</ListItemText>
+              </MenuItem>,
+              <MenuItem key="editStudent" onClick={handleEditStudent}>
+                <ListItemIcon>
+                  <EditIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Edit Student</ListItemText>
+              </MenuItem>,
+              <MenuItem key="paymentHistory" onClick={handlePaymentHistory}>
+                <ListItemIcon>
+                  <HistoryIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Payment History</ListItemText>
+              </MenuItem>,
+              <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
+                <ListItemIcon>
+                  <HistoryIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Seat Assignment History</ListItemText>
+              </MenuItem>,
+              <MenuItem key="seatHistory" onClick={handleStudentSeatHistory}>
+                <ListItemIcon>
+                  <EventSeatIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Student Seat History</ListItemText>
+              </MenuItem>,
+              <Divider key="divider" />,
+              <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
+                <ListItemIcon>
+                  <DeleteIcon fontSize="small" color="error" />
+                </ListItemIcon>
+                <ListItemText>Deactivate Student</ListItemText>
+              </MenuItem>
+            ]
+          )
+        )}
 
         {currentTab === 2 && selectedItemForAction && [ // Deactivated Students View Actions
           <MenuItem key="viewStudent" onClick={handleViewStudent}>
@@ -3879,47 +4011,39 @@ function Students() {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth>
-              <InputLabel>Select Student</InputLabel>
-              <Select
-                value={assignSeatData.studentId}
-                onChange={(e) => setAssignSeatData({ ...assignSeatData, studentId: e.target.value })}
-                label="Select Student"
-              >
-                {(() => {
-                  console.log('🔍 [Assign Seat Dialog] Debugging student data:');
-                  console.log('Total students array length:', students.length);
-                  console.log('Students array:', students);
-                  
-                  // Filter out null/undefined students first
-                  const validStudents = students.filter(student => student && typeof student === 'object');
-                  console.log('Valid students after null check:', validStudents.length);
-                  
-                  // Then filter for unassigned students
-                  const unassignedStudents = validStudents.filter(student => {
-                    const hasNoSeat = !student.seat_number && student.seat_number !== 0;
-                    console.log(`Student ${student.name} (ID: ${student.id}): seat_number=${student.seat_number}, hasNoSeat=${hasNoSeat}`);
-                    return hasNoSeat;
-                  });
-                  
-                  console.log('Unassigned students:', unassignedStudents.length);
-                  console.log('Unassigned students data:', unassignedStudents);
-                  
-                  if (unassignedStudents.length === 0) {
-                    return (
-                      <MenuItem disabled>
-                        No unassigned students available
-                      </MenuItem>
-                    );
-                  }
-                  
-                  return unassignedStudents.map((student) => (
-                    <MenuItem key={student.id} value={student.id}>
-                      {student.name} (ID: {student.id})
-                      {student.seat_number && ` - Currently: Seat ${student.seat_number}`}
-                    </MenuItem>
-                  ));
-                })()}
-              </Select>
+              {/* Use the same Autocomplete rendering as Payments Add Payment dialog for exact match */}
+              <Autocomplete
+                options={students.filter(s => s && s.id && (!s.seat_number && s.seat_number !== 0))}
+                getOptionLabel={(option) => {
+                  if (!option) return '';
+                  const seatPart = option.seat_number ? ` • 🪑${option.seat_number}` : '';
+                  return `${option.name || ''}${seatPart} (${option.id || ''})`;
+                }}
+                value={students.find(s => s.id === assignSeatData.studentId) || null}
+                onChange={(e, value) => setAssignSeatData(prev => ({ ...prev, studentId: value ? value.id : '' }))}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.id}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{option.name}</Typography>
+                        {option.seat_number && (
+                          <Typography variant="caption" color="text.secondary">🪑{option.seat_number}</Typography>
+                        )}
+                        <Typography variant="caption" color="text.secondary">#{option.id}</Typography>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" noWrap>
+                        {option.contact_number || 'No contact'} · {option.father_name || 'No father name'}
+                      </Typography>
+                    </Box>
+                  </li>
+                )}
+                renderInput={(params) => (
+                  <TextField {...params} label="Select Student" placeholder="Search by name, ID or seat" />
+                )}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                clearOnEscape
+                fullWidth
+              />
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
                 {(() => {
                   const validStudents = students.filter(student => student && typeof student === 'object');

@@ -175,6 +175,92 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST /api/seats/assign - Assign a student to a seat
+router.post('/assign', async (req, res) => {
+  const rl = logger.createRequestLogger('POST', '/api/seats/assign', req);
+  try {
+    const { seatNumber, studentId } = req.body || {};
+    rl.validationStart('Validating input for seat assign');
+    if (!seatNumber || !studentId) {
+      rl.validationError('missing_params', ['seatNumber and studentId are required']);
+      return res.status(400).json({ error: 'seatNumber and studentId are required', timestamp: new Date().toISOString() });
+    }
+
+    rl.businessLogic('Starting transaction to assign student to seat');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Lock seat row
+      const seatQuery = 'SELECT seat_number FROM seats WHERE seat_number = $1 FOR UPDATE';
+      const seatRes = await client.query(seatQuery, [seatNumber]);
+      if (seatRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        rl.warn('Seat not found for assign', { seatNumber });
+        return res.status(404).json({ error: 'Seat not found', timestamp: new Date().toISOString() });
+      }
+
+      // Ensure seat is not already occupied
+      const occupantCheck = await client.query('SELECT id FROM students WHERE seat_number = $1', [seatNumber]);
+      if (occupantCheck.rows.length > 0) {
+        await client.query('ROLLBACK');
+        rl.warn('Seat already occupied', { seatNumber, occupantId: occupantCheck.rows[0].id });
+        return res.status(409).json({ error: 'Seat is already occupied', timestamp: new Date().toISOString() });
+      }
+
+      // Lock student row
+      const studentQuery = 'SELECT id, sex, seat_number FROM students WHERE id = $1 FOR UPDATE';
+      const studentRes = await client.query(studentQuery, [studentId]);
+      if (studentRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        rl.warn('Student not found for assign', { studentId });
+        return res.status(404).json({ error: 'Student not found', timestamp: new Date().toISOString() });
+      }
+      const studentRow = studentRes.rows[0];
+
+      // Ensure student does not already have a seat
+      if (studentRow.seat_number) {
+        await client.query('ROLLBACK');
+        rl.warn('Student already has a seat', { studentId, currentSeat: studentRow.seat_number });
+        return res.status(409).json({ error: 'Student already has a seat assigned', timestamp: new Date().toISOString() });
+      }
+
+      // Update student record with new seat
+      const updateStudentQuery = `
+        UPDATE students
+        SET seat_number = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING *
+      `;
+      const modifiedBy = req.user?.userId || req.user?.id || 1;
+      const updateStudentRes = await client.query(updateStudentQuery, [seatNumber, modifiedBy, studentId]);
+
+      // Update seat occupant_sex to student's sex
+      const updateSeatQuery = `
+        UPDATE seats
+        SET occupant_sex = $1, modified_by = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE seat_number = $3
+        RETURNING *
+      `;
+      const updateSeatRes = await client.query(updateSeatQuery, [studentRow.sex, modifiedBy, seatNumber]);
+
+      await client.query('COMMIT');
+      rl.info('Seat assigned successfully', { seatNumber, studentId });
+      res.json({ message: 'Seat assigned successfully', student: updateStudentRes.rows[0], seat: updateSeatRes.rows[0], timestamp: new Date().toISOString() });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      rl.transactionRollback(err.message);
+      throw err;
+    } finally {
+      client.release();
+      rl.info('Database connection released after assign');
+    }
+  } catch (error) {
+    rl.error(error, { requestBody: req.body });
+    res.status(500).json({ error: 'Failed to assign seat', details: error.message, timestamp: new Date().toISOString() });
+  }
+});
+
 // GET /api/seats/:seatNumber/history - Get seat change history
 router.get('/:seatNumber/history', async (req, res) => {
   const rl = logger.createRequestLogger('GET', '/api/seats/:seatNumber/history', req);
