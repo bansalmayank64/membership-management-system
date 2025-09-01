@@ -155,6 +155,7 @@ function Payments() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteInfo, setDeleteInfo] = useState(null);
 
   // Global error handler for API calls
   const handleApiError = (error, fallbackMessage = 'An error occurred') => {
@@ -392,13 +393,77 @@ function Payments() {
       setError('You do not have permission to delete payments');
       return;
     }
-    setPaymentToDelete(paymentId);
-    setDeleteDialogOpen(true);
+    // Prepare deletion info: compute membership impact if this payment extended membership
+    (async () => {
+      try {
+        setPaymentToDelete(paymentId);
+        setDeleteDialogOpen(true); // open early with loading state
+
+        // find payment in local state
+        const payment = payments.find(p => p && (p.id === paymentId));
+        if (!payment) return;
+
+        // Default: no membership change
+        let reductionDays = 0;
+        let currentMembershipTill = null;
+        let newMembershipTill = null;
+
+        // Only consider membership impact for monthly_fee payments with positive amount
+        if (payment.payment_type === 'monthly_fee' && payment.amount && Number(payment.amount) > 0) {
+          try {
+            // Fetch student to read current membership_till and sex
+            const studentResp = await fetch(`/api/students/${payment.student_id}`, {
+              headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+            });
+            if (studentResp.ok) {
+              const student = await studentResp.json();
+              currentMembershipTill = student.membership_till || null;
+
+              // Fetch fee config for student's gender if available
+              const sex = student.sex || student.gender || null;
+              if (sex) {
+                const cfgResp = await fetch(`/api/students/fee-config/${sex}`, {
+                  headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                });
+                if (cfgResp.ok) {
+                  const cfg = await cfgResp.json();
+                  const monthlyFee = cfg && cfg.monthly_fees ? Number(cfg.monthly_fees) : null;
+                  if (monthlyFee && monthlyFee > 0) {
+                    reductionDays = Math.floor((Number(payment.amount) / monthlyFee) * 30);
+                    if (reductionDays > 0 && currentMembershipTill) {
+                      // compute new membership_till by subtracting reductionDays
+                      const cur = new Date(currentMembershipTill);
+                      if (!isNaN(cur.getTime())) {
+                        const newDt = new Date(cur);
+                        newDt.setDate(newDt.getDate() - reductionDays);
+                        newMembershipTill = newDt.toISOString().split('T')[0];
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            // ignore errors computing membership impact
+            console.warn('Failed to compute membership impact for deletion', err);
+          }
+        }
+
+        // store computed info in state so dialog can display it
+        setDeleteInfo({ reductionDays, currentMembershipTill, newMembershipTill, payment });
+      } catch (err) {
+        console.error('openDeleteDialog error', err);
+        setPaymentToDelete(paymentId);
+        setDeleteInfo(null);
+        setDeleteDialogOpen(true);
+      }
+    })();
   };
 
   const closeDeleteDialog = () => {
     setDeleteDialogOpen(false);
     setPaymentToDelete(null);
+  setDeleteInfo(null);
   };
 
   // Perform delete (called after confirmation)
@@ -407,6 +472,7 @@ function Payments() {
     setDeleting(true);
     setError(null);
     try {
+      // Delete payment
       const resp = await fetch(`/api/payments/${paymentId}`, {
         method: 'DELETE',
         headers: {
@@ -417,6 +483,43 @@ function Payments() {
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to delete payment');
+      }
+
+      // If we computed a membership reduction, apply it now
+      try {
+        if (deleteInfo && deleteInfo.reductionDays > 0 && deleteInfo.payment && deleteInfo.payment.student_id) {
+          // Update student's membership_till to the new date (if available), otherwise compute from current
+          const studentId = deleteInfo.payment.student_id;
+          let membershipTillToSend = deleteInfo.newMembershipTill || null;
+
+          // If we don't have a computed newMembershipTill but have reductionDays and currentMembershipTill, compute it
+          if (!membershipTillToSend && deleteInfo.currentMembershipTill && deleteInfo.reductionDays) {
+            const cur = new Date(deleteInfo.currentMembershipTill);
+            const newDt = new Date(cur);
+            newDt.setDate(newDt.getDate() - deleteInfo.reductionDays);
+            membershipTillToSend = newDt.toISOString().split('T')[0];
+          }
+
+          if (membershipTillToSend) {
+            // Send PUT to update student's membership_till
+            const updResp = await fetch(`/api/students/${studentId}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+              },
+              body: JSON.stringify({ membership_till: membershipTillToSend })
+            });
+            if (!updResp.ok) {
+              const err = await updResp.json().catch(() => ({}));
+              console.warn('Failed to update student membership after payment deletion', err);
+              // don't throw - deletion already happened; surface a warning instead
+              setError('Payment deleted but failed to update membership end date for the student.');
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error applying membership reduction after payment deletion', err);
       }
 
       // Refresh list
@@ -739,6 +842,22 @@ function Payments() {
                 <MenuItem value="refund">Refund</MenuItem>
               </Select>
             </FormControl>
+            <TextField
+              fullWidth
+              label="Payment Date"
+              type="date"
+              value={paymentDataLocal.date}
+              onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, date: e.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              fullWidth
+              label="Notes"
+              value={paymentDataLocal.notes}
+              onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, notes: e.target.value }))}
+              multiline
+              rows={3}
+            />
           </Stack>
         </DialogContent>
 
@@ -815,10 +934,27 @@ function Payments() {
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
         <DialogTitle>Confirm delete</DialogTitle>
-        <DialogContent>
-          <Typography>Are you sure you want to delete this payment? This action cannot be undone.</Typography>
-          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-        </DialogContent>
+          <DialogContent>
+            <Typography>Are you sure you want to delete this payment? This action cannot be undone.</Typography>
+
+            {/* Show computed membership impact if available */}
+            {deleteInfo && (deleteInfo.reductionDays > 0 || deleteInfo.currentMembershipTill) && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>Membership impact</Typography>
+                {deleteInfo.currentMembershipTill ? (
+                  <Typography variant="body2">Current membership till: {new Date(deleteInfo.currentMembershipTill).toLocaleDateString()}</Typography>
+                ) : (
+                  <Typography variant="body2">Current membership till: N/A</Typography>
+                )}
+                <Typography variant="body2">Reduction days: {deleteInfo.reductionDays || 0} day(s)</Typography>
+                {deleteInfo.newMembershipTill ? (
+                  <Typography variant="body2">New membership till: {new Date(deleteInfo.newMembershipTill).toLocaleDateString()}</Typography>
+                ) : null}
+              </Box>
+            )}
+
+            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+          </DialogContent>
         <DialogActions>
           <Button onClick={closeDeleteDialog} disabled={deleting}>Cancel</Button>
           <Button

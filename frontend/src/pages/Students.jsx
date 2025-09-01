@@ -905,31 +905,28 @@ function Students() {
       data = data.filter(item => item.gender === genderFilter);
     }
     
-    if (studentNameFilter) {
-      const q = studentNameFilter.toString().trim().toLowerCase();
-      if (currentTab === 1) {
-        // Students tab: prefix match against name, id or contact/mobile
-        data = data.filter(item => {
-          const name = (item.name || item.studentName || '').toString().toLowerCase();
-          const id = (item.id || item.studentId || item.student_id || '').toString().toLowerCase();
-          const contact = (item.contact || item.contactNumber || item.contact_number || '').toString().toLowerCase();
-          return (
-            (name && name.startsWith(q)) ||
-            (id && id.startsWith(q)) ||
-            (contact && contact.startsWith(q))
-          );
-        });
-      } else {
-        // Other tabs: keep existing name prefix matching
-        data = data.filter(item => 
-          (item.name || item.studentName || '').toLowerCase().startsWith(q)
+    // Apply name filter only when in Students tab (tab index 1).
+    const nameFilterLocal = currentTab === 1 ? (studentNameFilter || '').toString().trim().toLowerCase() : '';
+    if (nameFilterLocal) {
+      const q = nameFilterLocal;
+      // Students tab: prefix match against name, id or contact/mobile
+      data = data.filter(item => {
+        const name = (item.name || item.studentName || '').toString().toLowerCase();
+        const id = (item.id || item.studentId || item.student_id || '').toString().toLowerCase();
+        const contact = (item.contact || item.contactNumber || item.contact_number || '').toString().toLowerCase();
+        return (
+          (name && name.startsWith(q)) ||
+          (id && id.startsWith(q)) ||
+          (contact && contact.startsWith(q))
         );
-      }
+      });
     }
     
-    if (contactFilter) {
+    // Apply contact filter only for Students tab
+    const contactFilterLocal = currentTab === 1 ? (contactFilter || '') : '';
+    if (contactFilterLocal) {
       data = data.filter(item => 
-        (item.contact || item.contactNumber || '').startsWith(contactFilter)
+        (item.contact || item.contactNumber || '').toString().startsWith(contactFilterLocal)
       );
     }
 
@@ -2285,7 +2282,7 @@ function Students() {
                     {stats.availableSeats}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Available</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Available Seats</Typography>
               </CardContent>
             </Card>
 
@@ -2331,7 +2328,7 @@ function Students() {
                     {stats.assignedSeats}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assigned</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assigned Seats</Typography>
               </CardContent>
             </Card>
 
@@ -2354,7 +2351,7 @@ function Students() {
                     {stats.unassignedStudents}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned Seats</Typography>
               </CardContent>
             </Card>
           </Box>
@@ -2879,10 +2876,13 @@ function Students() {
                           variant="body1"
                           sx={{
                             fontWeight: 700,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
                             color: 'primary.main',
+                            // Allow the name to wrap or shrink rather than being truncated.
+                            maxWidth: 'calc(100% - 28px)',
+                            fontSize: 'clamp(0.75rem, 1.6vw, 1rem)',
+                            lineHeight: 1.05,
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
                             '&:hover': { textDecoration: 'underline' }
                           }}
                         >
@@ -3009,6 +3009,12 @@ function Students() {
                             fontWeight: 'medium',
                             cursor: 'pointer',
                             color: 'primary.main',
+                            maxWidth: 'calc(100% - 32px)',
+                            // Shrink font when needed and allow wrapping so the full name is visible.
+                            fontSize: 'clamp(0.75rem, 1.4vw, 0.95rem)',
+                            lineHeight: 1.05,
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
                             '&:hover': {
                               textDecoration: 'underline'
                             }
@@ -3134,13 +3140,16 @@ function Students() {
                         <Typography
                           variant="body1"
                           sx={{
-                            fontWeight: 700,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            cursor: 'pointer',
-                            color: 'primary.main',
-                            '&:hover': { textDecoration: 'underline' }
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              color: 'primary.main',
+                              maxWidth: 'calc(100% - 56px)',
+                              // Reduce font-size for long names and allow wrapping so the full name shows.
+                              fontSize: 'clamp(0.75rem, 1.8vw, 1.1rem)',
+                              lineHeight: 1.05,
+                              wordBreak: 'break-word',
+                              overflowWrap: 'anywhere',
+                              '&:hover': { textDecoration: 'underline' }
                           }}
                           onClick={async (e) => {
                             try {
