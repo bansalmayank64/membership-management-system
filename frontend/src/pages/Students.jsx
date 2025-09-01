@@ -76,6 +76,8 @@ function Students() {
   // Header ref and dynamic sticky offset for stats (prevents visual gap)
   const headerRef = useRef(null);
   const [stickyTopOffset, setStickyTopOffset] = useState(isMobile ? 56 : 80);
+  // If the app has a left drawer open (permanent/persistent), measure its width so the header can be pushed
+  const [drawerOffset, setDrawerOffset] = useState(0);
 
   // Authenticated user
   const { user } = useAuth();
@@ -479,6 +481,49 @@ function Students() {
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
+  }, [isMobile]);
+
+  // Measure left drawer width (if present) and update drawerOffset so header can be pushed when drawer is open
+  useEffect(() => {
+    const measureDrawer = () => {
+      try {
+        // Find all drawer papers and select the left-side one (if any).
+        const els = Array.from(document.querySelectorAll('.MuiDrawer-paper'));
+        if (!els || els.length === 0) {
+          setDrawerOffset(0);
+          return;
+        }
+
+        const leftDrawer = els.find(el => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          // left drawer: fairly narrow compared to viewport, aligned to left edge
+          const isLeftAligned = Math.abs(rect.left) <= 2;
+          const notFullWidth = rect.width < window.innerWidth * 0.9;
+          const visible = rect.width > 0 && style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+          return isLeftAligned && notFullWidth && visible;
+        });
+
+        if (!leftDrawer) {
+          setDrawerOffset(0);
+          return;
+        }
+
+        const rect = leftDrawer.getBoundingClientRect();
+        setDrawerOffset(Math.round(rect.width));
+      } catch (e) {
+        setDrawerOffset(0);
+      }
+    };
+
+    measureDrawer();
+    const mo = new MutationObserver(measureDrawer);
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true });
+    window.addEventListener('resize', measureDrawer);
+    return () => {
+      mo.disconnect();
+      window.removeEventListener('resize', measureDrawer);
+    };
   }, [isMobile]);
 
   // Effect to calculate membership extension days when payment amount changes
@@ -3265,9 +3310,18 @@ function Students() {
   }
 
   return (
-    <Box sx={{ p: isMobile ? 1 : 3 }}>
+    <Box sx={{ p: isMobile ? 1 : 3, boxSizing: 'border-box' }}>
   {/* Top sticky section: header + stats + tabs + filters */}
-  <Box ref={headerRef} sx={{ position: 'sticky', top: 0, zIndex: 1300, backgroundColor: 'background.paper', pb: 1 }}>
+  <Box
+    ref={headerRef}
+    sx={{
+      // No longer sticky — allow header, stats, tabs and filters to scroll normally
+      position: 'static',
+      boxSizing: 'border-box',
+      backgroundColor: 'background.paper',
+      pb: 1
+    }}
+  >
     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {currentTab === 0 ? <EventSeatIcon sx={{ color: 'primary.main' }} /> : <PersonIcon sx={{ color: 'primary.main' }} />}

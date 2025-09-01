@@ -122,7 +122,7 @@ function Navigation() {
 
   return (
     <>
-      <AppBar position="static" elevation={1}>
+  <AppBar position="sticky" elevation={1} sx={{ top: 0, zIndex: theme.zIndex.appBar ? theme.zIndex.appBar : (theme.zIndex.drawer ? theme.zIndex.drawer + 20 : 1400) }}>
         <Toolbar>
           {isMobile && (
             <IconButton
