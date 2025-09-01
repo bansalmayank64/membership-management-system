@@ -3143,12 +3143,13 @@ function Students() {
                               fontWeight: 700,
                               cursor: 'pointer',
                               color: 'primary.main',
-                              maxWidth: 'calc(100% - 56px)',
-                              // Reduce font-size for long names and allow wrapping so the full name shows.
+                              maxWidth: '100%',
+                              // Keep name on a single line and truncate with ellipsis if too long
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
                               fontSize: 'clamp(0.75rem, 1.8vw, 1.1rem)',
                               lineHeight: 1.05,
-                              wordBreak: 'break-word',
-                              overflowWrap: 'anywhere',
                               '&:hover': { textDecoration: 'underline' }
                           }}
                           onClick={async (e) => {
@@ -3250,7 +3251,7 @@ function Students() {
                             ) : (
                               <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
                             )}
-                            <Typography variant="body1" sx={{ fontWeight: 700 }}>{student.name}</Typography>
+                            <Typography variant="body1" sx={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{student.name}</Typography>
                           </Box>
                           <Typography variant="caption" color="text.secondary" display="block">
                             {formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}

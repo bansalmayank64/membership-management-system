@@ -182,7 +182,30 @@ function UpdateDiff({ details, subjectType, subjectId, timestamp }) {
   useEffect(() => {
     if (!prev || !details) return;
     try {
-      const d1 = prev || {};
+      // Normalize previous row keys to the same keys used in activity.details
+      // so we compare like-for-like. Currently activity.details for students
+      // uses keys: name, aadhaar, contact, seat. DB history rows use
+      // aadhaar_number, contact_number, seat_number.
+      const normalizePrev = (prevRow, detailsObj, subjectType) => {
+        if (!prevRow) return {};
+        const out = {};
+        const keys = Object.keys(detailsObj || {});
+        const t = (subjectType || '').toString().toLowerCase();
+        keys.forEach(k => {
+          if (t === 'student') {
+            if (k === 'aadhaar') out.aadhaar = prevRow.aadhaar_number ?? prevRow.aadhaar ?? undefined;
+            else if (k === 'contact') out.contact = prevRow.contact_number ?? prevRow.contact ?? undefined;
+            else if (k === 'seat') out.seat = prevRow.seat_number ?? prevRow.seat ?? null;
+            else out[k] = prevRow[k];
+          } else {
+            // generic fallback: prefer direct property, then snake_case variants
+            out[k] = prevRow[k] ?? prevRow[`${k}_number`] ?? prevRow[`${k}_id`] ?? prevRow[`${k}_at`] ?? prevRow[`${k}_date`];
+          }
+        });
+        return out;
+      };
+
+      const d1 = normalizePrev(prev, details, subjectType);
       const d2 = details || {};
       const changed = {};
       // compare shallow fields
@@ -221,20 +244,12 @@ function UpdateDiff({ details, subjectType, subjectId, timestamp }) {
   // When we have a previous record, show both before/after and a concise diff
   return (
     <Box sx={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
-      <Box sx={{ mb: 1 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>Before</Typography>
-        <pre style={{ whiteSpace: 'pre-wrap', margin: '0.25rem 0 0 0' }}>{JSON.stringify(prev, null, 2)}</pre>
-      </Box>
-      <Box sx={{ mb: 1 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>After</Typography>
-        <pre style={{ whiteSpace: 'pre-wrap', margin: '0.25rem 0 0 0' }}>{JSON.stringify(details, null, 2)}</pre>
-      </Box>
       {diff && Object.keys(diff).length > 0 ? (
         Object.entries(diff).map(([k, v]) => (
           <Box key={k} sx={{ mb: 0.5 }}>
             <Typography variant="caption" sx={{ fontWeight: 600 }}>{k}:</Typography>
-            <Typography variant="body2" color="text.secondary">from: {String(v.from)}</Typography>
-            <Typography variant="body2" color="text.primary">to: {String(v.to)}</Typography>
+            <Typography variant="body2" color="text.secondary">From: {String(v.from)}</Typography>
+            <Typography variant="body2" color="text.primary">To: {String(v.to)}</Typography>
           </Box>
         ))
       ) : (
