@@ -25,25 +25,24 @@ function chipForType(t) {
   return { label: t || '', color };
 }
 
-// Convert timestamp (assumed GMT/UTC) to IST and format
-function formatToIST(ts) {
-  if (!ts) return '';
-  try {
-    // Convert GMT to IST first (add 5.5 hours)
-    const gmtDate = new Date(ts);
-    const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000));
-    const formatter = new Intl.DateTimeFormat('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-    return formatter.format(istDate);
-  } catch (e) {
-    return String(ts);
-  }
+function formatToIST (dateString) {
+    try {
+      // Convert GMT to IST first
+      const gmtDate = new Date(dateString);
+      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
+      
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      return formatter.format(istDate);
+    } catch (error) {
+      return dateString;
+    }
 }
 
 // Convert timestamp (any parseable input) to a GMT/UTC plain string
