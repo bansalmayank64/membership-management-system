@@ -9,6 +9,8 @@ const auth = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+// Activity routes
+const activityRoutes = require('./activity');
 
 // Helper to format worksheet columns
 function autoFitColumns(worksheet, data) {
@@ -400,6 +402,9 @@ router.get('/fees-config', auth, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch fees configuration' });
   }
 });
+
+// Mount activity routes under /api/admin/activity
+router.use('/activity', auth, requireAdmin, activityRoutes);
 
 // Update fees configuration
 router.put('/fees-config/:gender', auth, requireAdmin, async (req, res) => {

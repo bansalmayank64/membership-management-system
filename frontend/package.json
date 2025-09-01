@@ -13,6 +13,7 @@
     "react-dom": "^18.2.0",
     "react-i18next": "^15.7.2",
     "react-router-dom": "^6.15.0"
+  ,"dayjs": "^1.11.9"
   },
   "scripts": {
     "dev": "vite",

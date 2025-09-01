@@ -60,7 +60,15 @@ router.post('/login', async (req, res) => {
     
   rl.info('JWT token generated', { durationMs: tokenTime });
   rl.success({ user: { id: user.id, username: user.username } });
-    
+    // Insert into activity_logs for auditing
+    try {
+      const ip = req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || null;
+      const ua = req.headers['user-agent'] || null;
+      await pool.query(`INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, metadata, ip_address, user_agent) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [user.id, user.username, 'login', 'User logged in', JSON.stringify({ username: user.username }), ip, ua]);
+    } catch (logErr) {
+      rl.warn('Failed to write activity log', { error: logErr.message });
+    }
+
     res.json({
       token,
       user: {

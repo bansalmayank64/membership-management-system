@@ -430,6 +430,35 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
       }
 
       await client.query('COMMIT');
+      // After successful commit, ensure sequences for serial id columns are set to max(id)+1
+      try {
+        const seqTables = await client.query(`
+          SELECT table_name, column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND column_default LIKE 'nextval(%' 
+            AND column_name = 'id'
+        `);
+
+        for (const t of seqTables.rows) {
+          try {
+            const tableName = t.table_name;
+            const seqRes = await client.query(`SELECT pg_get_serial_sequence($1,$2) as seq`, [tableName, 'id']);
+            const seqName = seqRes.rows && seqRes.rows[0] && seqRes.rows[0].seq;
+            if (!seqName) continue;
+            const maxRes = await client.query(`SELECT COALESCE(MAX(id),0) as max_id FROM "${tableName}"`);
+            const nextVal = Number(maxRes.rows[0].max_id) + 1;
+            // setval with is_called = false so next nextval returns this value
+            await client.query(`SELECT setval($1, $2, false)`, [seqName, nextVal]);
+            logger.info('Sequence reset', { requestId, table: tableName, sequence: seqName, next: nextVal });
+          } catch (seqErr) {
+            logger.warn('Failed to reset sequence for table', { requestId, table: t.table_name, error: seqErr.message });
+          }
+        }
+      } catch (seqOuterErr) {
+        logger.warn('Failed to enumerate/reset sequences after import', { requestId, error: seqOuterErr.message });
+      }
+
       logger.info('Import committed', { requestId, importedCount, memberImported, renewalImported, memberSkipped, renewalSkipped, durationMs: Date.now() - startTime });
 
       const totalSkipped = memberSkipped + renewalSkipped;

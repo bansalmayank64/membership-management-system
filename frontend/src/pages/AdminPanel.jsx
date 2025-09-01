@@ -50,6 +50,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import Footer from '../components/Footer';
 import api from '../services/api';
+import ActivityLog from './ActivityLog';
 
 function AdminPanel() {
   const [tabValue, setTabValue] = useState(0);
@@ -66,6 +67,16 @@ function AdminPanel() {
   const [confirmDialog, setConfirmDialog] = useState({ open: false, action: '', data: null });
   
   const { user } = useAuth();
+
+  const isAdmin = user && user.role === 'admin';
+  // compute tab indexes dynamically so tabs work whether Activity tab is shown or not
+  let __tabIdx = 0;
+  const IDX_ACTIVITY = isAdmin ? __tabIdx++ : -1;
+  const IDX_IMPORT = __tabIdx++;
+  const IDX_USERS = __tabIdx++;
+  const IDX_SEATS = __tabIdx++;
+  const IDX_FEES = __tabIdx++;
+  const IDX_SYSTEM = __tabIdx++;
 
   // Global error handler for API calls
   const handleApiError = (error, fallbackMessage = 'An error occurred') => {
@@ -708,10 +719,12 @@ function AdminPanel() {
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <Paper elevation={3} sx={{ p: 3 }}>
-        <Typography variant="h4" component="h1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <SecurityIcon color="primary" />
-          Admin Control Panel
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="h4" component="h1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SecurityIcon color="primary" />
+            Admin Control Panel
+          </Typography>
+        </Box>
         
         <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
           Welcome, {user.username}! Manage your library system from this central dashboard.
@@ -737,7 +750,21 @@ function AdminPanel() {
               }
             }}
           >
+            {isAdmin && (
+              <Tab 
+                key="activity"
+                label="Activity Logs" 
+                icon={<SecurityIcon />} 
+                sx={{ 
+                  '& .MuiTab-wrapper': { 
+                    fontSize: { xs: '0.7rem', sm: '0.875rem' } 
+                  } 
+                }}
+              />
+            )}
+
             <Tab 
+              key="import"
               label="Import/Export" 
               icon={<UploadIcon />} 
               sx={{ 
@@ -747,6 +774,7 @@ function AdminPanel() {
               }}
             />
             <Tab 
+              key="users"
               label="Users" 
               icon={<PeopleIcon />}
               sx={{ 
@@ -756,6 +784,7 @@ function AdminPanel() {
               }}
             />
             <Tab 
+              key="seats"
               label="Seats" 
               icon={<SeatIcon />}
               sx={{ 
@@ -765,6 +794,7 @@ function AdminPanel() {
               }}
             />
             <Tab 
+              key="fees"
               label="Fees" 
               icon={<MoneyIcon />}
               sx={{ 
@@ -774,6 +804,7 @@ function AdminPanel() {
               }}
             />
             <Tab 
+              key="system"
               label="System" 
               icon={<StorageIcon />}
               sx={{ 
@@ -785,8 +816,15 @@ function AdminPanel() {
           </Tabs>
         </Box>
 
-        {/* Data Import/Export Tab */}
-        {tabValue === 0 && (
+        {/* Activity Logs Tab (admin-only) */}
+        {isAdmin && tabValue === IDX_ACTIVITY && (
+          <Box sx={{ my: 1 }}>
+            <ActivityLog />
+          </Box>
+        )}
+
+  {/* Data Import/Export Tab */}
+  {tabValue === IDX_IMPORT && (
           <Grid container spacing={3}>
             {/* Import Excel */}
             <Grid item xs={12} md={6}>
@@ -930,7 +968,7 @@ function AdminPanel() {
         )}
 
         {/* User Management Tab */}
-        {tabValue === 1 && (
+  {tabValue === IDX_USERS && (
           <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1007,7 +1045,7 @@ function AdminPanel() {
         )}
 
         {/* Seat Management Tab */}
-        {tabValue === 2 && (
+  {tabValue === IDX_SEATS && (
           <Box>
             <Grid container spacing={3}>
               {/* Add New Seat */}
@@ -1105,7 +1143,7 @@ function AdminPanel() {
         )}
 
         {/* Monthly Fees Management Tab */}
-        {tabValue === 3 && (
+  {tabValue === IDX_FEES && (
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
               <MoneyIcon color="primary" />
@@ -1173,7 +1211,7 @@ function AdminPanel() {
         )}
 
         {/* System Management Tab */}
-        {tabValue === 4 && (
+  {tabValue === IDX_SYSTEM && (
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Card>

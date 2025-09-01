@@ -39,6 +39,7 @@ DROP TABLE IF EXISTS students CASCADE;
 DROP TABLE IF EXISTS seats CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS student_fees_config CASCADE;
+DROP TABLE IF EXISTS activity_logs CASCADE;
 
 -- Users table (must be first for foreign key references)
 CREATE TABLE users (
@@ -334,3 +335,21 @@ INSERT INTO student_fees_config (gender, monthly_fees) VALUES
 ('male', 600.00),
 ('female', 550.00)
 ON CONFLICT (gender) DO UPDATE SET monthly_fees = EXCLUDED.monthly_fees;
+
+-- Activity logs table (centralized log of user actions, auth events, and system activities)
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id SERIAL PRIMARY KEY,
+    actor_user_id INTEGER REFERENCES users(id),
+    actor_username VARCHAR(50),
+    action_type VARCHAR(50) NOT NULL,
+    action_description TEXT,
+    subject_type VARCHAR(50),
+    subject_id INTEGER,
+    metadata JSONB,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_logs_actor ON activity_logs(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);
