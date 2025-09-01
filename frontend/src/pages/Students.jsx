@@ -232,8 +232,6 @@ function Students() {
   const [studentNameFilter, setStudentNameFilter] = useState('');
   const [contactFilter, setContactFilter] = useState('');
   const [activeStatFilter, setActiveStatFilter] = useState(null);
-  // By default, inactive students are hidden in the Students tab to keep focus on active members
-  const [showInactive, setShowInactive] = useState(false);
   
   // Add Student dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -643,6 +641,10 @@ function Students() {
     const femaleSeats = seatData.filter(s => s && s.occupantSexRestriction === 'female').length;
     const neutralSeats = totalSeats - maleSeats - femaleSeats; // Seats with no gender restriction
 
+  // Student gender counts (based on active students)
+  const maleStudents = activeStudents.filter(s => (s.sex || s.gender || '').toString().toLowerCase() === 'male').length;
+  const femaleStudents = activeStudents.filter(s => (s.sex || s.gender || '').toString().toLowerCase() === 'female').length;
+
   // Note: logging moved outside so we don't spam console on every render
 
     return {
@@ -656,6 +658,9 @@ function Students() {
       maleSeats,
       femaleSeats,
       neutralSeats
+  ,
+  maleStudents,
+  femaleStudents
     };
   };
 
@@ -823,16 +828,6 @@ function Students() {
       logger.debug('Processed students data sample (up to 3)', data.slice(0, 3).map(s => ({ id: s.id, name: s.name, status: s.status })));
       // Sort by name (dictionary order) before applying filters
       data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
-
-      // By default, hide inactive students to keep focus on active members unless toggled or explicitly requested
-      try {
-        if (!showInactive && statusFilter !== 'inactive') {
-          data = data.filter(item => (item.status || '').toString().toLowerCase() !== 'inactive');
-        }
-      } catch (e) {
-        // If anything goes wrong, keep original data
-        logger.debug('Error while applying showInactive filter', e);
-      }
     } else if (currentTab === 2) { // Deactivated Students View
       logger.debug('Processing deactivated students for view', { sampleStudents: students.slice(0,3) });
       data = deactivatedStudents.map(student => {
@@ -2258,6 +2253,16 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Students</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, mt: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.maleStudents}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.femaleStudents}</Typography>
+                  </Box>
+                </Box>
               </CardContent>
             </Card>
 
@@ -2442,6 +2447,20 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="body2">Total Students</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mt: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
+                    <Typography variant="caption" color="primary.main" fontWeight="medium">
+                      {stats.maleStudents}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
+                    <Typography variant="caption" color="secondary.main" fontWeight="medium">
+                      {stats.femaleStudents}
+                    </Typography>
+                  </Box>
+                </Box>
               </CardContent>
             </Card>
           </Grid>
@@ -2646,10 +2665,6 @@ function Students() {
                 <MenuItem value="expired">Expired</MenuItem>
               </Select>
             </FormControl>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip label="Show inactive" color={showInactive ? 'default' : 'default'} size="small" clickable onClick={() => setShowInactive(s => !s)} sx={{ cursor: 'pointer' }} />
-              <Typography variant="caption" color="text.secondary">Inactive students are hidden by default</Typography>
-            </Box>
             <FormControl size="small" fullWidth>
               <InputLabel>Gender</InputLabel>
               <Select
@@ -2806,11 +2821,6 @@ function Students() {
     if (isMobile) {
       return (
         <Stack spacing={2}>
-          {/* Mobile: allow explicit toggle to reveal rarely-viewed inactive students */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Chip label={showInactive ? 'Hide inactive' : 'Show inactive'} size="small" clickable onClick={() => setShowInactive(s => !s)} />
-            <Typography variant="caption" color="text.secondary">Inactive students are hidden by default</Typography>
-          </Box>
           {seats.map((seat) => {
             const statusLabel = seat.expired ? 'Expired' : (seat.expiring ? 'Expiring' : (seat.occupied ? 'Occupied' : 'Available'));
             const statusColor = seat.expired ? 'error' : (seat.expiring ? 'warning' : (seat.occupied ? 'success' : 'default'));
@@ -3205,7 +3215,7 @@ function Students() {
             </Box>
           )}
 
-          {showInactive && inactive.length > 0 && (
+          {inactive.length > 0 && (
             <Box>
               <Typography variant="subtitle1" sx={{ mt: 1, mb: 1, fontWeight: 'bold' }}>Inactive Students</Typography>
               <Stack spacing={2}>
@@ -3282,11 +3292,11 @@ function Students() {
           </TableHead>
           <TableBody>
             {visibleStudents.map((student) => (
-              <TableRow key={student.id} sx={student.status === 'inactive' ? { opacity: 0.6, bgcolor: 'action.hover' } : {}}>
+              <TableRow key={student.id}>
                 <TableCell>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                    <Typography variant="body2" sx={{ fontWeight: 'medium', color: student.status === 'inactive' ? 'text.secondary' : 'text.primary' }}>{student.name}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
                   </Box>
                 </TableCell>
                 <TableCell align="center">
