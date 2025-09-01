@@ -299,8 +299,6 @@ router.post('/', async (req, res) => {
         validationErrors.push("Father's name must be at least 2 characters long if provided");
       } else if (father_name.trim().length > 100) {
         validationErrors.push("Father's name must not exceed 100 characters (database constraint)");
-      } else if (!/^[a-zA-Z\s\.\-']+$/.test(father_name.trim())) {
-        validationErrors.push("Father's name can only contain letters, spaces, dots, hyphens, and apostrophes");
       }
     }
 
@@ -549,8 +547,6 @@ router.put('/:id', async (req, res) => {
         validationErrors.push("Father's name must be at least 2 characters long if provided");
       } else if (father_name.trim().length > 100) {
         validationErrors.push("Father's name must not exceed 100 characters (database constraint)");
-      } else if (!/^[a-zA-Z\s\.\-']+$/.test(father_name.trim())) {
-        validationErrors.push("Father's name can only contain letters, spaces, dots, hyphens, and apostrophes");
       }
     }
 

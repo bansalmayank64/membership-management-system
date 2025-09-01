@@ -669,7 +669,7 @@ function Payments() {
         )}
       </Paper>
       {/* Add Payment Dialog (select student + amount) */}
-      <Dialog open={addPaymentOpen} onClose={() => setAddPaymentOpen(false)} maxWidth="sm" fullWidth>
+  <Dialog open={addPaymentOpen} onClose={() => setAddPaymentOpen(false)} maxWidth="sm" fullWidth scroll="paper" fullScreen={isMobile}>
         <DialogTitle>Add/Refund Payment</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>

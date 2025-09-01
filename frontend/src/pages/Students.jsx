@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -40,6 +40,10 @@ import {
   ListItemText
 } from '@mui/material';
 import MobileFilters from '../components/MobileFilters';
+import Footer from '../components/Footer';
+import logger from '../utils/clientLogger';
+import { useAuth } from '../contexts/AuthContext';
+import { getSeatChartData } from '../services/api';
 import {
   Refresh as RefreshIcon,
   Search as SearchIcon,
@@ -52,95 +56,123 @@ import {
   Female as FemaleIcon,
   Man as ManIcon,
   Woman as WomanIcon,
-  Phone as PhoneIcon,
   EventSeat as EventSeatIcon,
-  Person as PersonIcon,
-  Close as CloseIcon,
-  AccessTime as AccessTimeIcon,
-  CalendarMonth as CalendarMonthIcon,
-  CalendarToday as CalendarTodayIcon,
-  Clear as ClearIcon,
-  History as HistoryIcon,
-  AssignmentInd as AssignmentIcon,
-  MoreVert as MoreVertIcon,
-  PersonAdd as PersonAddIcon,
   Visibility as VisibilityIcon,
-  CheckCircle as CheckCircleIcon
+  History as HistoryIcon,
+  CheckCircle as CheckCircleIcon,
+  MoreVert as MoreVertIcon,
+  SwapHoriz as SwapHorizIcon,
+  LinkOff as LinkOffIcon,
+  CalendarToday as CalendarTodayIcon,
+  AccessTime as AccessTimeIcon,
+  Person as PersonIcon
 } from '@mui/icons-material';
-import { getSeatChartData, markSeatAsVacant } from '../services/api';
-import Footer from '../components/Footer';
-import { useAuth } from '../contexts/AuthContext';
-import logger from '../utils/clientLogger';
-
-// Helper function to format dates consistently in DD-MMM-YYYY format
-const formatDateForDisplay = (dateString) => {
-  if (!dateString) return 'N/A';
-  
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'N/A';
-    
-    return date.toLocaleDateString('en-GB', { 
-      day: '2-digit', 
-      month: 'short', 
-      year: 'numeric',
-      timeZone: 'Asia/Kolkata'
-    }).replace(/ /g, '-');
-  } catch (error) {
-    return 'N/A';
-  }
-};
-
+ 
 function Students() {
+  // Theme and mobile breakpoint detection
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  // Header ref and dynamic sticky offset for stats (prevents visual gap)
+  const headerRef = useRef(null);
+  const [stickyTopOffset, setStickyTopOffset] = useState(isMobile ? 56 : 80);
+
+  // Authenticated user
   const { user } = useAuth();
-  
-  // Helper function to handle API errors, especially token expiration
-  const handleApiError = (error, defaultMessage = 'An error occurred') => {
-    if (error.message === 'TOKEN_EXPIRED') {
-      // Token expiration is handled globally by the AuthContext
-      // Don't show additional error messages as user will be redirected to login
+
+  // Global API error handler (keeps parity with other pages)
+  const handleApiError = (error, fallbackMessage = 'An error occurred') => {
+    // If a token-expired error shape is returned by the backend/interceptor, allow global logic to handle it
+    if (error?.response?.data?.error === 'TOKEN_EXPIRED') {
       return;
     }
-    
-    logger.error('API Error', error);
-    setSnackbarMessage(error.message || defaultMessage);
-    setSnackbarSeverity('error');
-    setSnackbarOpen(true);
+    try {
+      setError(error?.response?.data?.message || error?.message || fallbackMessage);
+    } catch (e) {
+      // If setError isn't available for some reason, fallback to logging
+      logger.error('handleApiError failed to set error state', e, error);
+    }
   };
-  
-  const [students, setStudents] = useState([]);
-  const [unassignedSeats, setUnassignedSeats] = useState([]);
-  const [seatData, setSeatData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
-  // View modes: 0=Seats, 1=Active Students, 2=Deactivated Students
-  const [currentTab, setCurrentTab] = useState(0);
-  
-  // Filters
-  const [seatNumberFilter, setSeatNumberFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [genderFilter, setGenderFilter] = useState('');
-  const [studentNameFilter, setStudentNameFilter] = useState('');
-  const [contactFilter, setContactFilter] = useState('');
-  
-  // Active stat filter
-  const [activeStatFilter, setActiveStatFilter] = useState(null);
-  
-  // Dialog states
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [reactivateConfirmOpen, setReactivateConfirmOpen] = useState(false);
-  const [deactivateRefundAmount, setDeactivateRefundAmount] = useState(0);
-  const [deactivateRefundDays, setDeactivateRefundDays] = useState(0);
-  const [deactivateFeeConfig, setDeactivateFeeConfig] = useState(null);
-  const [processingDeactivate, setProcessingDeactivate] = useState(false);
-  const [seatHistoryOpen, setSeatHistoryOpen] = useState(false);
+
+  const openUnassignConfirm = (seat) => {
+    setUnassignTargetSeat(seat);
+    setConfirmUnassignOpen(true);
+  };
+
+  // Open change seat flow: reuse assign dialog but pre-fill student and open
+  const handleChangeSeat = (seat) => {
+    try {
+      // Resolve student object for this seat
+      const student = students.find(s => s && (s.id === seat.studentId || s.id === seat.studentId || s.id === seat.studentId));
+      if (!student) {
+        setSnackbarMessage('No student assigned to this seat');
+        setSnackbarSeverity('warning');
+        setSnackbarOpen(true);
+        return;
+      }
+      // Reuse assign seat dialog UI for changing seat
+      handleAssignSeatToStudent(student);
+    } catch (err) {
+      logger.error('❌ [handleChangeSeat] Error', err);
+      setSnackbarMessage('Unable to start seat change');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
+  };
+
+  // Unassign seat from student: clear seat_number for the student assigned to this seat
+  const handleUnassignSeat = async (seat) => {
+    try {
+      const student = students.find(s => s && (s.id === seat.studentId || s.id === seat.studentId));
+      if (!student || !student.id) {
+        setSnackbarMessage('No student assigned to this seat');
+        setSnackbarSeverity('warning');
+        setSnackbarOpen(true);
+        return;
+      }
+
+      // Call API to update student and remove seat assignment
+      const response = await fetch(`/api/students/${student.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ ...student, seat_number: null })
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Failed to unassign seat: ${text}`);
+      }
+
+      setSnackbarMessage('Seat unassigned successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      fetchData();
+    } catch (err) {
+      logger.error('❌ [handleUnassignSeat] Error', err);
+      handleApiError(err, 'Failed to unassign seat');
+    }
+  };
+
+  // Local helper to format dates to IST for display (kept consistent with StudentProfile.jsx)
+  const formatDateForDisplay = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'N/A';
+      return date.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata'
+      }).replace(/ /g, '-');
+    } catch (err) {
+      return 'N/A';
+    }
+  };
+
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
   const [assignSeatOpen, setAssignSeatOpen] = useState(false);
   // Aadhaar conflict dialog state
@@ -163,6 +195,9 @@ function Students() {
   const [assignSelectedSeat, setAssignSelectedSeat] = useState('');
   const [assignAvailableSeats, setAssignAvailableSeats] = useState([]);
   const [studentForSeatAssignment, setStudentForSeatAssignment] = useState(null);
+  // Unassign confirmation dialog state
+  const [confirmUnassignOpen, setConfirmUnassignOpen] = useState(false);
+  const [unassignTargetSeat, setUnassignTargetSeat] = useState(null);
   
   // History data
   const [seatHistoryData, setSeatHistoryData] = useState([]);
@@ -187,6 +222,30 @@ function Students() {
 
   // Track whether user attempted to submit the Add Student form
   const [addAttempted, setAddAttempted] = useState(false);
+
+  // Filter states (ensure these are declared to avoid runtime ReferenceErrors)
+  const [seatNumberFilter, setSeatNumberFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [genderFilter, setGenderFilter] = useState('');
+  const [studentNameFilter, setStudentNameFilter] = useState('');
+  const [contactFilter, setContactFilter] = useState('');
+  const [activeStatFilter, setActiveStatFilter] = useState(null);
+  
+  // Add Student dialog state
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  // Seat history dialog state
+  const [seatHistoryOpen, setSeatHistoryOpen] = useState(false);
+  // Delete confirmation dialog state
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  // Deactivate / refund states
+  const [deactivateRefundAmount, setDeactivateRefundAmount] = useState(0);
+  const [deactivateRefundDays, setDeactivateRefundDays] = useState(0);
+  const [deactivateFeeConfig, setDeactivateFeeConfig] = useState(null);
+  const [processingDeactivate, setProcessingDeactivate] = useState(false);
+
+  // Reactivate confirmation dialog state
+  const [reactivateConfirmOpen, setReactivateConfirmOpen] = useState(false);
 
   // Fetch available seats when gender is selected
   const fetchAvailableSeats = async (gender) => {
@@ -366,6 +425,14 @@ function Students() {
   // Data states
   const [seatHistory, setSeatHistory] = useState([]);
   const [paymentHistory, setPaymentHistory] = useState([]);
+  // Core data and loading/error states
+  const [students, setStudents] = useState([]);
+  const [seatData, setSeatData] = useState([]);
+  const [unassignedSeats, setUnassignedSeats] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  // UI tab (0=Seats,1=Active,2=Inactive)
+  const [currentTab, setCurrentTab] = useState(0);
   const [paymentData, setPaymentData] = useState({
     amount: '',
     method: 'cash',
@@ -389,6 +456,30 @@ function Students() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Measure header height (including margin-bottom) and update sticky top offset
+  useEffect(() => {
+    const measure = () => {
+      try {
+        if (headerRef && headerRef.current) {
+          const rect = headerRef.current.getBoundingClientRect();
+          const style = window.getComputedStyle(headerRef.current);
+          const marginBottom = parseFloat(style.marginBottom) || 0;
+          const computed = Math.max(0, Math.round(rect.height + marginBottom));
+          setStickyTopOffset(computed + 8); // a small extra gap for breathing room
+        } else {
+          setStickyTopOffset(isMobile ? 56 : 80);
+        }
+      } catch (e) {
+        setStickyTopOffset(isMobile ? 56 : 80);
+      }
+    };
+
+    // Measure once and on resize
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [isMobile]);
 
   // Effect to calculate membership extension days when payment amount changes
   useEffect(() => {
@@ -511,7 +602,7 @@ function Students() {
       totalStudents,
       assignedSeats,
       availableSeats,
-      expiringSeats,
+  expiringSeats,
       expiredSeats,
       unassignedStudents,
       totalSeats,
@@ -644,9 +735,10 @@ function Students() {
       });
       
   logger.debug('Processed data sample (occupied, up to 3):', data.filter(d => d.occupied).slice(0, 3).map(d => ({ seatNumber: d.seatNumber, studentName: d.studentName })));
-    } else if (currentTab === 1) { // Active Students View
-      logger.debug('Processing active students for view', { sampleStudents: students.slice(0,3) });
-      data = activeStudents.map(student => {
+    } else if (currentTab === 1) { // Students tab - include both active and inactive so desktop/table shows all
+      logger.debug('Processing students for view (including inactive)', { sampleStudents: students.slice(0,3) });
+      // Use the full validStudents list so both active and inactive records are present
+      data = validStudents.map(student => {
         // Compute expiry flags using IST-adjusted view (consistent with Seats view)
         const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
         let membershipTillIST = null;
@@ -663,23 +755,27 @@ function Students() {
         const isExpired = membershipTillIST ? (membershipTillIST < now) : true; // no end date => expired
         const isExpiring = membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false;
 
+        // Normalize status: if backend marked inactive/deactivated, keep it; otherwise derive from seat
+        const rawStatus = (student.membership_status || student.status || '').toString().toLowerCase();
+        const normalizedStatus = (rawStatus === 'inactive' || rawStatus === 'deactivated') ? 'inactive' : (student.seat_number ? 'assigned' : 'unassigned');
+
         const processedStudent = {
           ...student,
-          status: student.seat_number ? 'assigned' : 'unassigned',
+          status: normalizedStatus,
           gender: student.sex,
           // Add consistent property for easier access
           seatNumber: student.seat_number,
           expiring: isExpiring,
           expired: isExpired
         };
-        
-  // Reduced logging: debug summary per student
-  logger.debug('Processing active student', { id: student.id, name: student.name, seat: student.seat_number || 'UNASSIGNED' });
-        
+
+        logger.debug('Processing student', { id: student.id, name: student.name, status: processedStudent.status, seat: student.seat_number || 'UNASSIGNED' });
         return processedStudent;
       });
-      
-  logger.debug('Processed active students data sample (up to 3)', data.slice(0, 3).map(s => ({ id: s.id, name: s.name, seatNumber: s.seatNumber })));
+
+      logger.debug('Processed students data sample (up to 3)', data.slice(0, 3).map(s => ({ id: s.id, name: s.name, status: s.status })));
+      // Sort by name (dictionary order) before applying filters
+      data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     } else if (currentTab === 2) { // Deactivated Students View
       logger.debug('Processing deactivated students for view', { sampleStudents: students.slice(0,3) });
       data = deactivatedStudents.map(student => {
@@ -699,13 +795,30 @@ function Students() {
       });
       
   logger.debug('Processed deactivated students data sample (up to 3)', data.slice(0, 3).map(s => ({ id: s.id, name: s.name })));
+  // Sort deactivated students by name (dictionary order) before applying filters
+  data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     }
 
     // Apply filters
     if (seatNumberFilter) {
-      data = data.filter(item => 
-        (item.seatNumber || '').toString() === seatNumberFilter
-      );
+      const filterVal = seatNumberFilter.toString();
+      // Seats view should allow prefix matching (e.g. entering "12" matches "120")
+      if (currentTab === 0) {
+        data = data.filter(item => {
+          const sn = (item.seatNumber !== undefined && item.seatNumber !== null)
+            ? String(item.seatNumber)
+            : ((item.seat_number !== undefined && item.seat_number !== null) ? String(item.seat_number) : '');
+          return sn.startsWith(filterVal);
+        });
+      } else {
+        // For students/deactivated views keep exact match semantics
+        data = data.filter(item => {
+          const sn = (item.seatNumber !== undefined && item.seatNumber !== null)
+            ? String(item.seatNumber)
+            : ((item.seat_number !== undefined && item.seat_number !== null) ? String(item.seat_number) : '');
+          return sn === filterVal;
+        });
+      }
     }
     
     if (statusFilter) {
@@ -741,9 +854,25 @@ function Students() {
     }
     
     if (studentNameFilter) {
-      data = data.filter(item => 
-        (item.name || item.studentName || '').toLowerCase().startsWith(studentNameFilter.toLowerCase())
-      );
+      const q = studentNameFilter.toString().trim().toLowerCase();
+      if (currentTab === 1) {
+        // Students tab: prefix match against name, id or contact/mobile
+        data = data.filter(item => {
+          const name = (item.name || item.studentName || '').toString().toLowerCase();
+          const id = (item.id || item.studentId || item.student_id || '').toString().toLowerCase();
+          const contact = (item.contact || item.contactNumber || item.contact_number || '').toString().toLowerCase();
+          return (
+            (name && name.startsWith(q)) ||
+            (id && id.startsWith(q)) ||
+            (contact && contact.startsWith(q))
+          );
+        });
+      } else {
+        // Other tabs: keep existing name prefix matching
+        data = data.filter(item => 
+          (item.name || item.studentName || '').toLowerCase().startsWith(q)
+        );
+      }
     }
     
     if (contactFilter) {
@@ -885,8 +1014,42 @@ function Students() {
   logger.debug('[handleActionClick] item selected', { id: item?.id, name: item?.name, tab: currentTab });
     
     event.stopPropagation();
+    // If the clicked item is a seat (from Seats view) and contains student info, normalize it
+    let contextItem = item;
+    try {
+      const isSeat = !!(item && (item.seatNumber || item.seat_number));
+      if (isSeat) {
+        // Try to resolve a student object for this seat
+        const studentId = item.studentId || item.studentId === 0 ? item.studentId : (item.student?.id || item.studentId || item.studentId);
+        let studentObj = null;
+        if (studentId) {
+          studentObj = students.find(s => s && (s.id === studentId || s.id === Number(studentId)));
+        }
+        // If not found but seat contains studentName and studentId-like fields, create a minimal student object
+        if (!studentObj && (item.studentName || item.studentId)) {
+          studentObj = {
+            id: item.studentId || item.studentId === 0 ? item.studentId : undefined,
+            name: item.studentName || item.student_name || undefined,
+            seat_number: item.seatNumber || item.seat_number || undefined
+          };
+        }
+
+        // Merge seat + student info into a single action context so handlers can work
+        contextItem = {
+          ...item,
+          // normalized student fields at top-level when available
+          ...(studentObj ? { ...studentObj } : {}),
+          // keep raw seat context for seat-specific handlers
+          __seatContext: { seatNumber: item.seatNumber || item.seat_number }
+        };
+      }
+    } catch (e) {
+      // fallback to original item
+      contextItem = item;
+    }
+
     setActionMenuAnchor(event.currentTarget);
-    setSelectedItemForAction(item);
+    setSelectedItemForAction(contextItem);
     
   logger.debug('[handleActionClick] Set selectedItemForAction', { id: item?.id });
   };
@@ -898,69 +1061,93 @@ function Students() {
   };
 
   // Seat history handler
+  // Seat history handler (seat-focused: shows student change history for a seat)
   const handleSeatHistory = async () => {
-    logger.debug('🔍 [History] Starting context-aware history', { currentTab, selectedItemForAction });
-    
-    // Store context data for seat history dialog (similar to view dialog pattern)
+    logger.debug('🔍 [History] Starting seat-focused history', { selectedItemForAction });
+
+    // Seat contextTab === 0
     setSeatHistoryContext({ 
       ...selectedItemForAction,
-      contextTab: currentTab // Store which tab we're coming from
+      contextTab: 0
     });
-    
+
     setHistoryLoading(true);
     try {
-      let response;
-      
-      if (currentTab === 0) {
-        // For seats tab (currentTab = 0), show all students who have used this seat
-        const seatNumber = selectedItemForAction?.seat_number || selectedItemForAction?.seatNumber;
-  logger.debug('🪑 [Seat History] Fetching seat history for seat', { seatNumber });
-        if (!seatNumber) {
-          logger.error('❌ [Seat History] No seat number available in selectedItemForAction', selectedItemForAction);
-          throw new Error('No seat number available');
-        }
-        response = await fetch(`/api/seats/${seatNumber}/history`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-          }
-        });
-      } else {
-        // For students tab (currentTab = 1), show all seats this student has occupied
-        const studentId = selectedItemForAction?.id;
-  logger.debug('👤 [Student History] Fetching student history for ID', { studentId, studentName: selectedItemForAction?.name });
-        if (!studentId) {
-    logger.error('❌ [Student History] No student ID available in selectedItemForAction', selectedItemForAction);
-          throw new Error('No student ID available');
-        }
-        response = await fetch(`/api/students/${studentId}/history`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-          }
-        });
+      // Resolve seat number from the selected action context
+      const seatNumber = selectedItemForAction?.seat_number || selectedItemForAction?.seatNumber || selectedItemForAction?.seat || selectedItemForAction?.seatNumber;
+      if (!seatNumber) {
+        setSnackbarMessage('No seat selected for history');
+        setSnackbarSeverity('warning');
+        setSnackbarOpen(true);
+        return handleActionClose();
       }
-      
-      if (!response.ok) throw new Error('Failed to fetch history');
-      
-      const historyData = await response.json();
-  logger.info('📊 [History] Received history data', { count: historyData?.length || 0 });
-      
-  setSeatHistory(historyData);
+
+      const response = await fetch(`/api/seats/${seatNumber}/history`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Seat history API error! status: ${response.status} - ${text}`);
+      }
+
+      const history = await response.json();
+      setSeatHistory(history || []);
       setSeatHistoryOpen(true);
     } catch (err) {
-  handleApiError(err, 'Failed to load history');
+      logger.error('❌ [handleSeatHistory] Error fetching seat history', err);
+      handleApiError(err, 'Failed to fetch seat history');
     } finally {
       setHistoryLoading(false);
     }
     handleActionClose();
   };
 
-  // Assign seat handler
-  const handleAssignSeat = () => {
-    setAssignSeatData({ 
-      seatNumber: selectedItemForAction?.seat_number || '', 
-      studentId: '' 
+  // Student seat history handler (student-focused: shows seat change history for a student)
+  const handleStudentSeatHistory = async () => {
+    logger.debug('🔍 [History] Starting student-focused seat history', { selectedItemForAction });
+
+    // Student contextTab === 1
+    setSeatHistoryContext({
+      ...selectedItemForAction,
+      contextTab: 1
     });
-    setAssignSeatOpen(true);
+
+    setHistoryLoading(true);
+    try {
+      // Resolve student id from selected action context
+      const studentId = selectedItemForAction?.id || selectedItemForAction?.studentId || selectedItemForAction?.student_id;
+      if (!studentId) {
+        setSnackbarMessage('No student selected for history');
+        setSnackbarSeverity('warning');
+        setSnackbarOpen(true);
+        return handleActionClose();
+      }
+
+      const response = await fetch(`/api/students/${studentId}/history`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Student history API error! status: ${response.status} - ${text}`);
+      }
+
+      const history = await response.json();
+      setSeatHistory(history || []);
+      setSeatHistoryOpen(true);
+    } catch (err) {
+      logger.error('❌ [handleStudentSeatHistory] Error fetching student history', err);
+      handleApiError(err, 'Failed to fetch student seat history');
+    } finally {
+      setHistoryLoading(false);
+    }
     handleActionClose();
   };
 
@@ -1780,6 +1967,33 @@ function Students() {
       setSnackbarOpen(true);
       return;
     }
+
+    // Validate father's name characters. Server accepts only letters, spaces, dots, hyphens and apostrophes.
+    const rawFather = (editStudent.fatherName || '').trim();
+    const fatherPattern = /^[A-Za-z.\-\'\s]+$/;
+    if (!fatherPattern.test(rawFather)) {
+      // Try a best-effort clean: replace common separators (e.g. "/") with space, remove other invalid chars,
+      // collapse multiple spaces, then re-validate.
+      const cleaned = rawFather
+        .replace(/[\/_()]/g, ' ')
+        .replace(/[^A-Za-z.\-\'\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (cleaned && fatherPattern.test(cleaned)) {
+        // Apply cleaned value and notify user (non-blocking)
+        setEditStudent(prev => ({ ...prev, fatherName: cleaned }));
+        setSnackbarMessage(`Father's name contained invalid characters; changed to "${cleaned}"`);
+        setSnackbarSeverity('info');
+        setSnackbarOpen(true);
+        // continue with cleaned value
+      } else {
+        setSnackbarMessage("Father's name is invalid, Please check.");
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        return;
+      }
+    }
     if (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim()) {
       setSnackbarMessage('*Aadhaar number is required');
       setSnackbarSeverity('error');
@@ -1897,10 +2111,17 @@ function Students() {
 
   // Render Dashboard Stats - Mobile Optimized
   const renderStats = () => {
+    // Keep stats visually grouped but not independently sticky when the whole top section is fixed
+    const outerSx = {
+      mb: 3,
+      backgroundColor: 'background.paper',
+      pt: 1
+    };
+
     if (isMobile) {
       // Mobile layout: Horizontal scrollable with compact cards
       return (
-        <Box sx={{ mb: 2 }}>
+        <Box sx={outerSx}>
           <Box
             sx={{
               display: 'flex',
@@ -1920,128 +2141,13 @@ function Students() {
               },
             }}
           >
-            {/* Total Students */}
-            <Card 
-              sx={{ 
-                minWidth: 100,
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
-                '&:hover': { bgcolor: 'primary.light' },
+            {/* Total Seats (moved to first) */}
+            <Card
+              sx={{
+                minWidth: 120,
                 borderRadius: 2,
-                boxShadow: 1
-              }}
-              onClick={() => handleStatClick('totalStudents')}
-            >
-              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
-                  <PersonIcon sx={{ color: 'primary.main', fontSize: 16, mr: 0.5 }} />
-                  <Typography variant="h6" fontWeight="bold" color="primary">
-                    {stats.totalStudents}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Students</Typography>
-              </CardContent>
-            </Card>
-
-            {/* Available Seats */}
-            <Card 
-              sx={{ 
-                minWidth: 100,
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
-                '&:hover': { bgcolor: 'info.light' },
-                borderRadius: 2,
-                boxShadow: 1
-              }}
-              onClick={() => handleStatClick('available')}
-            >
-              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
-                  <EventSeatIcon sx={{ color: 'info.main', fontSize: 16, mr: 0.5 }} />
-                  <Typography variant="h6" fontWeight="bold" color="info.main">
-                    {stats.availableSeats}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Available</Typography>
-              </CardContent>
-            </Card>
-
-            {/* Expiring Soon */}
-            <Card 
-              sx={{ 
-                minWidth: 100,
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
-                '&:hover': { bgcolor: 'warning.light' },
-                borderRadius: 2,
-                boxShadow: 1
-              }}
-              onClick={() => handleStatClick('expiring')}
-            >
-              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
-                  <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 16, mr: 0.5 }} />
-                  <Typography variant="h6" fontWeight="bold" color="warning.main">
-                    {stats.expiringSeats}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring</Typography>
-              </CardContent>
-            </Card>
-
-            {/* Assigned Seats */}
-            <Card 
-              sx={{ 
-                minWidth: 100,
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
-                '&:hover': { bgcolor: 'success.light' },
-                borderRadius: 2,
-                boxShadow: 1
-              }}
-              onClick={() => handleStatClick('assigned')}
-            >
-              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
-                  <EventSeatIcon sx={{ color: 'success.main', fontSize: 16, mr: 0.5 }} />
-                  <Typography variant="h6" fontWeight="bold" color="success.main">
-                    {stats.assignedSeats}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assigned</Typography>
-              </CardContent>
-            </Card>
-
-            {/* Unassigned */}
-            <Card 
-              sx={{ 
-                minWidth: 100,
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
-                '&:hover': { bgcolor: 'error.light' },
-                borderRadius: 2,
-                boxShadow: 1
-              }}
-              onClick={() => handleStatClick('unassigned')}
-            >
-              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
-                  <PersonIcon sx={{ color: 'error.main', fontSize: 16, mr: 0.5 }} />
-                  <Typography variant="h6" fontWeight="bold" color="error.main">
-                    {stats.unassignedStudents}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned</Typography>
-              </CardContent>
-            </Card>
-
-            {/* Total Seats */}
-            <Card 
-              sx={{ 
-                minWidth: 120, 
-                borderRadius: 2, 
                 boxShadow: 1,
-                cursor: 'pointer', 
+                cursor: 'pointer',
                 bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper',
                 '&:hover': { bgcolor: 'grey.200' }
               }}
@@ -2074,8 +2180,123 @@ function Students() {
                 </Box>
               </CardContent>
             </Card>
+
+            {/* Total Students */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
+                '&:hover': { bgcolor: 'primary.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('totalStudents')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <PersonIcon sx={{ color: 'primary.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="primary">
+                    {stats.totalStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Students</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Available Seats */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
+                '&:hover': { bgcolor: 'info.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('available')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <EventSeatIcon sx={{ color: 'info.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="info.main">
+                    {stats.availableSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Available</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Expiring Soon */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
+                '&:hover': { bgcolor: 'warning.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('expiring')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="warning.main">
+                    {stats.expiringSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Assigned Seats */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
+                '&:hover': { bgcolor: 'success.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('assigned')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <EventSeatIcon sx={{ color: 'success.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="success.main">
+                    {stats.assignedSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assigned</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Unassigned */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
+                '&:hover': { bgcolor: 'error.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('unassigned')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <PersonIcon sx={{ color: 'error.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="error.main">
+                    {stats.unassignedStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned</Typography>
+              </CardContent>
+            </Card>
           </Box>
-          
+
           {/* Clear filter hint */}
           {activeStatFilter && (
             <Box sx={{ textAlign: 'center', mt: 1 }}>
@@ -2092,201 +2313,208 @@ function Students() {
       );
     }
 
-    // Desktop layout: Grid with larger cards
+    // Desktop layout: Grid with larger cards - move Total Seats to the first position and keep sticky
     return (
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={4} md={2}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer', 
-              bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
-                bgcolor: 'primary.light',
-                transform: 'translateY(-2px)',
-                boxShadow: 3
-              }
-            }}
-            onClick={() => handleStatClick('totalStudents')}
-          >
-            <CardContent sx={{ py: 2, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <PersonIcon sx={{ color: 'primary.main', fontSize: 20, mr: 1 }} />
-                <Typography variant="h5" fontWeight="bold" color="primary">
-                  {stats.totalStudents}
-                </Typography>
-              </Box>
-              <Typography variant="body2">Total Students</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={4} md={2}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer', 
-              bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
-                bgcolor: 'info.light',
-                transform: 'translateY(-2px)',
-                boxShadow: 3
-              }
-            }}
-            onClick={() => handleStatClick('available')}
-          >
-            <CardContent sx={{ py: 2, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <EventSeatIcon sx={{ color: 'info.main', fontSize: 20, mr: 1 }} />
-                <Typography variant="h5" fontWeight="bold" color="info.main">
-                  {stats.availableSeats}
-                </Typography>
-              </Box>
-              <Typography variant="body2">Available Seats</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={4} md={2}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer', 
-              bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
-                bgcolor: 'warning.light',
-                transform: 'translateY(-2px)',
-                boxShadow: 3
-              }
-            }}
-            onClick={() => handleStatClick('expiring')}
-          >
-            <CardContent sx={{ py: 2, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 20, mr: 1 }} />
-                <Typography variant="h5" fontWeight="bold" color="warning.main">
-                  {stats.expiringSeats}
-                </Typography>
-              </Box>
-              <Typography variant="body2">Expiring Soon</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={4} md={2}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer', 
-              bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
-                bgcolor: 'success.light',
-                transform: 'translateY(-2px)',
-                boxShadow: 3
-              }
-            }}
-            onClick={() => handleStatClick('assigned')}
-          >
-            <CardContent sx={{ py: 2, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <EventSeatIcon sx={{ color: 'success.main', fontSize: 20, mr: 1 }} />
-                <Typography variant="h5" fontWeight="bold" color="success.main">
-                  {stats.assignedSeats}
-                </Typography>
-              </Box>
-              <Typography variant="body2">Assigned Seats</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={4} md={2}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer', 
-              bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
-                bgcolor: 'error.light',
-                transform: 'translateY(-2px)',
-                boxShadow: 3
-              }
-            }}
-            onClick={() => handleStatClick('unassigned')}
-          >
-            <CardContent sx={{ py: 2, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <PersonIcon sx={{ color: 'error.main', fontSize: 20, mr: 1 }} />
-                <Typography variant="h5" fontWeight="bold" color="error.main">
-                  {stats.unassignedStudents}
-                </Typography>
-              </Box>
-              <Typography variant="body2">Unassigned</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={4} md={2}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer', 
-              bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
-                bgcolor: 'grey.200',
-                transform: 'translateY(-2px)',
-                boxShadow: 3
-              }
-            }}
-            onClick={() => handleStatClick('total')}
-          >
-            <CardContent sx={{ py: 2, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <EventSeatIcon sx={{ color: 'text.secondary', fontSize: 20, mr: 1 }} />
-                <Typography variant="h5" fontWeight="bold">
-                  {stats.totalSeats}
-                </Typography>
-              </Box>
-              <Typography variant="body2" sx={{ mb: 1 }}>Total Seats</Typography>
-              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
-                  <Typography variant="caption" color="primary.main" fontWeight="medium">
-                    {stats.maleSeats}
+      <Box sx={outerSx}>
+        <Grid container spacing={2}>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card
+              sx={{
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  bgcolor: 'grey.200',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('total')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <EventSeatIcon sx={{ color: 'text.secondary', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold">
+                    {stats.totalSeats}
                   </Typography>
                 </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
-                  <Typography variant="caption" color="secondary.main" fontWeight="medium">
-                    {stats.femaleSeats}
-                  </Typography>
-                </Box>
-                {stats.neutralSeats > 0 && (
+                <Typography variant="body2" sx={{ mb: 1 }}>Total Seats</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight="medium">
-                      +{stats.neutralSeats}
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
+                    <Typography variant="caption" color="primary.main" fontWeight="medium">
+                      {stats.maleSeats}
                     </Typography>
                   </Box>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
+                    <Typography variant="caption" color="secondary.main" fontWeight="medium">
+                      {stats.femaleSeats}
+                    </Typography>
+                  </Box>
+                  {stats.neutralSeats > 0 && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary" fontWeight="medium">
+                        +{stats.neutralSeats}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  bgcolor: 'primary.light',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('totalStudents')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <PersonIcon sx={{ color: 'primary.main', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold" color="primary">
+                    {stats.totalStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="body2">Total Students</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  bgcolor: 'info.light',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('available')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <EventSeatIcon sx={{ color: 'info.main', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold" color="info.main">
+                    {stats.availableSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="body2">Available Seats</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  bgcolor: 'warning.light',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('expiring')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold" color="warning.main">
+                    {stats.expiringSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="body2">Expiring Soon</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  bgcolor: 'success.light',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('assigned')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <EventSeatIcon sx={{ color: 'success.main', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold" color="success.main">
+                    {stats.assignedSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="body2">Assigned Seats</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  bgcolor: 'error.light',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('unassigned')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <PersonIcon sx={{ color: 'error.main', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold" color="error.main">
+                    {stats.unassignedStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="body2">Unassigned</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
-      </Grid>
+      </Box>
     );
   };
 
   // Render filters based on current tab
   const renderFilters = () => {
     const activeFilters = {};
-    const filterCount = Object.values({
+    // Exclude contact filter from the Students tab (currentTab === 1)
+    const baseFilters = {
       seatNumber: seatNumberFilter,
       status: statusFilter,
       gender: genderFilter,
-      studentName: studentNameFilter,
-      contact: contactFilter
-    }).filter(value => value && value !== '').length;
+      studentName: studentNameFilter
+    };
+    if (currentTab !== 1) {
+      baseFilters.contact = contactFilter;
+    }
 
-    // Build active filters object for chips
+    const filterCount = Object.values(baseFilters).filter(value => value && value !== '').length;
+
+    // Build active filters object for chips (omit contact when on Students tab)
     if (seatNumberFilter) activeFilters.seat = seatNumberFilter;
     if (statusFilter) activeFilters.status = statusFilter;
     if (genderFilter) activeFilters.gender = genderFilter;
     if (studentNameFilter) activeFilters.name = studentNameFilter;
-    if (contactFilter) activeFilters.contact = contactFilter;
+    if (currentTab !== 1 && contactFilter) activeFilters.contact = contactFilter;
 
     const handleFilterRemove = (filterKey) => {
       switch (filterKey) {
@@ -2373,13 +2601,6 @@ function Students() {
                 <MenuItem value="female">Female</MenuItem>
               </Select>
             </FormControl>
-            <TextField
-              size="small"
-              label="Contact"
-              value={contactFilter}
-              onChange={(e) => setContactFilter(e.target.value)}
-              fullWidth
-            />
           </Stack>
         )}
         
@@ -2427,6 +2648,82 @@ function Students() {
       </>
     );
 
+    // On mobile, show inline top filters instead of the floating filter button
+    if (isMobile) {
+      if (currentTab === 0) {
+        // Seats mobile top filter (single-row compact bar)
+        return (
+          <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+            <TextField
+              size="small"
+              placeholder="Seat #"
+              value={seatNumberFilter}
+              onChange={(e) => setSeatNumberFilter(e.target.value)}
+              sx={{ minWidth: 140, flex: '0 0 auto' }}
+              InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1 }} /> }}
+            />
+            <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Status"
+                sx={{ pl: 0.5 }}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="occupied">Occupied</MenuItem>
+                <MenuItem value="available">Available</MenuItem>
+                <MenuItem value="expiring">Expiring</MenuItem>
+                <MenuItem value="expired">Expired</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+              <InputLabel>Gender</InputLabel>
+              <Select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value)}
+                label="Gender"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+          </Paper>
+        );
+      }
+
+      // Students mobile top search
+      if (currentTab === 1) {
+        // Students mobile top search (single-row compact)
+        return (
+          <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+            <TextField
+              size="small"
+              placeholder="Search name / ID / mobile"
+              value={studentNameFilter}
+              onChange={(e) => setStudentNameFilter(e.target.value)}
+              sx={{ minWidth: 200, flex: '1 0 auto' }}
+              InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1 }} /> }}
+            />
+            <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+              <InputLabel>Gender</InputLabel>
+              <Select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value)}
+                label="Gender"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="male">Male</MenuItem>
+                <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+          </Paper>
+        );
+      }
+    }
+
+    // Desktop: keep existing MobileFilters collapse UI
     return (
       <MobileFilters
         title={currentTab === 0 ? "Seat Filters" : "Student Filters"}
@@ -2441,411 +2738,514 @@ function Students() {
     );
   };
 
-  // Render Seats View
-  const renderSeatsView = () => (
-    <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-      <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 600 : 'auto' }}>
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ 
-              minWidth: 24,
-              width: 24,
-              maxWidth: 32
-            }}>
-              <strong>Seat#</strong>
-            </TableCell>
-            <TableCell sx={{ 
-              position: isMobile ? 'sticky' : 'static',
-              left: isMobile ? 40 : 'auto',
-              bgcolor: 'background.paper',
-              zIndex: isMobile ? 10 : 'auto',
-              minWidth: 200,
-              borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
-            }}>
-              <strong>Student Details</strong>
-            </TableCell>
-            <TableCell sx={{ 
-              minWidth: 80,
-              position: 'sticky',
-              right: 0,
-              bgcolor: 'background.paper',
-              zIndex: isMobile ? 10 : 'auto',
-              borderLeft: '1px solid rgba(224, 224, 224, 1)'
-            }}>
-              <strong>Actions</strong>
-            </TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {filteredData.filter(seat => seat && seat.seatNumber).map((seat) => (
-            <TableRow key={seat.seatNumber}>
-              <TableCell>
-                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <EventSeatIcon 
-                      sx={{ 
-                        color: seat.occupied 
-                          ? (seat.gender === 'female' ? 'secondary.main' : 'primary.main')
-                          : 'grey.500',
-                        fontSize: 20
-                      }} 
-                    />
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        fontWeight: 'medium',
-                        color: 'text.primary'
-                      }}
-                    >
-                      #{seat.seatNumber}
-                    </Typography>
-                  </Box>
-                  {seat.expired ? (
-                    <Chip 
-                      label="Expired"
-                      color="error" 
-                      size="small" 
-                    />
-                  ) : seat.expiring ? (
-                    <Chip 
-                      label="Expiring"
-                      color="warning" 
-                      size="small" 
-                    />
-                  ) : seat.occupied ? (
-                    <Chip label="Occupied" color="success" size="small" />
+  // Render Seats View (desktop: table; mobile: card list similar to Active students)
+  const renderSeatsView = () => {
+    const seats = filteredData.filter(seat => seat && seat.seatNumber);
+
+    if (isMobile) {
+      return (
+        <Stack spacing={2}>
+          {seats.map((seat) => {
+            const statusLabel = seat.expired ? 'Expired' : (seat.expiring ? 'Expiring' : (seat.occupied ? 'Occupied' : 'Available'));
+            const statusColor = seat.expired ? 'error' : (seat.expiring ? 'warning' : (seat.occupied ? 'success' : 'default'));
+            return (
+              <Paper key={seat.seatNumber} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, borderRadius: 2, boxShadow: 2, '&:hover': { boxShadow: 6 } }}>
+                {/* Left: unified seat chip (icon + number) to match Students view */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, minWidth: 64 }}>
+                  <Chip
+                    icon={<EventSeatIcon sx={{ fontSize: 14 }} />}
+                    label={seat.seatNumber ? `#${seat.seatNumber}` : 'Unassigned'}
+                    color={seat.expired ? 'error' : (seat.expiring ? 'warning' : (seat.occupied ? 'success' : 'default'))}
+                    size="small"
+                    sx={{ fontWeight: 700, minWidth: 64 }}
+                  />
+                  {/* Status as colored text (no chip) to match seat chip color */}
+                  <Typography variant="caption" sx={{ mt: 0.5, fontWeight: 700, color: statusColor === 'default' ? 'text.secondary' : `${statusColor}.main` }}>
+                    {statusLabel}
+                  </Typography>
+                </Box>
+
+                {/* Middle: student details or empty */}
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {seat.studentName ? (
+                    <>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+                           onClick={async (event) => {
+                             event.stopPropagation();
+                             const student = students.find(s => s.id === seat.studentId);
+                             if (student) {
+                               setSelectedItemForAction(student);
+                               setViewStudentData({ ...student });
+                               try {
+                                 const resp = await fetch(`/api/payments/student/${student.id}`, {
+                                   headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}`, 'Content-Type': 'application/json' }
+                                 });
+                                 if (resp.ok) {
+                                   const payments = await resp.json();
+                                   const totalPaid = (payments || []).reduce((sum, p) => { const a = parseFloat(p.amount); return sum + (isNaN(a) ? 0 : a); }, 0);
+                                   setViewStudentTotalPaid(totalPaid);
+                                 } else {
+                                   setViewStudentTotalPaid(0);
+                                 }
+                               } catch (err) {
+                                 logger.error('❌ [seat card click] Error fetching payments', err);
+                                 setViewStudentTotalPaid(0);
+                               }
+                               setViewStudentOpen(true);
+                             }
+                           }}>
+                        {seat.gender === 'female' ? (
+                          <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} />
+                        ) : (
+                          <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
+                        )}
+                        <Typography
+                          variant="body1"
+                          sx={{
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            color: 'primary.main',
+                            '&:hover': { textDecoration: 'underline' }
+                          }}
+                        >
+                          {seat.studentName}
+                        </Typography>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {seat.membershipExpiry ? `${formatDateForDisplay(seat.membershipExpiry)} • ` : ''}ID {seat.studentId}
+                      </Typography>
+                    </>
                   ) : (
-                    <Chip label="Available" variant="outlined" size="small" />
+                    <Typography variant="body2" color="text.secondary">Empty</Typography>
                   )}
                 </Box>
+
+                {/* Right: actions */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0, zIndex: 1 }}>
+                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                    {/* Show Change / Unassign only when a student is assigned to this seat */}
+                    {seat.studentName ? (
+                      <>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleChangeSeat(seat); }} aria-label="Change seat">
+                          <SwapHorizIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); openUnassignConfirm(seat); }} aria-label="Unassign seat">
+                          <LinkOffIcon fontSize="small" />
+                        </IconButton>
+                      </>
+                    ) : null}
+                    <IconButton size="small" onClick={(e) => handleActionClick(e, seat)}>
+                      <MoreVertIcon />
+                    </IconButton>
+                  </Box>
+                </Box>
+              </Paper>
+            );
+          })}
+        </Stack>
+      );
+    }
+
+    // Desktop: original table layout
+    return (
+      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+        <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 600 : 'auto' }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ 
+                minWidth: 24,
+                width: 24,
+                maxWidth: 32
+              }}>
+                <strong>Seat#</strong>
               </TableCell>
               <TableCell sx={{ 
                 position: isMobile ? 'sticky' : 'static',
                 left: isMobile ? 40 : 'auto',
                 bgcolor: 'background.paper',
-                zIndex: isMobile ? 5 : 'auto',
+                zIndex: isMobile ? 10 : 'auto',
+                minWidth: 200,
                 borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
               }}>
-                {seat.studentName ? (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                <strong>Student Details</strong>
+              </TableCell>
+              <TableCell sx={{ 
+                minWidth: 80,
+                position: 'sticky',
+                right: 0,
+                bgcolor: 'background.paper',
+                zIndex: isMobile ? 10 : 'auto',
+                borderLeft: '1px solid rgba(224, 224, 224, 1)'
+              }}>
+                <strong>Actions</strong>
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {seats.map((seat) => (
+              <TableRow key={seat.seatNumber}>
+                <TableCell>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {seat.gender === 'female' ? 
-                        <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
-                        <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
-                      }
-                      <Typography 
-                        variant="body2" 
+                      <EventSeatIcon 
+                        sx={{ 
+                          color: seat.occupied 
+                            ? (seat.gender === 'female' ? 'secondary.main' : 'primary.main')
+                            : 'grey.500',
+                          fontSize: 20
+                        }} 
+                      />
+                      <Typography
+                        variant="body2"
                         sx={{
                           fontWeight: 'medium',
-                          cursor: 'pointer',
-                          color: 'primary.main',
-                          '&:hover': {
-                            textDecoration: 'underline'
-                          }
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          // Find the student by ID or name to set as selected item
-                          const student = students.find(s => s.id === seat.studentId);
-                          if (student) {
-                            // Set selected item and trigger view directly
-                            setSelectedItemForAction(student);
-                            setViewStudentData({ ...student });
-                            
-                            // Calculate total paid amount inline
-                            fetch(`/api/payments/student/${student.id}`, {
-                              headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                                'Content-Type': 'application/json'
-                              }
-                            }).then(response => {
-                              if (response.ok) {
-                                return response.json();
-                              }
-                              return [];
-                            }).then(payments => {
-                              const totalPaid = payments.reduce((sum, payment) => {
-                                const amount = parseFloat(payment.amount);
-                                return sum + (isNaN(amount) ? 0 : amount);
-                              }, 0);
-                              setViewStudentTotalPaid(totalPaid);
-                            }).catch(() => {
-                              setViewStudentTotalPaid(0);
-                            });
-                            
-                            setViewStudentOpen(true);
-                          }
+                          color: 'text.primary'
                         }}
                       >
-                        {seat.studentName}
+                        #{seat.seatNumber}
                       </Typography>
                     </Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ ml: 3 }}>
-                      ID: {seat.studentId || 'N/A'}
+                    {/* Status as colored text (no chip) */}
+                    <Typography variant="caption" sx={{ mt: 0.5, fontWeight: 700, color: seat.expired ? 'error.main' : (seat.expiring ? 'warning.main' : (seat.occupied ? 'success.main' : 'text.secondary')) }}>
+                      {seat.expired ? 'Expired' : (seat.expiring ? 'Expiring' : (seat.occupied ? 'Occupied' : 'Available'))}
                     </Typography>
-                    {seat.expiring && seat.membershipExpiry && (
-                      <Typography variant="caption" color="warning.main" sx={{ ml: 3 }}>
-                        Expiring: {formatDateForDisplay(seat.membershipExpiry)}
-                      </Typography>
-                    )}
-                    {seat.expired && (seat.membershipExpiry || seat.membership_till) && (
-                      <Typography variant="caption" color="error.main" sx={{ ml: 3 }}>
-                        Expired: {formatDateForDisplay(seat.membershipExpiry || seat.membership_till)}
-                      </Typography>
-                    )}
                   </Box>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">Empty</Typography>
-                )}
-              </TableCell>
-              <TableCell sx={{ 
-                position: 'sticky',
-                right: 0,
-                bgcolor: 'background.paper',
-                zIndex: isMobile ? 5 : 'auto',
-                borderLeft: '1px solid rgba(224, 224, 224, 1)'
-              }}>
-                <IconButton 
-                  size="small" 
-                  onClick={(e) => handleActionClick(e, seat)}
-                  sx={{ 
-                    zIndex: 100,
-                    position: 'relative'
-                  }}
-                >
-                  <MoreVertIcon />
-                </IconButton>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-
-  // Render Students View
-  const renderStudentsView = () => (
-    <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-      <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 450 : 'auto' }}>
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ 
-              position: isMobile ? 'sticky' : 'static',
-              left: 0,
-              bgcolor: 'background.paper',
-              zIndex: isMobile ? 10 : 'auto',
-              minWidth: 40
-            }}>
-              <strong>Student ID</strong>
-            </TableCell>
-            <TableCell sx={{ 
-              position: isMobile ? 'sticky' : 'static',
-              left: isMobile ? 40 : 'auto',
-              bgcolor: 'background.paper',
-              zIndex: isMobile ? 10 : 'auto',
-              minWidth: 250,
-              borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
-            }}>
-              <strong>Name</strong>
-            </TableCell>
-            <TableCell sx={{ 
-              minWidth: 80,
-              position: 'sticky',
-              right: 0,
-              bgcolor: 'background.paper',
-              zIndex: isMobile ? 10 : 'auto',
-              borderLeft: '1px solid rgba(224, 224, 224, 1)'
-            }}>
-              <strong>Actions</strong>
-            </TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {filteredData.filter(student => student && student.id).map((student) => {
-            // Compute IST-adjusted membership expiry flags so UI matches Seats view behavior
-            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-            const now = new Date();
-            const sevenDaysFromNow = new Date();
-            sevenDaysFromNow.setDate(now.getDate() + 7);
-            let membershipTillIST = null;
-            if (student.membership_till) {
-              const raw = new Date(student.membership_till);
-              if (!isNaN(raw.getTime())) {
-                membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
-              }
-            }
-            const isExpired = membershipTillIST ? (membershipTillIST < now) : true; // no end date => treat as expired
-            const isExpiring = membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false;
-
-            // Determine chip color similar to Seats view
-            const seatChipColor = student.seat_number ? (isExpired ? 'error' : (isExpiring ? 'warning' : 'success')) : 'default';
-
-            return (
-            <TableRow key={student.id}>
-              <TableCell sx={{ 
-                position: isMobile ? 'sticky' : 'static',
-                left: 0,
-                bgcolor: 'background.paper',
-                zIndex: isMobile ? 5 : 'auto'
-              }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      fontWeight: 'medium',
-                      cursor: 'pointer',
-                      color: 'primary.main',
-                      '&:hover': {
-                        textDecoration: 'underline'
-                      }
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      // Set selected item and trigger view directly
-                      setSelectedItemForAction(student);
-                      setViewStudentData({ ...student });
-                      
-                      // Calculate total paid amount inline
-                      fetch(`/api/payments/student/${student.id}`, {
-                        headers: {
-                          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                          'Content-Type': 'application/json'
+                </TableCell>
+                <TableCell sx={{ 
+                  position: isMobile ? 'sticky' : 'static',
+                  left: isMobile ? 40 : 'auto',
+                  bgcolor: 'background.paper',
+                  zIndex: isMobile ? 5 : 'auto',
+                  borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
+                }}>
+                  {seat.studentName ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {seat.gender === 'female' ? 
+                          <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
+                          <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
                         }
-                      }).then(response => {
-                        if (response.ok) {
-                          return response.json();
-                        }
-                        return [];
-                      }).then(payments => {
-                        const totalPaid = payments.reduce((sum, payment) => {
-                          const amount = parseFloat(payment.amount);
-                          return sum + (isNaN(amount) ? 0 : amount);
-                        }, 0);
-                        setViewStudentTotalPaid(totalPaid);
-                      }).catch(() => {
-                        setViewStudentTotalPaid(0);
-                      });
-                      
-                      setViewStudentOpen(true);
-                    }}
-                  >
-                    {student.id}
-                  </Typography>
-                  <Chip 
-                    icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
-                    label={student.seat_number || 'Unassigned'} 
-                    color={seatChipColor}
-                    size="small"
-                    onClick={!student.seat_number && student.membership_status !== 'inactive' ? (event) => {
-                      event.stopPropagation();
-                      handleAssignSeatToStudent(student);
-                    } : undefined}
-                    sx={{
-                      cursor: !student.seat_number && student.membership_status !== 'inactive' ? 'pointer' : 'default',
-                      '&:hover': !student.seat_number && student.membership_status !== 'inactive' ? {
-                        backgroundColor: 'error.dark',
-                        '& .MuiChip-label': {
-                          color: 'white'
-                        }
-                      } : {}
-                    }}
-                  />
-                </Box>
-              </TableCell>
-              <TableCell sx={{ 
-                position: isMobile ? 'sticky' : 'static',
-                left: isMobile ? 40 : 'auto',
-                bgcolor: 'background.paper',
-                zIndex: isMobile ? 5 : 'auto',
-                borderLeft: isMobile ? '1px solid rgba(224, 224, 224, 1)' : 'none'
-              }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {student.sex === 'female' ? 
-                      <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
-                      <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
-                    }
-                    <Typography 
-                      variant="body2" 
-                      sx={{
-                        fontWeight: 'medium',
-                        cursor: 'pointer',
-                        color: 'primary.main',
-                        '&:hover': {
-                          textDecoration: 'underline'
-                        }
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        // Set selected item and trigger view directly
-                        setSelectedItemForAction(student);
-                        setViewStudentData({ ...student });
-                        
-                        // Calculate total paid amount inline
-                        fetch(`/api/payments/student/${student.id}`, {
-                          headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                            'Content-Type': 'application/json'
-                          }
-                        }).then(response => {
-                          if (response.ok) {
-                            return response.json();
-                          }
-                          return [];
-                        }).then(payments => {
-                          const totalPaid = payments.reduce((sum, payment) => {
-                            const amount = parseFloat(payment.amount);
-                            return sum + (isNaN(amount) ? 0 : amount);
-                          }, 0);
-                          setViewStudentTotalPaid(totalPaid);
-                        }).catch(() => {
-                          setViewStudentTotalPaid(0);
-                        });
-                        
-                        setViewStudentOpen(true);
+                        <Typography 
+                          variant="body2" 
+                          sx={{
+                            fontWeight: 'medium',
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            '&:hover': {
+                              textDecoration: 'underline'
+                            }
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const student = students.find(s => s.id === seat.studentId);
+                            if (student) {
+                              setSelectedItemForAction(student);
+                              setViewStudentData({ ...student });
+                              fetch(`/api/payments/student/${student.id}`, {
+                                headers: {
+                                  'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                                  'Content-Type': 'application/json'
+                                }
+                              }).then(response => {
+                                if (response.ok) return response.json();
+                                return [];
+                              }).then(payments => {
+                                const totalPaid = payments.reduce((sum, payment) => { const amount = parseFloat(payment.amount); return sum + (isNaN(amount) ? 0 : amount); }, 0);
+                                setViewStudentTotalPaid(totalPaid);
+                              }).catch(() => setViewStudentTotalPaid(0));
+                              setViewStudentOpen(true);
+                            }
+                          }}
+                        >
+                          {seat.studentName}
+                        </Typography>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 3 }}>
+                        ID: {seat.studentId || 'N/A'}
+                      </Typography>
+                      {seat.expiring && seat.membershipExpiry && (
+                        <Typography variant="caption" color="warning.main" sx={{ ml: 3 }}>
+                          Expiring: {formatDateForDisplay(seat.membershipExpiry)}
+                        </Typography>
+                      )}
+                      {seat.expired && (seat.membershipExpiry || seat.membership_till) && (
+                        <Typography variant="caption" color="error.main" sx={{ ml: 3 }}>
+                          Expired: {formatDateForDisplay(seat.membershipExpiry || seat.membership_till)}
+                        </Typography>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">Empty</Typography>
+                  )}
+                </TableCell>
+                <TableCell sx={{ 
+                  position: 'sticky',
+                  right: 0,
+                  bgcolor: 'background.paper',
+                  zIndex: isMobile ? 5 : 'auto',
+                  borderLeft: '1px solid rgba(224, 224, 224, 1)'
+                }}>
+                  <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end', alignItems: 'center' }}>
+                    {seat.studentName ? (
+                      <>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleChangeSeat(seat); }} aria-label="Change seat">
+                          <SwapHorizIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); openUnassignConfirm(seat); }} aria-label="Unassign seat">
+                          <LinkOffIcon fontSize="small" />
+                        </IconButton>
+                      </>
+                    ) : null}
+                    <IconButton 
+                      size="small" 
+                      onClick={(e) => handleActionClick(e, seat)}
+                      sx={{ 
+                        zIndex: 100,
+                        position: 'relative'
                       }}
                     >
-                      {student.name}
-                    </Typography>
+                      <MoreVertIcon />
+                    </IconButton>
                   </Box>
-                  {student.membership_till && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <AccessTimeIcon sx={{ color: 'grey.600', fontSize: 16 }} />
-                      <Typography 
-                        variant="caption" 
-                        sx={{ color: isExpired ? 'error.main' : (isExpiring ? 'warning.main' : 'text.secondary') }}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
+
+  // Render Students View (mobile: card list; desktop: table)
+  const renderStudentsView = () => {
+    const visibleStudents = filteredData.filter(student => student && student.id);
+
+    if (isMobile) {
+      // Split into active and inactive for clearer mobile layout
+      const active = visibleStudents.filter(s => s.membership_status !== 'inactive' && s.status !== 'inactive');
+      const inactive = visibleStudents.filter(s => s.membership_status === 'inactive' || s.status === 'inactive');
+
+      return (
+        <Stack spacing={2}>
+          {active.length > 0 && (
+            <Box>
+              <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 'bold' }}>Active Students</Typography>
+              <Stack spacing={2}>
+                {active.map(student => {
+            const seatChipColor = student.seatNumber || student.seat_number ? (student.expired ? 'error' : (student.expiring ? 'warning' : 'success')) : 'default';
+            return (
+              <Paper key={student.id} sx={{
+                p: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                borderRadius: 2,
+                boxShadow: 2,
+                '&:hover': { boxShadow: 6 }
+              }}>
+                {/* Left: avatar + name */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                  <Avatar sx={{ bgcolor: 'grey.200', color: 'text.primary', width: 48, height: 48 }}>{student.name ? student.name.charAt(0).toUpperCase() : '?'}</Avatar>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {student.sex === 'female' ? (
+                          <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} />
+                        ) : (
+                          <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
+                        )}
+                        <Typography
+                          variant="body1"
+                          sx={{
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            '&:hover': { textDecoration: 'underline' }
+                          }}
+                          onClick={async (e) => {
+                            try {
+                              e.stopPropagation();
+                              // Set selected item and view data
+                              setSelectedItemForAction(student);
+                              setViewStudentData({ ...student });
+
+                              // Fetch payments for the student and compute total
+                              const resp = await fetch(`/api/payments/student/${student.id}`, {
+                                headers: {
+                                  'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+                                  'Content-Type': 'application/json'
+                                }
+                              });
+
+                              if (resp.ok) {
+                                const payments = await resp.json();
+                                const totalPaid = (payments || []).reduce((sum, p) => {
+                                  const amt = parseFloat(p.amount);
+                                  return sum + (isNaN(amt) ? 0 : amt);
+                                }, 0);
+                                setViewStudentTotalPaid(totalPaid);
+                              } else {
+                                setViewStudentTotalPaid(0);
+                              }
+
+                              setViewStudentOpen(true);
+                            } catch (err) {
+                              logger.error('❌ [mobile name click] Error fetching payments', err);
+                              setViewStudentTotalPaid(0);
+                              setViewStudentOpen(true);
+                            }
+                          }}
+                        >
+                          {student.name}
+                        </Typography>
+                      </Box>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        display="block"
                       >
-                        Until: {formatDateForDisplay(student.membership_till)}
+                        {formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}
                       </Typography>
                     </Box>
-                  )}
                 </Box>
-              </TableCell>
-              <TableCell sx={{ 
-                position: 'sticky',
-                right: 0,
-                bgcolor: 'background.paper',
-                zIndex: isMobile ? 5 : 'auto',
-                borderLeft: '1px solid rgba(224, 224, 224, 1)'
-              }}>
-                <IconButton 
-                  size="small" 
-                  onClick={(e) => handleActionClick(e, student)}
-                  sx={{ 
-                    zIndex: 100,
-                    position: 'relative'
-                  }}
-                >
-                  <MoreVertIcon />
-                </IconButton>
-              </TableCell>
+
+                {/* Center: seat chip centered (absolute centering to guarantee visual center) */}
+                <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                  <Chip
+                    sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}
+                    icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
+                    label={student.seatNumber || student.seat_number || 'Unassigned'}
+                    color={seatChipColor}
+                    size="small"
+                  />
+                </Box>
+
+                {/* Right: actions */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0, zIndex: 1 }}>
+                  <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'flex-end' }}>
+                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction(student); handleActionClick(e, student); }}>
+                      <MoreVertIcon />
+                    </IconButton>
+                  </Box>
+                </Box>
+              </Paper>
+            );
+                })}
+              </Stack>
+            </Box>
+          )}
+
+          {inactive.length > 0 && (
+            <Box>
+              <Typography variant="subtitle1" sx={{ mt: 1, mb: 1, fontWeight: 'bold' }}>Inactive Students</Typography>
+              <Stack spacing={2}>
+                {inactive.map(student => {
+                  const seatChipColor = student.seatNumber || student.seat_number ? (student.expired ? 'error' : (student.expiring ? 'warning' : 'success')) : 'default';
+                  return (
+                    <Paper key={student.id} sx={{
+                      p: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      borderRadius: 2,
+                      boxShadow: 2,
+                      '&:hover': { boxShadow: 6 }
+                    }}>
+                      {/* Left: avatar + name */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                        <Avatar sx={{ bgcolor: 'grey.200', color: 'text.primary', width: 48, height: 48 }}>{student.name ? student.name.charAt(0).toUpperCase() : '?'}</Avatar>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {student.sex === 'female' ? (
+                              <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} />
+                            ) : (
+                              <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
+                            )}
+                            <Typography variant="body1" sx={{ fontWeight: 700 }}>{student.name}</Typography>
+                          </Box>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      {/* Center: seat chip centered (absolute centering to guarantee visual center) */}
+                      <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                        <Chip
+                          sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}
+                          icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
+                          label={student.seatNumber || student.seat_number || 'Unassigned'}
+                          color={seatChipColor}
+                          size="small"
+                        />
+                      </Box>
+
+                      {/* Right: actions */}
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0, zIndex: 1 }}>
+                        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'flex-end' }}>
+                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction(student); handleActionClick(e, student); }}>
+                            <MoreVertIcon />
+                          </IconButton>
+                        </Box>
+                      </Box>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            </Box>
+          )}
+        </Stack>
+      );
+    }
+
+    // Desktop: keep table layout
+    return (
+      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+        <Table size="medium">
+          <TableHead>
+            <TableRow>
+              <TableCell><strong>Name</strong></TableCell>
+              <TableCell align="center"><strong>Seat</strong></TableCell>
+              <TableCell><strong>Membership Till</strong></TableCell>
+              <TableCell align="right"><strong>Actions</strong></TableCell>
             </TableRow>
-          );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
+          </TableHead>
+          <TableBody>
+            {visibleStudents.map((student) => (
+              <TableRow key={student.id}>
+                <TableCell>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
+                    <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
+                  </Box>
+                </TableCell>
+                <TableCell align="center">
+                  <Chip icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined} label={student.seat_number || 'Unassigned'} size="small" color={student.seat_number ? 'success' : 'default'} />
+                </TableCell>
+                <TableCell>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      {formatDateForDisplay(student.membership_till || student.membershipTill)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">ID {student.id}</Typography>
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ textAlign: 'right', pr: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <IconButton size="small" onClick={(e) => handleActionClick(e, student)}><MoreVertIcon /></IconButton>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
 
   if (loading) {
     return (
@@ -2866,11 +3266,15 @@ function Students() {
 
   return (
     <Box sx={{ p: isMobile ? 1 : 3 }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">
-          👥 Students
-        </Typography>
+  {/* Top sticky section: header + stats + tabs + filters */}
+  <Box ref={headerRef} sx={{ position: 'sticky', top: 0, zIndex: 1300, backgroundColor: 'background.paper', pb: 1 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {currentTab === 0 ? <EventSeatIcon sx={{ color: 'primary.main' }} /> : <PersonIcon sx={{ color: 'primary.main' }} />}
+          <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">
+            {currentTab === 0 ? 'Seats' : 'Students'}
+          </Typography>
+        </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
             variant="contained"
@@ -2891,31 +3295,30 @@ function Students() {
             <RefreshIcon />
           </IconButton>
         </Box>
-      </Box>
+    </Box>
 
-      {/* Dashboard Stats */}
-      {renderStats()}
+    {/* Dashboard Stats */}
+    {renderStats()}
 
-      {/* Tabs */}
-      <Paper sx={{ mb: 2 }}>
-        <Tabs
-          value={currentTab}
-          onChange={handleTabChange}
-          variant={isMobile ? "fullWidth" : "standard"}
-        >
-          <Tab label="Seats View" />
-          <Tab label="Active Students" />
-          <Tab label="Inactive Students" />
-        </Tabs>
-      </Paper>
+    {/* Tabs */}
+    <Paper sx={{ mb: 2 }}>
+      <Tabs
+        value={currentTab}
+        onChange={handleTabChange}
+        variant={isMobile ? "fullWidth" : "standard"}
+      >
+        <Tab icon={<EventSeatIcon />} label="Seats" />
+        <Tab icon={<PersonIcon />} label="Students" />
+      </Tabs>
+    </Paper>
 
-      {/* Filters */}
-      {renderFilters()}
+    {/* Filters */}
+    {renderFilters()}
+  </Box>
 
       {/* Content */}
-      {currentTab === 0 && renderSeatsView()}
-      {currentTab === 1 && renderStudentsView()}
-      {currentTab === 2 && renderStudentsView()}
+  {currentTab === 0 && renderSeatsView()}
+  {currentTab === 1 && renderStudentsView()}
 
       {/* Action Menu */}
       <Menu
@@ -2931,14 +3334,62 @@ function Students() {
           horizontal: 'right',
         }}
       >
-        {currentTab === 0 && selectedItemForAction && [ // Seats View Actions
+        {currentTab === 0 && selectedItemForAction && (selectedItemForAction.studentName || selectedItemForAction.name) ? (
+          // Seat row contains a student — show full student actions + seat history
+          <>
+            <MenuItem key="viewStudent" onClick={handleViewStudent}>
+              <ListItemIcon>
+                <VisibilityIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>View Student Details</ListItemText>
+            </MenuItem>
+            <MenuItem key="addPayment" onClick={handleAddPayment}>
+              <ListItemIcon>
+                <PaymentIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Add Payment</ListItemText>
+            </MenuItem>
+            <MenuItem key="editStudent" onClick={handleEditStudent}>
+              <ListItemIcon>
+                <EditIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Edit Student</ListItemText>
+            </MenuItem>
+            <MenuItem key="paymentHistory" onClick={handlePaymentHistory}>
+              <ListItemIcon>
+                <HistoryIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Payment History</ListItemText>
+            </MenuItem>
+            <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
+              <ListItemIcon>
+                <HistoryIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Seat Assignment History</ListItemText>
+            </MenuItem>
+            <MenuItem key="seatHistory" onClick={handleStudentSeatHistory}>
+              <ListItemIcon>
+                <EventSeatIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Student Seat History</ListItemText>
+            </MenuItem>
+            <Divider key="divider" />
+            <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
+              <ListItemIcon>
+                <DeleteIcon fontSize="small" color="error" />
+              </ListItemIcon>
+              <ListItemText>Deactivate Student</ListItemText>
+            </MenuItem>
+          </>
+        ) : currentTab === 0 && selectedItemForAction ? (
+          // Seat row without student — only seat history
           <MenuItem key="history" onClick={handleSeatHistory}>
             <ListItemIcon>
               <HistoryIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>View Seat History</ListItemText>
           </MenuItem>
-        ]}
+        ) : null}
         
         {currentTab === 1 && selectedItemForAction && [ // Active Students View Actions
           <MenuItem key="viewStudent" onClick={handleViewStudent}>
@@ -2965,11 +3416,23 @@ function Students() {
             </ListItemIcon>
             <ListItemText>Payment History</ListItemText>
           </MenuItem>,
-          <MenuItem key="seatHistory" onClick={handleSeatHistory}>
+          <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
+            <ListItemIcon>
+              <HistoryIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Seat Assignment History</ListItemText>
+          </MenuItem>,
+          <MenuItem key="viewSeatHistory" onClick={handleSeatHistory}>
+            <ListItemIcon>
+              <HistoryIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Seat Assignment History</ListItemText>
+          </MenuItem>,
+          <MenuItem key="seatHistory" onClick={handleStudentSeatHistory}>
             <ListItemIcon>
               <EventSeatIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>Seat Change History</ListItemText>
+            <ListItemText>Student Seat History</ListItemText>
           </MenuItem>,
           <Divider key="divider" />,
           <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
@@ -2993,11 +3456,11 @@ function Students() {
             </ListItemIcon>
             <ListItemText>Payment History</ListItemText>
           </MenuItem>,
-          <MenuItem key="seatHistory" onClick={handleSeatHistory}>
+          <MenuItem key="seatHistory" onClick={handleStudentSeatHistory}>
             <ListItemIcon>
               <EventSeatIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>Seat Change History</ListItemText>
+            <ListItemText>Student Seat History</ListItemText>
           </MenuItem>,
           <Divider key="divider" />,
           <MenuItem key="reactivate" onClick={handleReactivateStudent} sx={{ color: 'success.main' }}>
@@ -3146,6 +3609,39 @@ function Students() {
         </DialogActions>
       </Dialog>
 
+      {/* Confirm Unassign Dialog */}
+      <Dialog
+        open={confirmUnassignOpen}
+        onClose={() => setConfirmUnassignOpen(false)}
+        aria-labelledby="confirm-unassign-title"
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle id="confirm-unassign-title">Confirm unassign seat</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to unassign seat {unassignTargetSeat?.seat_number || unassignTargetSeat?.seatNumber || ''}?
+          </Typography>
+          {unassignTargetSeat && (unassignTargetSeat.student_id || unassignTargetSeat.studentId) && (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              This will remove the seat assignment from student ID {unassignTargetSeat.student_id || unassignTargetSeat.studentId}.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmUnassignOpen(false)}>Cancel</Button>
+          <Button
+            color="error"
+            onClick={async () => {
+              setConfirmUnassignOpen(false);
+              if (unassignTargetSeat) await handleUnassignSeat(unassignTargetSeat);
+            }}
+          >
+            Unassign
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Seat History Dialog */}
       <Dialog open={seatHistoryOpen} onClose={() => setSeatHistoryOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>
@@ -3158,9 +3654,9 @@ function Students() {
                 const seatNumber = seatHistoryContext?.seatNumber || seatHistoryContext?.seat_number;
                 
                 if (studentName) {
-                  return `Seat Change History - ${studentName}`;
+                  return `Student Seat History - ${studentName}`;
                 } else if (studentId) {
-                  return `Seat Change History - Student ID: ${studentId}`;
+                  return `Student Seat History - Student ID: ${studentId}`;
                 } else if (seatNumber) {
                   return `Seat History - Seat #${seatNumber}`;
                 } else {
@@ -3393,7 +3889,7 @@ function Students() {
       <Dialog open={addPaymentOpen} onClose={() => {
         setAddPaymentOpen(false);
         handleActionClose();
-      }} maxWidth="sm" fullWidth>
+      }} maxWidth="sm" fullWidth scroll="paper" fullScreen={isMobile}>
         <DialogTitle>Add/Refund Payment - {selectedItemForAction?.name}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>

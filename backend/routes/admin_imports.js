@@ -84,9 +84,14 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
         await client.query(`INSERT INTO seats (seat_number, occupant_sex, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (seat_number) DO NOTHING`, [row.seat_number, row.occupant_sex, row.created_at, row.updated_at, row.modified_by]);
       }
 
-      // Restore students
+      // Restore students (normalize contact numbers to 10 digits; default to '1234567890' when invalid)
       for (const row of backup.students || []) {
-        await client.query(`INSERT INTO students (id, name, father_name, contact_number, sex, seat_number, membership_date, membership_till, membership_status, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`, [row.id, row.name, row.father_name, row.contact_number, row.sex, row.seat_number, row.membership_date, row.membership_till, row.membership_status, row.created_at, row.updated_at, row.modified_by]);
+        const restoredContact = (() => {
+          if (!row || row.contact_number === null || row.contact_number === undefined) return '1234567890';
+          const digits = String(row.contact_number).replace(/[^0-9]/g, '');
+          return /^[0-9]{10}$/.test(digits) ? digits : '1234567890';
+        })();
+        await client.query(`INSERT INTO students (id, name, father_name, contact_number, sex, seat_number, membership_date, membership_till, membership_status, created_at, updated_at, modified_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`, [row.id, row.name, row.father_name, restoredContact, row.sex, row.seat_number, row.membership_date, row.membership_till, row.membership_status, row.created_at, row.updated_at, row.modified_by]);
       }
 
       // Restore users (skip admin if present)
@@ -174,6 +179,16 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
       const rand = Math.floor(Math.random() * 1e4).toString().padStart(4, '0');
       const candidate = (ts + rand).slice(0, 12);
       return candidate;
+    };
+
+    // Normalize contact number: return exactly 10 digits or null
+    const normalizeContact = (val) => {
+      if (val === null || val === undefined) return null;
+      const s = String(val).trim();
+      // Remove common formatting characters
+      const digits = s.replace(/[^0-9]/g, '');
+      if (/^[0-9]{10}$/.test(digits)) return digits;
+      return null;
     };
 
     // Column mappings (same as before)
@@ -318,7 +333,8 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
           memberId,
           (memberName || '').toString().substring(0, 100).toUpperCase(),
           (getColumnValue(member, memberColumnMappings.father_name) || '').toString().substring(0, 100).toUpperCase(),
-          (getColumnValue(member, memberColumnMappings.contact_number) || '').toString().substring(0, 20),
+          // Ensure contact number is exactly 10 digits; default to '1234567890' when invalid/missing
+          (normalizeContact(getColumnValue(member, memberColumnMappings.contact_number)) || '1234567890'),
           memberSex || null,
           (seatNumber || '').toString().substring(0, 20),
           membershipDateVal,
