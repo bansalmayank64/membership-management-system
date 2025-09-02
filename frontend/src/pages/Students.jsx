@@ -712,11 +712,25 @@ function Students() {
     }
   }, [stats]);
 
-  // Handle stat clicks for filtering
+  // Handle stat clicks for filtering (toggle behavior)
   const handleStatClick = (statType) => {
-    setActiveStatFilter(statType);
+    // If clicking the already-active stat, toggle it off and explicitly clear UI state
+    if (activeStatFilter === statType) {
+      // Explicitly clear highlight and all per-tab filters so no residual styling remains
+      setActiveStatFilter(null);
+      setSeatsFilters({ seatNumber: '', status: '', gender: '' });
+      setStudentsFilters({ studentName: '', status: '', gender: '', contact: '', seatNumber: '' });
+      setSeatNumberFilter('');
+      setStatusFilter('');
+      setStudentNameFilter('');
+      setContactFilter('');
+      return;
+    }
+
+    // Clear existing filters first, then set the new active stat
     clearAllFilters();
-    
+    setActiveStatFilter(statType);
+
     switch (statType) {
       case 'total':
         setCurrentTab(0); // Seats view
@@ -739,11 +753,13 @@ function Students() {
         setSeatsFilters(prev => ({ ...prev, status: 'expired' }));
         break;
       case 'assigned':
-        setCurrentTab(1); // Active Students view
-        setStudentsFilters(prev => ({ ...prev, status: 'assigned' }));
+        // Apply 'assigned' filter in Seats view only
+        setCurrentTab(0); // Seats view
+        setSeatsFilters(prev => ({ ...prev, status: 'occupied' }));
         break;
       case 'unassigned':
-        setCurrentTab(1); // Active Students view
+        // Apply the unassigned filter in the Students view (show students without seats)
+        setCurrentTab(1); // Students view
         setStudentsFilters(prev => ({ ...prev, status: 'unassigned' }));
         break;
       case 'male':
@@ -769,7 +785,7 @@ function Students() {
   const clearAllFilters = () => {
   // Clear both per-tab storage and the active UI values
   setSeatsFilters({ seatNumber: '', status: '', gender: '' });
-  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '' });
+  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '', seatNumber: '' });
   setSeatNumberFilter('');
   setStatusFilter('');
   setStudentNameFilter('');
@@ -794,6 +810,23 @@ function Students() {
       setSelectedItemForAction(null);
     }
   };
+
+  // Reflect Seats view status dropdown selection in the top 'activeStatFilter' so the "Filtered by: ..." chip appears
+  useEffect(() => {
+    // Sync Seats view dropdown status to the top-tile active filter in a deterministic way
+    if (currentTab !== 0) return; // only reflect seats view
+    const s = seatsFilters.status || '';
+
+    // If empty, always clear the active stat (avoid race conditions)
+    if (!s.trim()) {
+      setActiveStatFilter(null);
+      return;
+    }
+
+    // Map seat status values to the top-tile keys used for highlighting
+    const mapped = s === 'occupied' ? 'assigned' : s;
+    setActiveStatFilter(mapped);
+  }, [seatsFilters.status, currentTab]);
 
   // Student sub-tab change handler (Active / Inactive)
   const handleStudentSubTabChange = (event, newValue) => {
@@ -957,9 +990,19 @@ function Students() {
         // Only items that are expiring soon and not already expired
         data = data.filter(item => item.expiring && !item.expired);
       } else if (statusFilterLocal === 'assigned') {
-        data = data.filter(item => item.seatNumber);
+        // Seats view: 'assigned' means the seat is occupied; Students view: student has a seat
+        if (currentTab === 0) {
+          data = data.filter(item => item.occupied);
+        } else {
+          data = data.filter(item => item.seatNumber);
+        }
       } else if (statusFilterLocal === 'unassigned') {
-        data = data.filter(item => !item.seatNumber);
+        // Seats view: 'unassigned' means seat is not occupied; Students view: student has no seat
+        if (currentTab === 0) {
+          data = data.filter(item => !item.occupied);
+        } else {
+          data = data.filter(item => !item.seatNumber);
+        }
       } else if (statusFilterLocal === 'available') {
         data = data.filter(item => !item.occupied);
       } else if (statusFilterLocal === 'occupied') {
@@ -2336,7 +2379,7 @@ function Students() {
                     {stats.totalStudents}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Students</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Total Students</Typography>
                 <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, mt: 0.5 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
                     <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
@@ -2402,7 +2445,7 @@ function Students() {
                     {stats.expiringSeats}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring Seats</Typography>
               </CardContent>
             </Card>
 
@@ -2425,7 +2468,7 @@ function Students() {
                     {stats.expiredSeats}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expired</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expired Seats</Typography>
               </CardContent>
             </Card>
 
@@ -2471,7 +2514,7 @@ function Students() {
                     {stats.unassignedStudents}
                   </Typography>
                 </Box>
-                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned Seats</Typography>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Unassigned Students</Typography>
               </CardContent>
             </Card>
           </Box>
@@ -2574,7 +2617,7 @@ function Students() {
                 <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 18, mr: 0.5 }} />
                 <Typography variant="h6" fontWeight="bold" color="warning.main">{stats.expiringSeats}</Typography>
               </Box>
-              <Typography variant="caption">Expiring</Typography>
+              <Typography variant="caption">Expiring Seats</Typography>
             </CardContent>
           </Card>
 
@@ -2584,7 +2627,7 @@ function Students() {
                 <HistoryIcon sx={{ color: 'error.main', fontSize: 18, mr: 0.5 }} />
                 <Typography variant="h6" fontWeight="bold" color="error.main">{stats.expiredSeats}</Typography>
               </Box>
-              <Typography variant="caption">Expired</Typography>
+              <Typography variant="caption">Expired Seats</Typography>
             </CardContent>
           </Card>
 
@@ -2617,7 +2660,7 @@ function Students() {
                 <PersonIcon sx={{ color: 'error.main', fontSize: 18, mr: 0.5 }} />
                 <Typography variant="h6" fontWeight="bold" color="error.main">{stats.unassignedStudents}</Typography>
               </Box>
-              <Typography variant="caption">Unassigned Seats</Typography>
+              <Typography variant="caption">Unassigned Students</Typography>
             </CardContent>
           </Card>
         </Box>
@@ -2684,10 +2727,10 @@ function Students() {
                 label="Status"
               >
                 <MenuItem value="">All</MenuItem>
-                <MenuItem value="occupied">Occupied</MenuItem>
-                <MenuItem value="available">Available</MenuItem>
                 <MenuItem value="expiring">Expiring</MenuItem>
                 <MenuItem value="expired">Expired</MenuItem>
+                <MenuItem value="occupied">Occupied</MenuItem>
+                <MenuItem value="available">Available</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" fullWidth>
@@ -3293,7 +3336,22 @@ function Students() {
                   </Box>
 
                   <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-                    <Chip sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }} icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined} label={student.seatNumber || student.seat_number || 'Unassigned'} color={seatChipColor} size="small" />
+                    <Chip
+                      sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', cursor: (!(student.seatNumber || student.seat_number) && !((student.status || student.membership_status || '').toString().toLowerCase().includes('inactive') || (student.status || '').toString().toLowerCase() === 'deactivated') ? 'pointer' : 'default') }}
+                      icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
+                      label={student.seatNumber || student.seat_number || 'Unassigned'}
+                      color={seatChipColor}
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const isAssigned = !!(student.seatNumber || student.seat_number);
+                        const statusVal = (student.status || student.membership_status || '').toString().toLowerCase();
+                        const isInactive = statusVal === 'inactive' || statusVal === 'deactivated';
+                        if (!isAssigned && !isInactive) {
+                          handleAssignSeatToStudent(student);
+                        }
+                      }}
+                    />
                   </Box>
 
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -3338,7 +3396,18 @@ function Students() {
                     </Box>
                   </TableCell>
                   <TableCell align="center">
-                    <Chip icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined} label={student.seat_number || 'Unassigned'} size="small" color={student.seat_number ? 'success' : 'default'} />
+                    <Chip
+                      icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
+                      label={student.seat_number || 'Unassigned'}
+                      size="small"
+                      color={student.seat_number ? 'success' : 'default'}
+                      sx={{ cursor: (!student.seat_number && !((student.status || student.membership_status || '').toString().toLowerCase().includes('inactive') || (student.status || '').toString().toLowerCase() === 'deactivated')) ? 'pointer' : 'default' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const isInactive = ((student.status || student.membership_status || '').toString().toLowerCase() === 'inactive') || ((student.status || '').toString().toLowerCase() === 'deactivated');
+                        if (!student.seat_number && !isInactive) handleAssignSeatToStudent(student);
+                      }}
+                    />
                   </TableCell>
                   <TableCell>
                     <Box>

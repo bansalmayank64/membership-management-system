@@ -14,8 +14,6 @@
     "react-i18next": "^15.7.2",
     "react-router-dom": "^6.15.0"
   ,"dayjs": "^1.11.9"
-  ,"jspdf": "^2.5.1",
-  "html2canvas": "^1.4.1"
   },
   "scripts": {
     "dev": "vite",
