@@ -32,66 +32,37 @@ import { useAuth } from '../contexts/AuthContext';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
 import api from '../services/api';
 
-// Parse timestamp: if timezone is missing, treat as UTC by appending 'Z'.
-// Returns a Date object representing the instant in time.
-const parseTimestamp = (ts) => {
-  if (!ts) return null;
-  try {
-    if (typeof ts === 'string' && !/Z$|[+\-]\d{2}:\d{2}$/.test(ts)) {
-      return new Date(ts + 'Z');
-    }
-    return new Date(ts);
-  } catch (err) {
-    return new Date(ts);
-  }
-};
-
-// Return an IST date-only string 'YYYY-MM-DD' for comparisons
-const getISTDateOnly = (dateObj) => {
-  if (!dateObj) return null;
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(dateObj);
-    const map = {};
-    parts.forEach(p => (map[p.type] = p.value));
-    return `${map.year}-${map.month}-${map.day}`;
-  } catch (e) {
-    // fallback
-    const ist = new Date(dateObj.getTime() + (5.5 * 60 * 60 * 1000));
-    const y = ist.getFullYear();
-    const m = String(ist.getMonth() + 1).padStart(2, '0');
-    const d = String(ist.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-};
-
-// Format timestamp to IST (e.g. '01 Sep 2025, 12:05 PM')
-const formatDate = (dateString) => {
-  if (!dateString) return 'N/A';
-  const d = parseTimestamp(dateString);
-  if (!d || isNaN(d.getTime())) return 'N/A';
-  try {
-    const opts = { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
-    const parts = new Intl.DateTimeFormat('en-GB', opts).formatToParts(d);
-    const map = {};
-    parts.forEach(p => (map[p.type] = p.value));
-    const day = map.day || '';
-    const month = map.month || '';
-    const year = map.year || '';
-    const hour = map.hour || '';
-    const minute = map.minute || '';
-    const dayPeriod = (map.dayPeriod || '').toUpperCase();
-    return `${day} ${month} ${year}, ${hour}:${minute} ${dayPeriod}`;
-  } catch (err) {
-    // fallback to simple IST offset
-    const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-    return ist.toLocaleString('en-GB');
-  }
+// Utility function to convert GMT to IST
+const convertToIST = (dateString) => {
+  if (!dateString) return null;
+  const date = new Date(dateString);
+  // Convert to IST (GMT+5:30)
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  return new Date(date.getTime() + istOffset);
 };
 
 // PaymentCard component for mobile view
 const PaymentCard = ({ payment, onDelete }) => {
   const { user } = useAuth();
-  // use top-level formatDate helper
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      // Convert GMT to IST first
+      const gmtDate = new Date(dateString);
+      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
+      
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      return formatter.format(istDate);
+    } catch (error) {
+      return 'N/A';
+    }
+  };
 
   const formatCurrency = (amount) => {
     const numAmount = Number(amount) || 0;
@@ -252,30 +223,48 @@ function Payments() {
     const matchesStudentId = !filters.studentId || 
       String(payment.student_id || '').toLowerCase().includes(filters.studentId.toLowerCase());
     
-  // Convert payment date to Date using timezone-aware parser
-  const paymentDateObj = parseTimestamp(payment.payment_date);
-  const paymentDateISTOnly = getISTDateOnly(paymentDateObj);
-
-  // Compare using date-only strings in IST (YYYY-MM-DD)
-  const startDateOnly = filters.startDate || null;
-  const endDateOnly = filters.endDate || null;
-
-  const afterStart = !startDateOnly || (paymentDateISTOnly && paymentDateISTOnly >= startDateOnly);
-  const beforeEnd = !endDateOnly || (paymentDateISTOnly && paymentDateISTOnly <= endDateOnly);
+    // Convert payment date to IST for filtering
+    const paymentDate = new Date(payment.payment_date);
+    const paymentDateIST = new Date(paymentDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    
+    // Convert filter dates to IST for comparison
+    const startDateIST = filters.startDate ? new Date(filters.startDate + 'T00:00:00') : null;
+    const endDateIST = filters.endDate ? new Date(filters.endDate + 'T23:59:59') : null;
+    
+    const afterStart = !startDateIST || paymentDateIST >= startDateIST;
+    const beforeEnd = !endDateIST || paymentDateIST <= endDateIST;
     
   return matchesSeat && matchesStudentName && matchesStudentId && afterStart && beforeEnd;
   })
   // Sort by payment_date - latest first (descending order)
   .sort((a, b) => {
-  const dateA = parseTimestamp(a.payment_date) || new Date(0);
-  const dateB = parseTimestamp(b.payment_date) || new Date(0);
-  return dateB - dateA; // Descending order (latest first)
+    const dateA = new Date(a.payment_date);
+    const dateB = new Date(b.payment_date);
+    return dateB - dateA; // Descending order (latest first)
   }) || [];
 
   const displayedPayments = filteredPayments
     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
-  // no local alias needed; PaymentCard uses the module-level formatDate helper
+  const formatDate = (dateString) => {
+    try {
+      // Convert GMT to IST first
+      const gmtDate = new Date(dateString);
+      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
+      
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      return formatter.format(istDate);
+    } catch (error) {
+      return dateString;
+    }
+  };
 
   const formatCurrency = (amount) => {
     const numAmount = Number(amount) || 0;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Paper, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, IconButton, Card, CardContent, Chip, useMediaQuery, Stack, TablePagination } from '@mui/material';
+import { Box, Paper, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, IconButton, Card, CardContent, Chip, useMediaQuery, Stack, TablePagination, Avatar } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import dayjs from 'dayjs';
 import { useTheme } from '@mui/material/styles';
@@ -43,71 +43,6 @@ function formatToIST (dateString) {
     } catch (error) {
       return dateString;
     }
-}
-
-// Convert timestamp (any parseable input) to a GMT/UTC plain string
-// Example output: 2025-09-01 13:40:15.961157
-function convertToGMT(ts) {
-  if (!ts && ts !== 0) return '';
-  try {
-    // If input is a number (epoch ms), use Date directly
-    if (typeof ts === 'number') {
-      const d = new Date(ts);
-      if (Number.isNaN(d.getTime())) return String(ts);
-      const Y = d.getUTCFullYear();
-      const M = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const D = String(d.getUTCDate()).padStart(2, '0');
-      const hh = String(d.getUTCHours()).padStart(2, '0');
-      const mm = String(d.getUTCMinutes()).padStart(2, '0');
-      const ss = String(d.getUTCSeconds()).padStart(2, '0');
-      const ms = String(d.getUTCMilliseconds()).padStart(3, '0');
-      return `${Y}-${M}-${D} ${hh}:${mm}:${ss}.${ms}000`;
-    }
-
-    // If input is an ISO string, try to preserve fractional seconds up to 6 digits
-    if (typeof ts === 'string') {
-      // Regex extracts date/time, fractional part (if any) and timezone
-      const isoRegex = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/;
-      const m = ts.match(isoRegex);
-      const d = new Date(ts); // Date will handle timezone offsets and give UTC components
-      if (Number.isNaN(d.getTime())) return String(ts);
-
-      const Y = d.getUTCFullYear();
-      const M = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const D = String(d.getUTCDate()).padStart(2, '0');
-      const hh = String(d.getUTCHours()).padStart(2, '0');
-      const mm = String(d.getUTCMinutes()).padStart(2, '0');
-      const ss = String(d.getUTCSeconds()).padStart(2, '0');
-
-      let micros;
-      if (m && m[5]) {
-        // fractional part present in input; normalize to 6 digits (microseconds)
-        let frac = m[5].slice(0, 6); // truncate to 6 if longer
-        frac = frac.padEnd(6, '0'); // pad to 6 if shorter
-        micros = frac;
-      } else {
-        // No fractional part in input; use milliseconds from Date and append 3 zeros
-        const ms = String(d.getUTCMilliseconds()).padStart(3, '0');
-        micros = ms + '000';
-      }
-
-      return `${Y}-${M}-${D} ${hh}:${mm}:${ss}.${micros}`;
-    }
-
-    // Fallback: try Date for other types
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return String(ts);
-    const Y = d.getUTCFullYear();
-    const M = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const D = String(d.getUTCDate()).padStart(2, '0');
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    const ss = String(d.getUTCSeconds()).padStart(2, '0');
-    const ms = String(d.getUTCMilliseconds()).padStart(3, '0');
-    return `${Y}-${M}-${D} ${hh}:${mm}:${ss}.${ms}000`;
-  } catch (e) {
-    return String(ts);
-  }
 }
 
 export default function UserActivity({ activities = [], loading }) {
@@ -262,6 +197,52 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
   const theme = useTheme();
   const small = useMediaQuery(theme.breakpoints.down('sm'));
 
+  // Render a details object in a readable key/value layout
+  function PrettyDetails({ details }) {
+    if (details === null || details === undefined) return <Typography variant="body2" color="text.secondary">No details</Typography>;
+
+    const renderValue = (val) => {
+      if (val === null || val === undefined) return <Typography component="span" color="text.secondary">—</Typography>;
+      if (Array.isArray(val)) return (
+        <Box>
+          {val.map((v, i) => (
+            <Typography key={i} variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</Typography>
+          ))}
+        </Box>
+      );
+      if (typeof val === 'object') return (
+        <Box sx={{ pl: 1, borderLeft: '2px solid', borderColor: 'divider', ml: 0.5 }}>
+          {Object.entries(val).map(([k, v]) => (
+            <Box key={k} sx={{ mb: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{k}:</Typography>
+              <Typography variant="body2">{v === null || v === undefined ? '—' : String(v)}</Typography>
+            </Box>
+          ))}
+        </Box>
+      );
+      return <Typography variant="body2">{String(val)}</Typography>;
+    };
+
+    if (typeof details === 'string' || typeof details === 'number' || typeof details === 'boolean') {
+      return <Typography variant="body2">{String(details)}</Typography>;
+    }
+
+    // details is an object
+    const entries = Object.entries(details || {});
+    if (entries.length === 0) return <Typography variant="body2" color="text.secondary">No details</Typography>;
+
+    return (
+      <Box sx={{ display: 'grid', gap: 1 }}>
+        {entries.map(([k, v]) => (
+          <Box key={k} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700, textTransform: 'capitalize' }}>{k}</Typography>
+            <Box sx={{ flex: 1 }}>{renderValue(v)}</Box>
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
   if (!activities || activities.length === 0) {
     return <Paper sx={{ p: 2 }}>No activities</Paper>;
   }
@@ -272,36 +253,46 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
   if (small) {
     return (
       <Box sx={{ display: 'grid', gap: 2 }}>
-        {sorted.map((a, idx) => (
-          <Card key={idx} variant="outlined">
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                <Box>
-                  <Typography variant="caption" color="text.secondary">{formatToIST(a.timestamp)}</Typography>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{a.type || a.action_type} {a.details && a.details.amount ? `• ₹${a.details.amount}` : ''}</Typography>
-                  <Typography variant="body2" color="text.secondary">{a.subjectType || a.subject_type} {a.subjectId || a.subject_id ? `• id:${a.subjectId || a.subject_id}` : ''}</Typography>
+        {sorted.map((a, idx) => {
+          const t = (a.type || a.action_type || '');
+          const p = chipForType(t);
+          const borderColor = (theme.palette[p.color] && theme.palette[p.color].main) || theme.palette.primary.main;
+          const actor = a.actorUsername || a.userName || a.userId || 'System';
+          const initials = (actor || 'S').toString().split(' ').map(s => s[0]).join('').slice(0,2).toUpperCase();
+          // Prefer explicit student name fields from payloads
+          const studentName = a.details?.name || a.details?.student_name || a.details?.studentName || a.details?.student || a.subjectName || a.studentName || null;
+          return (
+            <Card key={idx} variant="outlined" sx={{ display: 'flex', flexDirection: 'column', borderLeft: `4px solid ${borderColor}`, overflow: 'hidden' }}>
+              <CardContent sx={{ pb: 1 }}>
+                <Stack direction="row" spacing={2} alignItems="flex-start">
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography variant="caption" color="text.secondary">{formatToIST(a.timestamp)}</Typography>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 0.5 }}>{a.type || a.action_type} {a.details && a.details.amount ? <Typography component="span" sx={{ fontWeight: 600, color: 'text.secondary' }}>• ₹{a.details.amount}</Typography> : null}</Typography>
+                    {studentName ? (
+                      <Typography variant="body1" sx={{ mt: 0.5 }}>{studentName}</Typography>
+                    ) : null}
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{a.subjectType || a.subject_type} {a.subjectId || a.subject_id ? `• id:${a.subjectId || a.subject_id}` : ''}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                    <Avatar sx={{ bgcolor: borderColor, width: 36, height: 36, fontSize: 14 }}>{initials}</Avatar>
+                    <Chip label={p.label || t} size="small" color={p.color} sx={{ textTransform: 'capitalize' }} />
+                    <Typography variant="caption" color="text.secondary">{actor}</Typography>
+                  </Box>
+                </Stack>
+                <Box sx={{ mt: 1 }}>
+                  <Paper variant="outlined" sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1, maxHeight: 140, overflow: 'auto' }}>
+                    {/* For UPDATE actions show a concise diff: only changed fields */}
+                    {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
+                      <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
+                    ) : (
+                      <PrettyDetails details={a.details} />
+                    )}
+                  </Paper>
                 </Box>
-                <Box sx={{ textAlign: 'right' }}>
-                  {(() => {
-                    const t = (a.type || a.action_type || '');
-                    const p = chipForType(t);
-                    return <Chip label={p.label} size="small" color={p.color} />;
-                  })()}
-                  <Typography variant="caption" display="block" sx={{ mt: 1 }}>{a.actorUsername || a.userId || 'System'}</Typography>
-                </Box>
-              </Stack>
-              <Box sx={{ mt: 1 }}>
-                {/* For UPDATE actions show a concise diff: only changed fields */}
-                {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
-                  // Pass the original ISO8601 timestamp (UTC) to the API so Postgres parses it with timezone
-                  <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
-                ) : (
-                  <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{JSON.stringify(a.details, null, 2)}</pre>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
         {/* Mobile Pagination */}
         <Paper sx={{ mt: 1 }}>
           <TablePagination
@@ -347,7 +338,7 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
           <TableBody>
                 {sorted.map((a, idx) => (
               <TableRow key={idx} hover>
-                <TableCell>{a.timestamp} {formatToIST(a.timestamp)} {a.timestamp}</TableCell>
+                <TableCell>{formatToIST(a.timestamp)}</TableCell>
                 <TableCell>
                   {(() => {
                     const t = (a.type || a.action_type || '');
@@ -365,11 +356,16 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                         <UpdateDiff details={a.details} subjectType={subjectType} subjectId={subjectId} timestamp={a.timestamp} />
                       );
                     }
-                    return <>{a.type || a.action_type} {a.details && a.details.amount ? `• ₹${a.details.amount}` : ''}</>;
+                    // Show structured details in desktop description column
+                    return <PrettyDetails details={a.details} />;
                   })()}
                 </TableCell>
                 <TableCell>
-                  {a.subjectType || a.subject_type} {a.subjectId || a.subject_id ? `#${a.subjectId || a.subject_id}` : ''}
+                  {(() => {
+                    const studentName = a.details?.name || a.details?.student_name || a.details?.studentName || a.details?.student || a.subjectName || a.studentName || null;
+                    if (studentName) return <><Typography variant="body2">{studentName}</Typography><Typography variant="caption" color="text.secondary">{a.subjectType || a.subject_type} {a.subjectId || a.subject_id ? `#${a.subjectId || a.subject_id}` : ''}</Typography></>;
+                    return <>{a.subjectType || a.subject_type} {a.subjectId || a.subject_id ? `#${a.subjectId || a.subject_id}` : ''}</>;
+                  })()}
                 </TableCell>
                 <TableCell>{a.actorUsername || a.userId || a.userName || 'System'}</TableCell>
               </TableRow>
