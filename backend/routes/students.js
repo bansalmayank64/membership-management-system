@@ -147,9 +147,16 @@ router.get('/:id', async (req, res) => {
         CASE 
           WHEN s.seat_number IS NOT NULL THEN 'occupied'
           ELSE 'available'
-        END as seat_status
+        END as seat_status,
+        COALESCE(payment_summary.total_paid, 0) as total_paid,
+        payment_summary.last_payment_date
       FROM students s
       LEFT JOIN seats ON s.seat_number = seats.seat_number
+      LEFT JOIN (
+        SELECT student_id, SUM(amount) as total_paid, MAX(payment_date) as last_payment_date
+        FROM payments
+        GROUP BY student_id
+      ) payment_summary ON s.id = payment_summary.student_id
       WHERE s.id = $1
     `;
     
@@ -498,21 +505,25 @@ router.put('/:id', async (req, res) => {
       currentStudentRow = studentExists.rows[0];
     }
 
+    // Default name/sex to existing DB values when not provided (allow partial updates)
+    const nameToValidate = (name !== undefined && name !== null) ? name : (currentStudentRow ? currentStudentRow.name : null);
+    const sexToValidate = (sex !== undefined && sex !== null) ? sex : (currentStudentRow ? currentStudentRow.sex : null);
+
     // Name validation - VARCHAR(100) NOT NULL
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    if (!nameToValidate || typeof nameToValidate !== 'string' || nameToValidate.trim().length === 0) {
       validationErrors.push('Name is required and must be a non-empty string');
-    } else if (name.trim().length < 2) {
+    } else if (nameToValidate.trim().length < 2) {
       validationErrors.push('Name must be at least 2 characters long');
-    } else if (name.trim().length > 100) {
+    } else if (nameToValidate.trim().length > 100) {
       validationErrors.push('Name must not exceed 100 characters (database constraint)');
-    } else if (!/^[a-zA-Z\s\.\-']+$/.test(name.trim())) {
+    } else if (!/^[a-zA-Z\s\.\-']+$/.test(nameToValidate.trim())) {
       validationErrors.push('Name can only contain letters, spaces, dots, hyphens, and apostrophes');
     }
 
     // Gender/Sex validation - CHECK (sex IN ('male','female')) NOT NULL
-    if (!sex || typeof sex !== 'string') {
+    if (!sexToValidate || typeof sexToValidate !== 'string') {
       validationErrors.push('Gender is required');
-    } else if (!['Male', 'Female', 'male', 'female', 'M', 'F', 'm', 'f'].includes(sex.trim())) {
+    } else if (!['Male', 'Female', 'male', 'female', 'M', 'F', 'm', 'f'].includes(sexToValidate.trim())) {
       validationErrors.push('Gender must be either Male or Female (database constraint: male/female)');
     }
 
@@ -598,8 +609,8 @@ router.put('/:id', async (req, res) => {
     }
 
     // Normalize data
-  const normalizedName = name.trim().replace(/\s+/g, ' ').toUpperCase();
-    const normalizedSex = sex.toLowerCase(); // Database expects lowercase: male/female
+  const normalizedName = (nameToValidate || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    const normalizedSex = (sexToValidate || '').toLowerCase(); // Database expects lowercase: male/female
     const normalizedContact = contact_number && contact_number.trim() ? contact_number.replace(/[\s\-\(\)]/g, '') : null;
     const normalizedFatherName = father_name ? father_name.trim().replace(/\s+/g, ' ').toUpperCase() : null;
     const normalizedSeatNumber = seat_number ? seat_number.trim().toUpperCase() : null;

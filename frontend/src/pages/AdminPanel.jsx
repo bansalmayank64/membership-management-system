@@ -46,11 +46,13 @@ import {
   Warning as WarningIcon,
   EventSeat as SeatIcon,
   AttachMoney as MoneyIcon
+  ,Report as ReportIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import Footer from '../components/Footer';
 import api from '../services/api';
 import ActivityLog from './ActivityLog';
+import Reports from './Reports';
 
 function AdminPanel() {
   const [tabValue, setTabValue] = useState(0);
@@ -76,6 +78,7 @@ function AdminPanel() {
   const IDX_USERS = __tabIdx++;
   const IDX_SEATS = __tabIdx++;
   const IDX_FEES = __tabIdx++;
+  const IDX_REPORTS = __tabIdx++;
   const IDX_SYSTEM = __tabIdx++;
 
   // Global error handler for API calls
@@ -804,6 +807,16 @@ function AdminPanel() {
               }}
             />
             <Tab 
+              key="reports"
+              label="Reports"
+              icon={<ReportIcon />}
+              sx={{ 
+                '& .MuiTab-wrapper': { 
+                  fontSize: { xs: '0.7rem', sm: '0.875rem' } 
+                } 
+              }}
+            />
+            <Tab 
               key="system"
               label="System" 
               icon={<StorageIcon />}
@@ -1207,6 +1220,13 @@ function AdminPanel() {
                 No fees configuration found. Default fees will be applied.
               </Alert>
             )}
+          </Box>
+        )}
+
+        {/* Reports Tab */}
+  {tabValue === IDX_REPORTS && (
+          <Box>
+            <Reports />
           </Box>
         )}
 

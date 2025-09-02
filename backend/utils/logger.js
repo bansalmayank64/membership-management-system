@@ -80,7 +80,7 @@ class APILogger {
           console.log(`📋 Sample data:`, result.slice(0, 2));
         }
       } else if (typeof result === 'object') {
-        console.log(`📋 Result data:`, result);
+        // console.log(`📋 Result data:`, result);
       }
     }
   }

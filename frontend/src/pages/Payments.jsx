@@ -134,6 +134,7 @@ function Payments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { user } = useAuth();
+  const [totalPayments, setTotalPayments] = useState(0);
   // Students list for Add Payment dropdown
   const [students, setStudents] = useState([]);
   const [addPaymentOpen, setAddPaymentOpen] = useState(false);
@@ -167,7 +168,7 @@ function Payments() {
   };
 
   useEffect(() => {
-    fetchPayments();
+  fetchPayments();
     // Prefetch students for dropdown
     fetchStudentsForDropdown();
   }, []);
@@ -189,62 +190,51 @@ function Payments() {
     }
   };
 
-  const fetchPayments = async () => {
+  // Fetch payments with optional overrides to avoid race conditions when updating page/size
+  const fetchPayments = async (overrides = {}) => {
     setLoading(true);
     setError(null);
     try {
-  const response = await fetch(`/api/payments`, {
+      const pageToUse = typeof overrides.page === 'number' ? overrides.page : page;
+      const pageSizeToUse = typeof overrides.pageSize === 'number' ? overrides.pageSize : rowsPerPage;
+      const filtersToUse = overrides.filters || filters;
+
+      // Build query params for server-side pagination & filters
+      const params = new URLSearchParams();
+      params.set('page', pageToUse);
+      params.set('pageSize', pageSizeToUse);
+      if (filtersToUse.seatNumber) params.set('seatNumber', filtersToUse.seatNumber);
+      if (filtersToUse.studentName) params.set('studentName', filtersToUse.studentName);
+      if (filtersToUse.studentId) params.set('studentId', filtersToUse.studentId);
+      if (filtersToUse.startDate) params.set('startDate', filtersToUse.startDate);
+      if (filtersToUse.endDate) params.set('endDate', filtersToUse.endDate);
+
+      const response = await fetch(`/api/payments?${params.toString()}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
-      const paymentArray = await response.json();
-      setPayments(paymentArray);
+
+      const payload = await response.json();
+      setPayments(payload.payments || []);
+      setTotalPayments(payload.total || 0);
     } catch (error) {
       console.error('Error fetching payments:', error);
       handleApiError(error, 'Failed to fetch payments');
       setPayments([]);
+      setTotalPayments(0);
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredPayments = payments?.filter(payment => {
-    const matchesSeat = !filters.seatNumber || 
-      String(payment.seat_number).toLowerCase().includes(filters.seatNumber.toLowerCase());
-    const matchesStudentName = !filters.studentName || 
-      String(payment.student_name || '').toLowerCase().includes(filters.studentName.toLowerCase());
-    const matchesStudentId = !filters.studentId || 
-      String(payment.student_id || '').toLowerCase().includes(filters.studentId.toLowerCase());
-    
-    // Convert payment date to IST for filtering
-    const paymentDate = new Date(payment.payment_date);
-    const paymentDateIST = new Date(paymentDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    
-    // Convert filter dates to IST for comparison
-    const startDateIST = filters.startDate ? new Date(filters.startDate + 'T00:00:00') : null;
-    const endDateIST = filters.endDate ? new Date(filters.endDate + 'T23:59:59') : null;
-    
-    const afterStart = !startDateIST || paymentDateIST >= startDateIST;
-    const beforeEnd = !endDateIST || paymentDateIST <= endDateIST;
-    
-  return matchesSeat && matchesStudentName && matchesStudentId && afterStart && beforeEnd;
-  })
-  // Sort by payment_date - latest first (descending order)
-  .sort((a, b) => {
-    const dateA = new Date(a.payment_date);
-    const dateB = new Date(b.payment_date);
-    return dateB - dateA; // Descending order (latest first)
-  }) || [];
-
-  const displayedPayments = filteredPayments
-    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  // With server-side pagination, payments already contains the current page
+  const displayedPayments = payments || [];
 
   const formatDate = (dateString) => {
     try {
@@ -485,42 +475,8 @@ function Payments() {
         throw new Error(err.error || 'Failed to delete payment');
       }
 
-      // If we computed a membership reduction, apply it now
-      try {
-        if (deleteInfo && deleteInfo.reductionDays > 0 && deleteInfo.payment && deleteInfo.payment.student_id) {
-          // Update student's membership_till to the new date (if available), otherwise compute from current
-          const studentId = deleteInfo.payment.student_id;
-          let membershipTillToSend = deleteInfo.newMembershipTill || null;
-
-          // If we don't have a computed newMembershipTill but have reductionDays and currentMembershipTill, compute it
-          if (!membershipTillToSend && deleteInfo.currentMembershipTill && deleteInfo.reductionDays) {
-            const cur = new Date(deleteInfo.currentMembershipTill);
-            const newDt = new Date(cur);
-            newDt.setDate(newDt.getDate() - deleteInfo.reductionDays);
-            membershipTillToSend = newDt.toISOString().split('T')[0];
-          }
-
-          if (membershipTillToSend) {
-            // Send PUT to update student's membership_till
-            const updResp = await fetch(`/api/students/${studentId}`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-              },
-              body: JSON.stringify({ membership_till: membershipTillToSend })
-            });
-            if (!updResp.ok) {
-              const err = await updResp.json().catch(() => ({}));
-              console.warn('Failed to update student membership after payment deletion', err);
-              // don't throw - deletion already happened; surface a warning instead
-              setError('Payment deleted but failed to update membership end date for the student.');
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('Error applying membership reduction after payment deletion', err);
-      }
+  // Membership adjustments (if any) are handled server-side in the DELETE endpoint.
+  // Do not perform a client-side PUT here; simply refresh data from server to reflect changes.
 
       // Refresh list
       await fetchPayments();
@@ -535,12 +491,23 @@ function Payments() {
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
+    // fetch new page
+    fetchPayments({ page: newPage, pageSize: rowsPerPage });
   };
 
   const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
+    const newSize = parseInt(event.target.value, 10);
+    setRowsPerPage(newSize);
     setPage(0);
+    // fetch first page with new page size
+    fetchPayments({ page: 0, pageSize: newSize });
   };
+
+  // Refetch when filters change (reset to page 0)
+  useEffect(() => {
+    setPage(0);
+    fetchPayments({ page: 0, filters });
+  }, [filters]);
 
   return (
     <Container sx={pageStyles.container}>
@@ -712,7 +679,7 @@ function Payments() {
                 <TablePagination
                   rowsPerPageOptions={[10, 25, 50, 100]}
                   component="div"
-                  count={filteredPayments.length}
+                  count={totalPayments}
                   rowsPerPage={rowsPerPage}
                   page={page}
                   onPageChange={handleChangePage}
@@ -741,30 +708,30 @@ function Payments() {
                 {/* Mobile Pagination */}
                 <Paper sx={{ mt: 1 }}>
                   <TablePagination
-                    component="div"
-                    count={filteredPayments.length}
-                    page={page}
-                    onPageChange={handleChangePage}
-                    rowsPerPage={rowsPerPage}
-                    onRowsPerPageChange={handleChangeRowsPerPage}
-                    rowsPerPageOptions={[10, 25, 50]}
-                    labelRowsPerPage="Per page:"
-                    labelDisplayedRows={({ from, to, count }) => 
-                      `${from}-${to} of ${count}`
-                    }
-                    sx={{
-                      '& .MuiTablePagination-toolbar': {
-                        paddingLeft: 1,
-                        paddingRight: 1,
-                      },
-                      '& .MuiTablePagination-selectLabel': {
-                        fontSize: '0.875rem',
-                      },
-                      '& .MuiTablePagination-displayedRows': {
-                        fontSize: '0.875rem',
+                      component="div"
+                      count={totalPayments}
+                      page={page}
+                      onPageChange={handleChangePage}
+                      rowsPerPage={rowsPerPage}
+                      onRowsPerPageChange={handleChangeRowsPerPage}
+                      rowsPerPageOptions={[10, 25, 50]}
+                      labelRowsPerPage="Per page:"
+                      labelDisplayedRows={({ from, to, count }) => 
+                        `${from}-${to} of ${count}`
                       }
-                    }}
-                  />
+                      sx={{
+                        '& .MuiTablePagination-toolbar': {
+                          paddingLeft: 1,
+                          paddingRight: 1,
+                        },
+                        '& .MuiTablePagination-selectLabel': {
+                          fontSize: '0.875rem',
+                        },
+                        '& .MuiTablePagination-displayedRows': {
+                          fontSize: '0.875rem',
+                        }
+                      }}
+                    />
                 </Paper>
               </Box>
             )}
@@ -961,7 +928,7 @@ function Payments() {
             variant="contained"
             color="error"
             onClick={() => handleDeletePayment(paymentToDelete)}
-            disabled={deleting}
+            disabled={deleting || !(deleteInfo && (deleteInfo.reductionDays > 0 || deleteInfo.currentMembershipTill))}
           >
             {deleting ? 'Deleting...' : 'Delete'}
           </Button>

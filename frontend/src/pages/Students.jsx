@@ -1528,46 +1528,48 @@ function Students() {
   };
 
   // View student details handler
-  const handleViewStudent = async () => {
-    logger.debug('👀 [handleViewStudent] View student action initiated', { selectedItemForAction });
-    
-    if (!selectedItemForAction) {
+  const handleViewStudent = async (item) => {
+    // item is optional; if provided, use it, otherwise fall back to selectedItemForAction
+    const ctx = (item && item.id) ? item : selectedItemForAction;
+    logger.debug('👀 [handleViewStudent] View student action initiated', { selectedContext: ctx });
+
+    if (!ctx) {
       logger.warn('⚠️ [handleViewStudent] No selected item for action, aborting view');
       return;
     }
 
-    logger.debug('👤 [handleViewStudent] Viewing student details', { id: selectedItemForAction.id, name: selectedItemForAction.name, contact: selectedItemForAction.contact_number, sex: selectedItemForAction.sex, seat: selectedItemForAction.seat_number, membershipTill: selectedItemForAction.membership_till });
-    
+    logger.debug('👤 [handleViewStudent] Viewing student details', { id: ctx.id, name: ctx.name, contact: ctx.contact_number, sex: ctx.sex, seat: ctx.seat_number, membershipTill: ctx.membership_till });
+
     // Store student data for the view dialog
-    setViewStudentData({ ...selectedItemForAction });
-    
+    setViewStudentData({ ...ctx });
+
     // Fetch total paid amount for this student
     try {
-      console.log('🌐 [handleViewStudent] Fetching payment data for total calculation...');
-      const response = await fetch(`/api/payments/student/${selectedItemForAction.id}`, {
+      console.log('🌐 [handleViewStudent] Fetching payment data for total calculation...', { studentId: ctx.id });
+      const response = await fetch(`/api/payments/student/${ctx.id}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (response.ok) {
         const payments = await response.json();
-    logger.debug('💰 [handleViewStudent] payments received', { count: (payments && payments.length) || 0 });
-        
+        logger.debug('💰 [handleViewStudent] payments received', { count: (payments && payments.length) || 0 });
+
         // Calculate total with proper number conversion and logging
         let totalPaid = 0;
         payments.forEach((payment, index) => {
           const rawAmount = payment.amount;
           const parsedAmount = parseFloat(rawAmount);
           const safeAmount = isNaN(parsedAmount) ? 0 : parsedAmount;
-          
+
           logger.debug('💰 [handleViewStudent] Payment item', { index: index+1, raw: rawAmount, safe: safeAmount });
-          
+
           totalPaid += safeAmount;
         });
-        
-  logger.info(`💰 [handleViewStudent] Final total calculated`, { totalPaid, count: payments.length });
+
+        logger.info(`💰 [handleViewStudent] Final total calculated`, { totalPaid, count: payments.length });
         setViewStudentTotalPaid(totalPaid);
       } else {
         logger.warn('⚠️ [handleViewStudent] Failed to fetch payment data, setting total paid to 0');
@@ -1577,9 +1579,9 @@ function Students() {
       logger.error('❌ [handleViewStudent] Error fetching payment data', error);
       setViewStudentTotalPaid(0);
     }
-    
+
     setViewStudentOpen(true);
-  logger.debug('✅ [handleViewStudent] View dialog opened successfully');
+    logger.debug('✅ [handleViewStudent] View dialog opened successfully');
     handleActionClose(); // Close the action menu
   };
 
@@ -3282,7 +3284,7 @@ function Students() {
                     <Box sx={{ minWidth: 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                        <Typography variant="body1" sx={{ fontWeight: 700, cursor: 'pointer', color: 'primary.main', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={async (e) => { e.stopPropagation(); setSelectedItemForAction(student); setViewStudentData({ ...student }); setViewStudentOpen(true); }}>
+                        <Typography variant="body1" sx={{ fontWeight: 700, cursor: 'pointer', color: 'primary.main', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={async (e) => { e.stopPropagation(); setSelectedItemForAction(student); await handleViewStudent(student); }}>
                           {student.name}
                         </Typography>
                       </Box>

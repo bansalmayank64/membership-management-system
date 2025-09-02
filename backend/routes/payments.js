@@ -8,8 +8,61 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   const rl = logger.createRequestLogger('GET', '/api/payments', req);
   try {
-    rl.businessLogic('Preparing database query for all payments');
-    const query = `
+    rl.businessLogic('Preparing database query for paginated/filtered payments');
+
+    // Parse pagination and filter params
+    const page = parseInt(req.query.page, 10) || 0; // zero-based
+    const pageSize = parseInt(req.query.pageSize, 10) || 25;
+    const seatNumber = req.query.seatNumber || null;
+    const studentName = req.query.studentName || null;
+    const studentId = req.query.studentId || null;
+    const startDate = req.query.startDate || null; // expected YYYY-MM-DD
+    const endDate = req.query.endDate || null; // expected YYYY-MM-DD
+
+    // Build WHERE clauses
+    const whereClauses = [];
+    const params = [];
+    let idx = 1;
+
+    if (seatNumber) {
+      whereClauses.push(`s.seat_number::text ILIKE $${idx++}`);
+      params.push(`%${seatNumber}%`);
+    }
+    if (studentName) {
+      whereClauses.push(`s.name ILIKE $${idx++}`);
+      params.push(`%${studentName}%`);
+    }
+    if (studentId) {
+      whereClauses.push(`p.student_id::text ILIKE $${idx++}`);
+      params.push(`%${studentId}%`);
+    }
+    if (startDate) {
+      whereClauses.push(`p.payment_date >= $${idx++}`);
+      params.push(startDate + ' 00:00:00');
+    }
+    if (endDate) {
+      whereClauses.push(`p.payment_date <= $${idx++}`);
+      params.push(endDate + ' 23:59:59');
+    }
+
+    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // Count total matching rows
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM payments p
+      LEFT JOIN students s ON p.student_id = s.id
+      ${whereSQL}
+    `;
+    rl.queryStart('Count payments query', countQuery, params);
+    const countStart = Date.now();
+    const countResult = await pool.query(countQuery, params);
+    rl.querySuccess('Count payments query', countStart, countResult, true);
+    const total = parseInt(countResult.rows[0].total, 10) || 0;
+
+    // Fetch page
+    const offset = page * pageSize;
+    const dataQuery = `
       SELECT 
         p.*,
         s.name as student_name,
@@ -17,15 +70,18 @@ router.get('/', async (req, res) => {
         s.contact_number
       FROM payments p
       LEFT JOIN students s ON p.student_id = s.id
+      ${whereSQL}
       ORDER BY p.payment_date DESC
+      LIMIT $${idx++} OFFSET $${idx++}
     `;
-    rl.queryStart('Execute payments query', query);
-    const queryStart = Date.now();
-    const result = await pool.query(query);
-    rl.querySuccess('Execute payments query', queryStart, result, true);
+    params.push(pageSize, offset);
+    rl.queryStart('Fetch payments page', dataQuery, params);
+    const dataStart = Date.now();
+    const dataResult = await pool.query(dataQuery, params);
+    rl.querySuccess('Fetch payments page', dataStart, dataResult, true);
 
-    rl.success(result.rows);
-    res.json(result.rows);
+    rl.success({ payments: dataResult.rows, total });
+    res.json({ payments: dataResult.rows, total });
   } catch (error) {
   rl.error(error);
   res.status(500).json({ error: 'Failed to fetch payments', requestId: rl.requestId, timestamp: new Date().toISOString() });
@@ -38,8 +94,8 @@ router.get('/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params;
     rl.validationStart('Validating student ID parameter');
-    if (!studentId || isNaN(studentId)) {
-      rl.validationError('studentId', ['Invalid student ID']);
+    if (!studentId) {
+      rl.validationError('studentId', ['Student ID is required']);
       return res.status(400).json({ error: 'Valid student ID is required', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
 
@@ -361,19 +417,103 @@ router.delete('/:id', async (req, res) => {
       rl.validationError('delete', ['Invalid payment ID']);
       return res.status(400).json({ error: 'Valid payment ID is required', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
+    // Use transaction: fetch payment, delete it, then update student.membership_till if applicable
+    rl.transactionStart();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const query = 'DELETE FROM payments WHERE id = $1 RETURNING *';
-    const queryStart = rl.queryStart('Delete payment', query, [id]);
-    const result = await pool.query(query, [id]);
-    rl.querySuccess('Delete payment', queryStart, result, true);
+      const fetchQuery = 'SELECT * FROM payments WHERE id = $1 FOR UPDATE';
+      const fetchStart = rl.queryStart('Fetch payment for delete', fetchQuery, [id]);
+      const fetchRes = await client.query(fetchQuery, [id]);
+      rl.querySuccess('Fetch payment for delete', fetchStart, fetchRes, true);
 
-    if (result.rows.length === 0) {
-      rl.warn('Payment not found for delete', { paymentId: id });
-      return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
+      if (fetchRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        rl.transactionRollback('Payment not found');
+        rl.warn('Payment not found for delete', { paymentId: id });
+        return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
+      }
+
+      const payment = fetchRes.rows[0];
+
+      const deleteQuery = 'DELETE FROM payments WHERE id = $1 RETURNING *';
+      rl.queryStart('Delete payment', deleteQuery, [id]);
+      const delRes = await client.query(deleteQuery, [id]);
+      rl.querySuccess('Delete payment', null, delRes, true);
+
+      // If payment is tied to a student and can affect membership, attempt to adjust membership_till
+      try {
+        if (payment.student_id && payment.payment_type) {
+          const studentFetch = await client.query('SELECT id, sex, membership_till FROM students WHERE id = $1 FOR UPDATE', [payment.student_id]);
+          if (studentFetch.rows.length > 0) {
+            const student = studentFetch.rows[0];
+            // Lookup fee config for student's gender
+            const feeCfg = await client.query('SELECT monthly_fees FROM student_fees_config WHERE gender = $1', [student.sex]);
+            if (feeCfg.rows.length > 0) {
+              const monthlyFees = parseFloat(feeCfg.rows[0].monthly_fees);
+              if (monthlyFees > 0) {
+                const amountAbs = Math.abs(Number(payment.amount || 0));
+                const adjustDays = Math.floor((amountAbs / monthlyFees) * 30);
+                if (adjustDays > 0) {
+                  const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+                  const newMembershipTill = new Date(currentMembershipTill);
+
+                  // Creation logic: monthly_fee (positive) extended membership; refund (negative) reduced membership
+                  if (payment.payment_type === 'monthly_fee' && Number(payment.amount) > 0) {
+                    // Deleting an extension -> reduce membership by adjustDays
+                    newMembershipTill.setDate(newMembershipTill.getDate() - adjustDays);
+                  } else if (payment.payment_type === 'refund' && Number(payment.amount) < 0) {
+                    // Deleting a refund (which reduced membership) -> add back days
+                    newMembershipTill.setDate(newMembershipTill.getDate() + adjustDays);
+                  }
+
+                  // Persist updated membership_till (store date part only)
+                  const newDateStr = newMembershipTill.toISOString().split('T')[0];
+                  try {
+                    const updRes = await client.query('UPDATE students SET membership_till = $1 WHERE id = $2 RETURNING *', [newDateStr, student.id]);
+                    if (updRes.rows.length === 0) {
+                      // Should not happen as we locked the student row, but guard anyway
+                      const e = new Error('Failed to update student membership_till during payment delete');
+                      e.context = { studentId: student.id };
+                      rl.error(e, { context: 'failed to persist membership update' });
+                      throw e;
+                    }
+                    rl.info('Updated student membership_till on payment delete', { studentId: student.id, old: student.membership_till, new: updRes.rows[0].membership_till });
+                  } catch (persistErr) {
+                    rl.error(persistErr, { context: 'persist membership update' });
+                    // Bubble up to outer catch to trigger rollback
+                    throw persistErr;
+                  }
+                } else {
+                  rl.info('Computed 0 adjustment days; skipping membership update', { paymentId: id, amount: payment.amount });
+                }
+              } else {
+                rl.warn('Invalid monthly_fees configuration; skipping membership update', { gender: student.sex });
+              }
+            } else {
+              rl.warn('No fee configuration found for gender; skipping membership update', { gender: student.sex });
+            }
+          }
+        }
+      } catch (innerErr) {
+        // Log and rethrow to ensure transaction is rolled back by outer handler
+        rl.error(innerErr, { context: 'membership update after payment delete' });
+        throw new Error('Membership update failed during payment deletion: ' + (innerErr.message || String(innerErr)));
+      }
+
+      await client.query('COMMIT');
+      rl.transactionCommit();
+
+      rl.success(delRes.rows[0]);
+      res.json({ message: 'Payment deleted successfully', payment: delRes.rows[0], requestId: rl.requestId, timestamp: new Date().toISOString() });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      rl.transactionRollback(error.message);
+      throw error;
+    } finally {
+      client.release();
     }
-
-    rl.success(result.rows[0]);
-    res.json({ message: 'Payment deleted successfully', payment: result.rows[0], requestId: rl.requestId, timestamp: new Date().toISOString() });
   } catch (error) {
     rl.error(error, { paymentId: req.params.id });
     res.status(500).json({ error: 'Failed to delete payment', requestId: rl.requestId, timestamp: new Date().toISOString() });
