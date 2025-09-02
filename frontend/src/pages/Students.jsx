@@ -16,6 +16,7 @@ import {
   DialogActions,
   FormControl,
   InputLabel,
+  InputAdornment,
   Select,
   useTheme,
   useMediaQuery,
@@ -69,6 +70,7 @@ import {
   Person as PersonIcon
 } from '@mui/icons-material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import CloseIcon from '@mui/icons-material/Close';
  
 function Students() {
   // Theme and mobile breakpoint detection
@@ -230,10 +232,14 @@ function Students() {
   // Filter states (ensure these are declared to avoid runtime ReferenceErrors)
   const [seatNumberFilter, setSeatNumberFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [genderFilter, setGenderFilter] = useState('');
   const [studentNameFilter, setStudentNameFilter] = useState('');
   const [contactFilter, setContactFilter] = useState('');
   const [activeStatFilter, setActiveStatFilter] = useState(null);
+
+  // Keep per-tab filter state so Seats and Students filters are independent
+  const [seatsFilters, setSeatsFilters] = useState({ seatNumber: '', status: '', gender: '' });
+  // Include seatNumber in studentsFilters so Students tab can have its own seat-number filter independent from Seats view
+  const [studentsFilters, setStudentsFilters] = useState({ studentName: '', status: '', gender: '', contact: '', seatNumber: '' });
   
   // Add Student dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -437,6 +443,8 @@ function Students() {
   const [error, setError] = useState(null);
   // UI tab (0=Seats,1=Active,2=Inactive)
   const [currentTab, setCurrentTab] = useState(0);
+  // Student view sub-tab: 0 = Active, 1 = Inactive
+  const [studentSubTab, setStudentSubTab] = useState(0);
   const [paymentData, setPaymentData] = useState({
     amount: '',
     method: 'cash',
@@ -608,31 +616,54 @@ function Students() {
     
     const totalStudents = activeStudents.length;
     const assignedSeats = activeStudents.filter(s => s.seat_number).length;
-    const availableSeats = unassignedSeats.length;
+  const availableSeats = unassignedSeats.length;
+    // Available seats gender breakdown (derive from seatData by checking if seat has no assigned student)
+    const availableMaleSeats = (seatData || []).filter(s => {
+      if (!s) return false;
+      const hasStudent = !!(s.studentName || s.studentId || s.student || s.student_id);
+      if (hasStudent) return false;
+      const sex = (s.occupantSexRestriction || s.occupant_sex || '').toString().toLowerCase();
+      return sex === 'male';
+    }).length;
+    const availableFemaleSeats = (seatData || []).filter(s => {
+      if (!s) return false;
+      const hasStudent = !!(s.studentName || s.studentId || s.student || s.student_id);
+      if (hasStudent) return false;
+      const sex = (s.occupantSexRestriction || s.occupant_sex || '').toString().toLowerCase();
+      return sex === 'female';
+    }).length;
     
-    // Calculate expiring students based on membership_till within 7 days
-    const today = new Date();
+    // Calculate expiring/expired counts from seatData so values match Seats view filtering
+    const now = new Date();
     const sevenDaysFromNow = new Date();
-    sevenDaysFromNow.setDate(today.getDate() + 7);
-    
-    const expiringSeats = activeStudents.filter(student => {
-      if (!student.membership_till) {
-        return false;
+    sevenDaysFromNow.setDate(now.getDate() + 7);
+
+    let expiringSeatsCount = 0;
+    let expiredSeatsCount = 0;
+
+    // Use seatData to count only seats (assigned) that are expiring/expired using IST adjustment
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    (seatData || []).forEach(seat => {
+      if (!seat) return;
+      const student = students.find(s => s && (s.id === seat.studentId || s.seat_number === seat.seatNumber || s.id === seat.studentId));
+      const membershipTill = seat.membershipExpiry || student?.membership_till;
+      const hasStudent = !!(seat.studentName || student?.name);
+
+      let membershipTillIST = null;
+      if (membershipTill) {
+        const raw = new Date(membershipTill);
+        if (!isNaN(raw.getTime())) membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
       }
-      
-      const expiryDate = new Date(student.membership_till);
-      return expiryDate >= today && expiryDate <= sevenDaysFromNow;
-    }).length;
-    
-    // Calculate expired seats based on membership_till less than current date
-    const expiredSeats = activeStudents.filter(student => {
-      if (!student.membership_till) {
-        return true; // No membership end date means expired
-      }
-      
-      const expiryDate = new Date(student.membership_till);
-      return expiryDate < today;
-    }).length;
+
+      const isExpired = hasStudent && (membershipTillIST ? (membershipTillIST < now) : true);
+      const isExpiring = hasStudent && (membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false);
+
+      if (isExpiring && !isExpired) expiringSeatsCount += 1;
+      if (isExpired) expiredSeatsCount += 1;
+    });
+
+    const expiringSeats = expiringSeatsCount;
+    const expiredSeats = expiredSeatsCount;
     
     const unassignedStudents = activeStudents.filter(s => !s.seat_number).length;
     const totalSeats = seatData.length;
@@ -663,6 +694,9 @@ function Students() {
   ,
   maleStudents,
   femaleStudents
+  ,
+  availableMaleSeats,
+  availableFemaleSeats
     };
   };
 
@@ -694,25 +728,38 @@ function Students() {
         break;
       case 'available':
         setCurrentTab(0); // Seats view
-        setStatusFilter('available');
+        setSeatsFilters(prev => ({ ...prev, status: 'available' }));
         break;
       case 'expiring':
         setCurrentTab(0); // Seats view
-        setStatusFilter('expiring');
+        setSeatsFilters(prev => ({ ...prev, status: 'expiring' }));
+        break;
+      case 'expired':
+        setCurrentTab(0); // Seats view
+        setSeatsFilters(prev => ({ ...prev, status: 'expired' }));
         break;
       case 'assigned':
         setCurrentTab(1); // Active Students view
-        setStatusFilter('assigned');
+        setStudentsFilters(prev => ({ ...prev, status: 'assigned' }));
         break;
       case 'unassigned':
         setCurrentTab(1); // Active Students view
-        setStatusFilter('unassigned');
+        setStudentsFilters(prev => ({ ...prev, status: 'unassigned' }));
         break;
       case 'male':
-        setGenderFilter('male');
+        // Set gender filter only for the active tab so filters are independent
+        if (currentTab === 0) {
+          setSeatsFilters(prev => ({ ...prev, gender: 'male' }));
+        } else {
+          setStudentsFilters(prev => ({ ...prev, gender: 'male' }));
+        }
         break;
       case 'female':
-        setGenderFilter('female');
+        if (currentTab === 0) {
+          setSeatsFilters(prev => ({ ...prev, gender: 'female' }));
+        } else {
+          setStudentsFilters(prev => ({ ...prev, gender: 'female' }));
+        }
         break;
       default:
         break;
@@ -720,12 +767,14 @@ function Students() {
   };
 
   const clearAllFilters = () => {
-    setSeatNumberFilter('');
-    setStatusFilter('');
-    setGenderFilter('');
-    setStudentNameFilter('');
-    setContactFilter('');
-    setActiveStatFilter(null);
+  // Clear both per-tab storage and the active UI values
+  setSeatsFilters({ seatNumber: '', status: '', gender: '' });
+  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '' });
+  setSeatNumberFilter('');
+  setStatusFilter('');
+  setStudentNameFilter('');
+  setContactFilter('');
+  setActiveStatFilter(null);
   };
 
   // Handle tab change - clear filters that may hide records when switching to Inactive tab
@@ -733,15 +782,22 @@ function Students() {
     setCurrentTab(newValue);
     // When opening Inactive tab, clear filters which often come from Seats/Active view
     if (newValue === 2) {
-      setSeatNumberFilter('');
-      setStatusFilter('');
-      setGenderFilter('');
-      setStudentNameFilter('');
-      setContactFilter('');
+  // Clear both per-tab filter objects and the legacy UI values
+  setSeatsFilters({ seatNumber: '', status: '', gender: '' });
+  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '' });
+  setSeatNumberFilter('');
+  setStatusFilter('');
+  setStudentNameFilter('');
+  setContactFilter('');
       setActiveStatFilter(null);
       // Also clear any selected action item to avoid accidental actions
       setSelectedItemForAction(null);
     }
+  };
+
+  // Student sub-tab change handler (Active / Inactive)
+  const handleStudentSubTabChange = (event, newValue) => {
+    setStudentSubTab(newValue);
   };
 
   // Filter data based on current tab and filters
@@ -763,10 +819,23 @@ function Students() {
       data = seatData.map(seat => {
         const student = students.find(s => s.seat_number === seat.seatNumber);
         
-        // Check if membership is expired
+        // Check membership expiry and expiring window (use IST-adjusted calculation like students view)
         const membershipTill = seat.membershipExpiry || student?.membership_till;
         const hasStudent = !!(seat.studentName || student?.name);
-        const isExpired = hasStudent && (membershipTill ? new Date(membershipTill) < new Date() : true); // null means expired if student exists
+        // Adjust to IST consistently (frontend displays IST elsewhere)
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        let membershipTillIST = null;
+        if (membershipTill) {
+          const raw = new Date(membershipTill);
+          if (!isNaN(raw.getTime())) {
+            membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
+          }
+        }
+        const now = new Date();
+        const sevenDaysFromNow = new Date();
+        sevenDaysFromNow.setDate(now.getDate() + 7);
+        const isExpired = hasStudent && (membershipTillIST ? (membershipTillIST < now) : true);
+        const isExpiring = hasStudent && (membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false);
         
         const processedSeat = {
           ...seat,
@@ -774,12 +843,16 @@ function Students() {
           studentName: seat.studentName || student?.name || '',
           studentId: seat.studentId || student?.id || '',
           contact: seat.contactNumber || student?.contact_number || '',
+          // gender: occupant (if occupied) fallback to student.sex
           gender: seat.gender || student?.sex || '',
+          // occupantSexRestriction: the seat's configured gender restriction (from DB occupant_sex)
+          occupantSexRestriction: seat.occupantSexRestriction || seat.occupant_sex || null,
           membership_till: membershipTill,
           // Fix: Determine if seat is occupied based on whether there's a student assigned
           occupied: !!(seat.studentName || student?.name),
-          // Add expired status
-          expired: isExpired
+          // Add expired and expiring status
+          expired: isExpired,
+          expiring: isExpiring
         };
         
     // Reduced logging: only debug summary per seat rather than one log per seat
@@ -853,9 +926,13 @@ function Students() {
   data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     }
 
-    // Apply filters
-    if (seatNumberFilter) {
-      const filterVal = seatNumberFilter.toString();
+    // Apply filters (use per-tab filter state so seats and students filters are independent)
+  const seatNumberFilterLocal = currentTab === 0 ? (seatsFilters.seatNumber || '') : (studentsFilters.seatNumber || '');
+  const statusFilterLocal = currentTab === 0 ? (seatsFilters.status || '') : (studentsFilters.status || '');
+  const genderFilterLocal = currentTab === 0 ? (seatsFilters.gender || '') : (studentsFilters.gender || '');
+
+    if (seatNumberFilterLocal) {
+      const filterVal = seatNumberFilterLocal.toString();
       // Seats view should allow prefix matching (e.g. entering "12" matches "120")
       if (currentTab === 0) {
         data = data.filter(item => {
@@ -874,21 +951,22 @@ function Students() {
         });
       }
     }
-    
-    if (statusFilter) {
-      if (statusFilter === 'expiring') {
-        data = data.filter(item => item.expiring);
-      } else if (statusFilter === 'assigned') {
+
+    if (statusFilterLocal) {
+      if (statusFilterLocal === 'expiring') {
+        // Only items that are expiring soon and not already expired
+        data = data.filter(item => item.expiring && !item.expired);
+      } else if (statusFilterLocal === 'assigned') {
         data = data.filter(item => item.seatNumber);
-      } else if (statusFilter === 'unassigned') {
+      } else if (statusFilterLocal === 'unassigned') {
         data = data.filter(item => !item.seatNumber);
-      } else if (statusFilter === 'available') {
+      } else if (statusFilterLocal === 'available') {
         data = data.filter(item => !item.occupied);
-      } else if (statusFilter === 'occupied') {
+      } else if (statusFilterLocal === 'occupied') {
         data = data.filter(item => item.occupied);
-      } else if (statusFilter === 'deactivated') {
+      } else if (statusFilterLocal === 'deactivated') {
         data = data.filter(item => item.status === 'inactive');
-      } else if (statusFilter === 'expired') {
+      } else if (statusFilterLocal === 'expired') {
         data = data.filter(item => {
           // For seats view, check if seat has expired membership
           if (currentTab === 0) {
@@ -902,13 +980,18 @@ function Students() {
         });
       }
     }
-    
-    if (genderFilter) {
-      data = data.filter(item => item.gender === genderFilter);
+
+    if (genderFilterLocal) {
+      if (currentTab === 0) {
+        // For Seats view, filter by seat's occupant restriction (occupant_sex column).
+        data = data.filter(item => (item.occupantSexRestriction || '') === genderFilterLocal);
+      } else {
+        data = data.filter(item => item.gender === genderFilterLocal);
+      }
     }
     
     // Apply name filter only when in Students tab (tab index 1).
-    const nameFilterLocal = currentTab === 1 ? (studentNameFilter || '').toString().trim().toLowerCase() : '';
+  const nameFilterLocal = currentTab === 1 ? (studentsFilters.studentName || '').toString().trim().toLowerCase() : '';
     if (nameFilterLocal) {
       const q = nameFilterLocal;
       // Students tab: prefix match against name, id or contact/mobile
@@ -925,7 +1008,7 @@ function Students() {
     }
     
     // Apply contact filter only for Students tab
-    const contactFilterLocal = currentTab === 1 ? (contactFilter || '') : '';
+  const contactFilterLocal = currentTab === 1 ? (studentsFilters.contact || '') : '';
     if (contactFilterLocal) {
       data = data.filter(item => 
         (item.contact || item.contactNumber || '').toString().startsWith(contactFilterLocal)
@@ -2285,6 +2368,16 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Available Seats</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, mt: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.availableMaleSeats}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.availableFemaleSeats}</Typography>
+                  </Box>
+                </Box>
               </CardContent>
             </Card>
 
@@ -2308,6 +2401,29 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Expired */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'expired' ? 'error.light' : 'background.paper',
+                '&:hover': { bgcolor: 'error.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('expired')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <HistoryIcon sx={{ color: 'error.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="error.main">
+                    {stats.expiredSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expired</Typography>
               </CardContent>
             </Card>
 
@@ -2485,6 +2601,20 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="body2">Available Seats</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
+                    <Typography variant="caption" color="primary.main" fontWeight="medium">
+                      {stats.availableMaleSeats}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
+                    <Typography variant="caption" color="secondary.main" fontWeight="medium">
+                      {stats.availableFemaleSeats}
+                    </Typography>
+                  </Box>
+                </Box>
               </CardContent>
             </Card>
           </Grid>
@@ -2510,6 +2640,31 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="body2">Expiring Soon</Typography>
+              </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={6} sm={4} md={2}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer', 
+                bgcolor: activeStatFilter === 'expired' ? 'error.light' : 'background.paper',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  bgcolor: 'error.light',
+                  transform: 'translateY(-2px)',
+                  boxShadow: 3
+                }
+              }}
+              onClick={() => handleStatClick('expired')}
+            >
+              <CardContent sx={{ py: 2, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                  <HistoryIcon sx={{ color: 'error.main', fontSize: 20, mr: 1 }} />
+                  <Typography variant="h5" fontWeight="bold" color="error.main">
+                    {stats.expiredSeats}
+                  </Typography>
+                </Box>
+                <Typography variant="body2">Expired</Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -2568,36 +2723,31 @@ function Students() {
     );
   };
 
-  // Render filters based on current tab
+  // Render filters based on current tab (separate seats vs students filters)
   const renderFilters = () => {
     const activeFilters = {};
-    // Exclude contact filter from the Students tab (currentTab === 1)
-    const baseFilters = {
-      seatNumber: seatNumberFilter,
-      status: statusFilter,
-      gender: genderFilter,
-      studentName: studentNameFilter
-    };
-    if (currentTab !== 1) {
-      baseFilters.contact = contactFilter;
+
+    // Build active filters from per-tab state
+    if (currentTab === 0) {
+      if (seatsFilters.seatNumber) activeFilters.seat = seatsFilters.seatNumber;
+      if (seatsFilters.status) activeFilters.status = seatsFilters.status;
+      if (seatsFilters.gender) activeFilters.gender = seatsFilters.gender;
+    } else {
+      if (studentsFilters.studentName) activeFilters.name = studentsFilters.studentName;
+      if (studentsFilters.status) activeFilters.status = studentsFilters.status;
+      if (studentsFilters.gender) activeFilters.gender = studentsFilters.gender;
+      if (studentsFilters.contact) activeFilters.contact = studentsFilters.contact;
     }
 
-    const filterCount = Object.values(baseFilters).filter(value => value && value !== '').length;
-
-    // Build active filters object for chips (omit contact when on Students tab)
-    if (seatNumberFilter) activeFilters.seat = seatNumberFilter;
-    if (statusFilter) activeFilters.status = statusFilter;
-    if (genderFilter) activeFilters.gender = genderFilter;
-    if (studentNameFilter) activeFilters.name = studentNameFilter;
-    if (currentTab !== 1 && contactFilter) activeFilters.contact = contactFilter;
+    const filterCount = Object.keys(activeFilters).length;
 
     const handleFilterRemove = (filterKey) => {
       switch (filterKey) {
-        case 'seat': setSeatNumberFilter(''); break;
-        case 'status': setStatusFilter(''); break;
-        case 'gender': setGenderFilter(''); break;
-        case 'name': setStudentNameFilter(''); break;
-        case 'contact': setContactFilter(''); break;
+        case 'seat': setSeatsFilters(prev => ({ ...prev, seatNumber: '' })); break;
+        case 'status': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, status: '' })); } else { setStudentsFilters(prev => ({ ...prev, status: '' })); } break;
+  case 'gender': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, gender: '' })); } else { setStudentsFilters(prev => ({ ...prev, gender: '' })); } break;
+        case 'name': setStudentsFilters(prev => ({ ...prev, studentName: '' })); break;
+        case 'contact': setStudentsFilters(prev => ({ ...prev, contact: '' })); break;
       }
     };
 
@@ -2608,15 +2758,27 @@ function Students() {
             <TextField
               size="small"
               label="Seat Number"
-              value={seatNumberFilter}
-              onChange={(e) => setSeatNumberFilter(e.target.value)}
+              value={seatsFilters.seatNumber}
+              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, seatNumber: e.target.value })); }}
               fullWidth
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    {seatsFilters.seatNumber ? (
+                      <IconButton size="small" onClick={() => setSeatsFilters(prev => ({ ...prev, seatNumber: '' }))} aria-label="clear seat number">
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    ) : null}
+                  </InputAdornment>
+                )
+              }}
+              sx={{ maxWidth: 120 }}
             />
             <FormControl size="small" fullWidth>
               <InputLabel>Status</InputLabel>
               <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                value={seatsFilters.status}
+                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, status: e.target.value })); }}
                 label="Status"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2629,8 +2791,8 @@ function Students() {
             <FormControl size="small" fullWidth>
               <InputLabel>Gender</InputLabel>
               <Select
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value)}
+                value={seatsFilters.gender}
+                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, gender: e.target.value })); }}
                 label="Gender"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2640,21 +2802,32 @@ function Students() {
             </FormControl>
           </Stack>
         )}
-        
+
         {currentTab === 1 && (
           <Stack spacing={2}>
             <TextField
               size="small"
               label="Student Name"
-              value={studentNameFilter}
-              onChange={(e) => setStudentNameFilter(e.target.value)}
+              value={studentsFilters.studentName}
+              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
               fullWidth
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    {studentsFilters.studentName ? (
+                      <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    ) : null}
+                  </InputAdornment>
+                )
+              }}
             />
             <FormControl size="small" fullWidth>
               <InputLabel>Status</InputLabel>
               <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                value={studentsFilters.status}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, status: e.target.value })); }}
                 label="Status"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2667,8 +2840,8 @@ function Students() {
             <FormControl size="small" fullWidth>
               <InputLabel>Gender</InputLabel>
               <Select
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value)}
+                value={studentsFilters.gender}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
                 label="Gender"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2678,21 +2851,32 @@ function Students() {
             </FormControl>
           </Stack>
         )}
-        
+
         {currentTab === 2 && (
           <Stack spacing={2}>
             <TextField
               size="small"
               label="Student Name"
-              value={studentNameFilter}
-              onChange={(e) => setStudentNameFilter(e.target.value)}
+              value={studentsFilters.studentName}
+              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
               fullWidth
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    {studentsFilters.studentName ? (
+                      <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    ) : null}
+                  </InputAdornment>
+                )
+              }}
             />
             <FormControl size="small" fullWidth>
               <InputLabel>Status</InputLabel>
               <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                value={studentsFilters.status}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, status: e.target.value })); }}
                 label="Status"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2702,8 +2886,8 @@ function Students() {
             <FormControl size="small" fullWidth>
               <InputLabel>Gender</InputLabel>
               <Select
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value)}
+                value={studentsFilters.gender}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
                 label="Gender"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2714,8 +2898,8 @@ function Students() {
             <TextField
               size="small"
               label="Contact"
-              value={contactFilter}
-              onChange={(e) => setContactFilter(e.target.value)}
+              value={studentsFilters.contact}
+              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, contact: e.target.value })); }}
               fullWidth
             />
           </Stack>
@@ -2732,16 +2916,27 @@ function Students() {
             <TextField
               size="small"
               placeholder="Seat #"
-              value={seatNumberFilter}
-              onChange={(e) => setSeatNumberFilter(e.target.value)}
-              sx={{ minWidth: 140, flex: '0 0 auto' }}
-              InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1 }} /> }}
+              value={seatsFilters.seatNumber}
+              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, seatNumber: e.target.value })); }}
+              sx={{ minWidth: 80, flex: '0 0 auto' }}
+              InputProps={{
+                startAdornment: <SearchIcon sx={{ mr: 1 }} />,
+                endAdornment: (
+                  <InputAdornment position="end">
+                    {seatsFilters.seatNumber ? (
+                      <IconButton size="small" onClick={() => setSeatsFilters(prev => ({ ...prev, seatNumber: '' }))} aria-label="clear seat number">
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    ) : null}
+                  </InputAdornment>
+                )
+              }}
             />
             <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
               <InputLabel>Status</InputLabel>
               <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                value={seatsFilters.status}
+                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, status: e.target.value })); }}
                 label="Status"
                 sx={{ pl: 0.5 }}
               >
@@ -2755,8 +2950,8 @@ function Students() {
             <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
               <InputLabel>Gender</InputLabel>
               <Select
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value)}
+                value={seatsFilters.gender}
+                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, gender: e.target.value })); }}
                 label="Gender"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2773,19 +2968,30 @@ function Students() {
         // Students mobile top search (single-row compact)
         return (
           <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
-            <TextField
-              size="small"
-              placeholder="Search name / ID / mobile"
-              value={studentNameFilter}
-              onChange={(e) => setStudentNameFilter(e.target.value)}
-              sx={{ minWidth: 200, flex: '1 0 auto' }}
-              InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1 }} /> }}
-            />
+              <TextField
+                size="small"
+                placeholder="Search name / ID / mobile"
+                value={studentsFilters.studentName}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
+                sx={{ minWidth: 200, flex: '1 0 auto' }}
+                InputProps={{
+                  startAdornment: <SearchIcon sx={{ mr: 1 }} />,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      {studentsFilters.studentName ? (
+                        <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      ) : null}
+                    </InputAdornment>
+                  )
+                }}
+              />
             <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
               <InputLabel>Gender</InputLabel>
               <Select
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value)}
+                value={studentsFilters.gender}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
                 label="Gender"
               >
                 <MenuItem value="">All</MenuItem>
@@ -2896,7 +3102,21 @@ function Students() {
                       </Typography>
                     </>
                   ) : (
-                    <Typography variant="body2" color="text.secondary">Empty</Typography>
+                    // If seat has an occupant sex restriction, show it on empty seats
+                    seat.occupantSexRestriction ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {seat.occupantSexRestriction === 'female' ? (
+                          <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
+                        ) : (
+                          <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
+                        )}
+                        <Typography variant="body2" color="text.secondary">
+                          {seat.occupantSexRestriction === 'female' ? 'Empty (Female only)' : 'Empty (Male only)'}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">Empty</Typography>
+                    )
                   )}
                 </Box>
 
@@ -3074,7 +3294,19 @@ function Students() {
                       )}
                     </Box>
                   ) : (
-                    <Typography variant="body2" color="text.secondary">Empty</Typography>
+                    // Show occupant sex restriction when no student is assigned
+                    seat.occupantSexRestriction ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {seat.occupantSexRestriction === 'female' ? (
+                          <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
+                        ) : (
+                          <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
+                        )}
+                        <Typography variant="body2" color="text.secondary">{seat.occupantSexRestriction === 'female' ? 'Female only' : 'Male only'}</Typography>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">Empty</Typography>
+                    )
                   )}
                 </TableCell>
                 <TableCell sx={{ 
@@ -3123,312 +3355,106 @@ function Students() {
 
   // Render Students View (mobile: card list; desktop: table)
   const renderStudentsView = () => {
-    const visibleStudents = filteredData.filter(student => student && student.id);
+    const visibleStudents = (filteredData || []).filter(student => student && student.id);
 
+    const activeStudents = visibleStudents.filter(s => (s.membership_status || s.status) !== 'inactive');
+    const inactiveStudents = visibleStudents.filter(s => (s.membership_status || s.status) === 'inactive');
+
+    // Mobile: cards with a simple sub-tab
     if (isMobile) {
-      // Split into active and inactive for clearer mobile layout
-      const active = visibleStudents.filter(s => s.membership_status !== 'inactive' && s.status !== 'inactive');
-      const inactive = visibleStudents.filter(s => s.membership_status === 'inactive' || s.status === 'inactive');
-
+      const listToShow = studentSubTab === 0 ? activeStudents : inactiveStudents;
       return (
-        <Stack spacing={2}>
-          {active.length > 0 && (
-            <Box>
-              <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 'bold' }}>Active Students</Typography>
-              <Stack spacing={2}>
-                {active.map(student => {
-            const seatChipColor = student.seatNumber || student.seat_number ? (student.expired ? 'error' : (student.expiring ? 'warning' : 'success')) : 'default';
-            return (
-              <Paper key={student.id} sx={{
-                p: 2,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-                borderRadius: 2,
-                boxShadow: 2,
-                '&:hover': { boxShadow: 6 }
-              }}>
-                {/* Left: avatar + name */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
-                  <Avatar sx={{ bgcolor: 'grey.200', color: 'text.primary', width: 48, height: 48 }}>{student.name ? student.name.charAt(0).toUpperCase() : '?'}</Avatar>
+        <Box>
+          <Paper sx={{ mb: 2 }}>
+            <Tabs value={studentSubTab} onChange={handleStudentSubTabChange} variant="fullWidth">
+              <Tab label={`Active (${activeStudents.length})`} />
+              <Tab label={`Inactive (${inactiveStudents.length})`} />
+            </Tabs>
+          </Paper>
+
+          <Stack spacing={2}>
+            {listToShow.map(student => {
+              const seatChipColor = student.seatNumber || student.seat_number ? (student.expired ? 'error' : (student.expiring ? 'warning' : 'success')) : 'default';
+              return (
+                <Paper key={student.id} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, borderRadius: 2, boxShadow: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                    <Avatar sx={{ bgcolor: 'grey.200', color: 'text.primary', width: 48, height: 48 }}>{student.name ? student.name.charAt(0).toUpperCase() : '?'}</Avatar>
                     <Box sx={{ minWidth: 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {student.sex === 'female' ? (
-                          <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} />
-                        ) : (
-                          <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
-                        )}
-                        <Typography
-                          variant="body1"
-                          sx={{
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              color: 'primary.main',
-                              maxWidth: '100%',
-                              // Keep name on a single line and truncate with ellipsis if too long
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              fontSize: 'clamp(0.75rem, 1.8vw, 1.1rem)',
-                              lineHeight: 1.05,
-                              '&:hover': { textDecoration: 'underline' }
-                          }}
-                          onClick={async (e) => {
-                            try {
-                              e.stopPropagation();
-                              // Set selected item and view data
-                              setSelectedItemForAction(student);
-                              setViewStudentData({ ...student });
-
-                              // Fetch payments for the student and compute total
-                              const resp = await fetch(`/api/payments/student/${student.id}`, {
-                                headers: {
-                                  'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                                  'Content-Type': 'application/json'
-                                }
-                              });
-
-                              if (resp.ok) {
-                                const payments = await resp.json();
-                                const totalPaid = (payments || []).reduce((sum, p) => {
-                                  const amt = parseFloat(p.amount);
-                                  return sum + (isNaN(amt) ? 0 : amt);
-                                }, 0);
-                                setViewStudentTotalPaid(totalPaid);
-                              } else {
-                                setViewStudentTotalPaid(0);
-                              }
-
-                              setViewStudentOpen(true);
-                            } catch (err) {
-                              logger.error('❌ [mobile name click] Error fetching payments', err);
-                              setViewStudentTotalPaid(0);
-                              setViewStudentOpen(true);
-                            }
-                          }}
-                        >
+                        {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
+                        <Typography variant="body1" sx={{ fontWeight: 700, cursor: 'pointer', color: 'primary.main', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={async (e) => { e.stopPropagation(); setSelectedItemForAction(student); setViewStudentData({ ...student }); setViewStudentOpen(true); }}>
                           {student.name}
                         </Typography>
                       </Box>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        display="block"
-                      >
-                        {formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}
-                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">{formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}</Typography>
                     </Box>
-                </Box>
-
-                {/* Center: seat chip centered (absolute centering to guarantee visual center) */}
-                <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-                  <Chip
-                    sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}
-                    icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
-                    label={student.seatNumber || student.seat_number || 'Unassigned'}
-                    color={seatChipColor}
-                    size="small"
-                  />
-                </Box>
-
-                {/* Right: actions */}
-                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0, zIndex: 1 }}>
-                  <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'flex-end' }}>
-                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction(student); handleActionClick(e, student); }}>
-                      <MoreVertIcon />
-                    </IconButton>
                   </Box>
-                </Box>
-              </Paper>
-            );
-                })}
-              </Stack>
-            </Box>
-          )}
 
-          {inactive.length > 0 && (
-            <Box>
-              <Typography variant="subtitle1" sx={{ mt: 1, mb: 1, fontWeight: 'bold' }}>Inactive Students</Typography>
-              <Stack spacing={2}>
-                {inactive.map(student => {
-                  const seatChipColor = student.seatNumber || student.seat_number ? (student.expired ? 'error' : (student.expiring ? 'warning' : 'success')) : 'default';
-                  return (
-                    <Paper key={student.id} sx={{
-                      p: 2,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 2,
-                      borderRadius: 2,
-                      boxShadow: 2,
-                      '&:hover': { boxShadow: 6 }
-                    }}>
-                      {/* Left: avatar + name */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
-                        <Avatar sx={{ bgcolor: 'grey.200', color: 'text.primary', width: 48, height: 48 }}>{student.name ? student.name.charAt(0).toUpperCase() : '?'}</Avatar>
-                        <Box sx={{ minWidth: 0 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            {student.sex === 'female' ? (
-                              <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} />
-                            ) : (
-                              <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
-                            )}
-                            <Typography
-                              variant="body1"
-                              sx={{
-                                fontWeight: 700,
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                color: 'primary.main',
-                                cursor: 'pointer',
-                                '&:hover': { textDecoration: 'underline' }
-                              }}
-                              onClick={async (e) => {
-                                try {
-                                  e.stopPropagation();
-                                  setSelectedItemForAction(student);
-                                  setViewStudentData({ ...student });
+                  <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                    <Chip sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }} icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined} label={student.seatNumber || student.seat_number || 'Unassigned'} color={seatChipColor} size="small" />
+                  </Box>
 
-                                  const resp = await fetch(`/api/payments/student/${student.id}`, {
-                                    headers: {
-                                      'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                                      'Content-Type': 'application/json'
-                                    }
-                                  });
-
-                                  if (resp.ok) {
-                                    const payments = await resp.json();
-                                    const totalPaid = (payments || []).reduce((sum, p) => {
-                                      const amt = parseFloat(p.amount);
-                                      return sum + (isNaN(amt) ? 0 : amt);
-                                    }, 0);
-                                    setViewStudentTotalPaid(totalPaid);
-                                  } else {
-                                    setViewStudentTotalPaid(0);
-                                  }
-
-                                  setViewStudentOpen(true);
-                                } catch (err) {
-                                  logger.error('❌ [inactive mobile name click] Error fetching payments', err);
-                                  setViewStudentTotalPaid(0);
-                                  setViewStudentOpen(true);
-                                }
-                              }}
-                            >
-                              {student.name}
-                            </Typography>
-                          </Box>
-                          <Typography variant="caption" color="text.secondary" display="block">
-                            {formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}
-                          </Typography>
-                        </Box>
-                      </Box>
-
-                      {/* Center: seat chip centered (absolute centering to guarantee visual center) */}
-                      <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-                        <Chip
-                          sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}
-                          icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
-                          label={student.seatNumber || student.seat_number || 'Unassigned'}
-                          color={seatChipColor}
-                          size="small"
-                        />
-                      </Box>
-
-                      {/* Right: actions */}
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0, zIndex: 1 }}>
-                        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'flex-end' }}>
-                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction(student); handleActionClick(e, student); }}>
-                            <MoreVertIcon />
-                          </IconButton>
-                        </Box>
-                      </Box>
-                    </Paper>
-                  );
-                })}
-              </Stack>
-            </Box>
-          )}
-        </Stack>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); setSelectedItemForAction(student); handleActionClick(e, student); }}><MoreVertIcon /></IconButton>
+                  </Box>
+                </Paper>
+              );
+            })}
+          </Stack>
+        </Box>
       );
     }
 
-    // Desktop: keep table layout
+    // Desktop: table with sub-tabs on top
+    const studentsToShow = studentSubTab === 0 ? activeStudents : inactiveStudents;
     return (
-      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-        <Table size="medium">
-          <TableHead>
-            <TableRow>
-              <TableCell><strong>Name</strong></TableCell>
-              <TableCell align="center"><strong>Seat</strong></TableCell>
-              <TableCell><strong>Membership Till</strong></TableCell>
-              <TableCell align="right"><strong>Actions</strong></TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {visibleStudents.map((student) => (
-              <TableRow key={student.id}>
-                <TableCell>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                    {(student.membership_status === 'inactive' || student.status === 'inactive') ? (
-                      <Typography
-                        variant="body2"
-                        sx={{ fontWeight: 'medium', color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            setSelectedItemForAction(student);
-                            setViewStudentData({ ...student });
-                            const response = await fetch(`/api/payments/student/${student.id}`, {
-                              headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                                'Content-Type': 'application/json'
-                              }
-                            });
-                            if (response.ok) {
-                              const payments = await response.json();
-                              const totalPaid = (payments || []).reduce((sum, p) => { const a = parseFloat(p.amount); return sum + (isNaN(a) ? 0 : a); }, 0);
-                              setViewStudentTotalPaid(totalPaid);
-                            } else {
-                              setViewStudentTotalPaid(0);
-                            }
-                            setViewStudentOpen(true);
-                          } catch (err) {
-                            logger.error('❌ [desktop inactive name click] Error fetching payments', err);
-                            setViewStudentTotalPaid(0);
-                            setViewStudentOpen(true);
-                          }
-                        }}
-                      >
-                        {student.name}
-                      </Typography>
-                    ) : (
-                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
-                    )}
-                  </Box>
-                </TableCell>
-                <TableCell align="center">
-                  <Chip icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined} label={student.seat_number || 'Unassigned'} size="small" color={student.seat_number ? 'success' : 'default'} />
-                </TableCell>
-                <TableCell>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      {formatDateForDisplay(student.membership_till || student.membershipTill)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">ID {student.id}</Typography>
-                  </Box>
-                </TableCell>
-                <TableCell sx={{ textAlign: 'right', pr: 2 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <IconButton size="small" onClick={(e) => handleActionClick(e, student)}><MoreVertIcon /></IconButton>
-                  </Box>
-                </TableCell>
+      <Box>
+        <Paper sx={{ mb: 2, display: { xs: 'none', md: 'block' } }}>
+          <Tabs value={studentSubTab} onChange={handleStudentSubTabChange} variant="standard">
+            <Tab label={`Active (${activeStudents.length})`} />
+            <Tab label={`Inactive (${inactiveStudents.length})`} />
+          </Tabs>
+        </Paper>
+
+        <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+          <Table size="medium">
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>Name</strong></TableCell>
+                <TableCell align="center"><strong>Seat</strong></TableCell>
+                <TableCell><strong>Membership Till</strong></TableCell>
+                <TableCell align="right"><strong>Actions</strong></TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {studentsToShow.map((student) => (
+                <TableRow key={student.id}>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
+                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Chip icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined} label={student.seat_number || 'Unassigned'} size="small" color={student.seat_number ? 'success' : 'default'} />
+                  </TableCell>
+                  <TableCell>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary">{formatDateForDisplay(student.membership_till || student.membershipTill)}</Typography>
+                      <Typography variant="caption" color="text.secondary">ID {student.id}</Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell sx={{ textAlign: 'right', pr: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <IconButton size="small" onClick={(e) => handleActionClick(e, student)}><MoreVertIcon /></IconButton>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
     );
   };
 
@@ -4013,7 +4039,21 @@ function Students() {
             <FormControl fullWidth>
               {/* Use the same Autocomplete rendering as Payments Add Payment dialog for exact match */}
               <Autocomplete
-                options={students.filter(s => s && s.id && (!s.seat_number && s.seat_number !== 0))}
+                options={students.filter(s => {
+                  if (!s || !s.id) return false;
+                  // Exclude inactive/deactivated students
+                  const status = ((s.membership_status || s.status || '') + '').toString().toLowerCase();
+                  if (status === 'inactive' || status === 'deactivated') return false;
+                  // Only unassigned students
+                  if (s.seat_number && s.seat_number !== 0) return false;
+                  // Determine seat restriction
+                  const seatNum = selectedItemForAction?.seatNumber ?? selectedItemForAction?.seat_number;
+                  const seatObj = (seatData || []).find(sd => sd && (sd.seatNumber == seatNum || sd.seat_number == seatNum));
+                  const restriction = ((seatObj?.occupantSexRestriction || seatObj?.occupant_sex || '') + '').toString().toLowerCase();
+                  if (!restriction) return true; // no restriction -> eligible
+                  const sex = ((s.sex || s.gender || '') + '').toString().toLowerCase();
+                  return sex === restriction;
+                })}
                 getOptionLabel={(option) => {
                   if (!option) return '';
                   const seatPart = option.seat_number ? ` • 🪑${option.seat_number}` : '';
@@ -4047,8 +4087,19 @@ function Students() {
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
                 {(() => {
                   const validStudents = students.filter(student => student && typeof student === 'object');
-                  const unassignedCount = validStudents.filter(student => !student.seat_number && student.seat_number !== 0).length;
-                  return `${unassignedCount} unassigned students available`;
+                  const seatNum = selectedItemForAction?.seatNumber ?? selectedItemForAction?.seat_number;
+                  const seatObj = (seatData || []).find(sd => sd && (sd.seatNumber == seatNum || sd.seat_number == seatNum));
+                  const restriction = ((seatObj?.occupantSexRestriction || seatObj?.occupant_sex || '') + '').toString().toLowerCase();
+                  const eligible = validStudents.filter(student => {
+                    // Exclude inactive/deactivated students
+                    const status = ((student.membership_status || student.status || '') + '').toString().toLowerCase();
+                    if (status === 'inactive' || status === 'deactivated') return false;
+                    if (student.seat_number && student.seat_number !== 0) return false;
+                    if (!restriction) return true;
+                    const sex = ((student.sex || student.gender || '') + '').toString().toLowerCase();
+                    return sex === restriction;
+                  }).length;
+                  return `${eligible} eligible students available`;
                 })()}
               </Typography>
             </FormControl>
