@@ -138,7 +138,7 @@ router.get('/previous', authenticateToken, async (req, res) => {
   // convert to a timestamp without time zone in UTC for a correct comparison.
   // Convert incoming timestamptz to the same wall-clock timezone used by stored TIMESTAMPs.
   // The DB stores TIMESTAMP values in local IST (Asia/Kolkata), so convert to that timezone.
-  const q = `SELECT * FROM ${table} WHERE ${idCol} = $1 AND ${timestampCol} < ($2::timestamptz AT TIME ZONE 'Asia/Kolkata') ORDER BY ${timestampCol} DESC LIMIT 1`;
+  const q = `SELECT * FROM ${table} WHERE ${idCol} = $1 AND ${timestampCol} < $2 ORDER BY ${timestampCol} DESC LIMIT 1`;
     const params = [subjectId, beforeUtc];
     // interpolate params for logging (safe-ish for debugging)
     try {
