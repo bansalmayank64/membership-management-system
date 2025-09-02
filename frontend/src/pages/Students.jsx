@@ -2490,235 +2490,135 @@ function Students() {
       );
     }
 
-    // Desktop layout: Grid with larger cards - move Total Seats to the first position and keep sticky
+    // Desktop: horizontally-scrollable compact cards to match mobile behavior but slightly larger
     return (
-      <Box sx={outerSx}>
-        <Grid container spacing={2}>
-          <Grid item xs={6} sm={4} md={2}>
-            <Card
-              sx={{
-                cursor: 'pointer',
-                bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': {
-                  bgcolor: 'grey.200',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('total')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <EventSeatIcon sx={{ color: 'text.secondary', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold">
-                    {stats.totalSeats}
-                  </Typography>
+      <Box sx={{ ...outerSx }}>
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 1.5,
+            overflowX: 'auto',
+            pb: 1,
+            alignItems: 'stretch',
+            '&::-webkit-scrollbar': { height: '6px' },
+            '&::-webkit-scrollbar-track': { background: '#f1f1f1', borderRadius: 4 },
+            '&::-webkit-scrollbar-thumb': { background: '#c1c1c1', borderRadius: 4 }
+          }}
+        >
+          {/** Helper to render a card with slightly smaller sizing */}
+          <Card sx={{ minWidth: 140, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'total' ? 'grey.200' : 'background.paper' }} onClick={() => handleStatClick('total')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <EventSeatIcon sx={{ color: 'text.secondary', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold">{stats.totalSeats}</Typography>
+              </Box>
+              <Typography variant="caption" display="block">Total Seats</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.75, mt: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.maleSeats}</Typography>
                 </Box>
-                <Typography variant="body2" sx={{ mb: 1 }}>Total Seats</Typography>
-                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
-                    <Typography variant="caption" color="primary.main" fontWeight="medium">
-                      {stats.maleSeats}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
-                    <Typography variant="caption" color="secondary.main" fontWeight="medium">
-                      {stats.femaleSeats}
-                    </Typography>
-                  </Box>
-                  {stats.neutralSeats > 0 && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary" fontWeight="medium">
-                        +{stats.neutralSeats}
-                      </Typography>
-                    </Box>
-                  )}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.femaleSeats}</Typography>
                 </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={4} md={2}>
-            <Card 
-              sx={{ 
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': { 
-                  bgcolor: 'primary.light',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('totalStudents')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <PersonIcon sx={{ color: 'primary.main', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold" color="primary">
-                    {stats.totalStudents}
-                  </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'totalStudents' ? 'primary.light' : 'background.paper' }} onClick={() => handleStatClick('totalStudents')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <PersonIcon sx={{ color: 'primary.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="primary">{stats.totalStudents}</Typography>
+              </Box>
+              <Typography variant="caption">Total Students</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.75, mt: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.maleStudents}</Typography>
                 </Box>
-                <Typography variant="body2">Total Students</Typography>
-                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mt: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
-                    <Typography variant="caption" color="primary.main" fontWeight="medium">
-                      {stats.maleStudents}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
-                    <Typography variant="caption" color="secondary.main" fontWeight="medium">
-                      {stats.femaleStudents}
-                    </Typography>
-                  </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.femaleStudents}</Typography>
                 </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={4} md={2}>
-            <Card 
-              sx={{ 
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': { 
-                  bgcolor: 'info.light',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('available')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <EventSeatIcon sx={{ color: 'info.main', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold" color="info.main">
-                    {stats.availableSeats}
-                  </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'available' ? 'info.light' : 'background.paper' }} onClick={() => handleStatClick('available')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <EventSeatIcon sx={{ color: 'info.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="info.main">{stats.availableSeats}</Typography>
+              </Box>
+              <Typography variant="caption">Available Seats</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.75, mt: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.availableMaleSeats}</Typography>
                 </Box>
-                <Typography variant="body2">Available Seats</Typography>
-                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <ManIcon sx={{ color: 'primary.main', fontSize: 16 }} />
-                    <Typography variant="caption" color="primary.main" fontWeight="medium">
-                      {stats.availableMaleSeats}
-                    </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.availableFemaleSeats}</Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper' }} onClick={() => handleStatClick('expiring')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="warning.main">{stats.expiringSeats}</Typography>
+              </Box>
+              <Typography variant="caption">Expiring</Typography>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expired' ? 'error.light' : 'background.paper' }} onClick={() => handleStatClick('expired')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <HistoryIcon sx={{ color: 'error.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="error.main">{stats.expiredSeats}</Typography>
+              </Box>
+              <Typography variant="caption">Expired</Typography>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper' }} onClick={() => handleStatClick('assigned')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <EventSeatIcon sx={{ color: 'success.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="success.main">{stats.assignedSeats}</Typography>
+              </Box>
+              <Typography variant="caption">Assigned Seats</Typography>
+              {/* If you have assigned gender breakdown available, show small counters — fallback to nothing if undefined */}
+              {(typeof stats.assignedMaleSeats !== 'undefined' || typeof stats.assignedFemaleSeats !== 'undefined') && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.75, mt: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <ManIcon sx={{ color: 'primary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.assignedMaleSeats || 0}</Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 16 }} />
-                    <Typography variant="caption" color="secondary.main" fontWeight="medium">
-                      {stats.availableFemaleSeats}
-                    </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <WomanIcon sx={{ color: 'secondary.main', fontSize: 12 }} />
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{stats.assignedFemaleSeats || 0}</Typography>
                   </Box>
                 </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={4} md={2}>
-            <Card 
-              sx={{ 
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'expiring' ? 'warning.light' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': { 
-                  bgcolor: 'warning.light',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('expiring')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold" color="warning.main">
-                    {stats.expiringSeats}
-                  </Typography>
-                </Box>
-                <Typography variant="body2">Expiring Soon</Typography>
-              </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={4} md={2}>
-            <Card 
-              sx={{ 
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'expired' ? 'error.light' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': { 
-                  bgcolor: 'error.light',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('expired')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <HistoryIcon sx={{ color: 'error.main', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold" color="error.main">
-                    {stats.expiredSeats}
-                  </Typography>
-                </Box>
-                <Typography variant="body2">Expired</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={4} md={2}>
-            <Card 
-              sx={{ 
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'assigned' ? 'success.light' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': { 
-                  bgcolor: 'success.light',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('assigned')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <EventSeatIcon sx={{ color: 'success.main', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold" color="success.main">
-                    {stats.assignedSeats}
-                  </Typography>
-                </Box>
-                <Typography variant="body2">Assigned Seats</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={4} md={2}>
-            <Card 
-              sx={{ 
-                cursor: 'pointer', 
-                bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper',
-                transition: 'all 0.2s ease',
-                '&:hover': { 
-                  bgcolor: 'error.light',
-                  transform: 'translateY(-2px)',
-                  boxShadow: 3
-                }
-              }}
-              onClick={() => handleStatClick('unassigned')}
-            >
-              <CardContent sx={{ py: 2, textAlign: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                  <PersonIcon sx={{ color: 'error.main', fontSize: 20, mr: 1 }} />
-                  <Typography variant="h5" fontWeight="bold" color="error.main">
-                    {stats.unassignedStudents}
-                  </Typography>
-                </Box>
-                <Typography variant="body2">Unassigned</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'unassigned' ? 'error.light' : 'background.paper' }} onClick={() => handleStatClick('unassigned')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <PersonIcon sx={{ color: 'error.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="error.main">{stats.unassignedStudents}</Typography>
+              </Box>
+              <Typography variant="caption">Unassigned Seats</Typography>
+            </CardContent>
+          </Card>
+        </Box>
       </Box>
     );
   };
