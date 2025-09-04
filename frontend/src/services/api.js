@@ -241,3 +241,21 @@ export async function markSeatAsVacant(seatNumber) {
     throw error;
   }
 }
+
+// Provide a default export for modules that import the legacy default `api`
+const apiDefault = {
+  setTokenExpirationHandler,
+  getSeatChartData,
+  addSeat,
+  updateSeat,
+  removeSeat,
+  getStudents,
+  addStudent,
+  getPayments,
+  addPayment,
+  getExpenses,
+  addExpense,
+  markSeatAsVacant
+};
+
+export default apiDefault;

@@ -34,6 +34,7 @@ import {
   TableCell,
   Badge,
   Avatar,
+  Tooltip,
   Stack,
   Divider,
   Menu,
@@ -179,6 +180,49 @@ function Students() {
     }
   };
 
+  // Format a period as a compact human-friendly range. If start === end, show a single date.
+  const formatPeriod = (startIso, endIso) => {
+    const fmt = (iso) => {
+      if (!iso) return null;
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return null;
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const s = fmt(startIso);
+    const e = fmt(endIso);
+    if (!s && !e) return 'N/A';
+    if (s && e) {
+      return `${s} — ${e}`;
+    }
+    if (s && !e) return `${s} — Current`;
+    return e || 'N/A';
+  };
+
+  // IST helpers - normalize ISO timestamps to an Asia/Kolkata date string suitable for <input type="date" />
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const isoToISTDateInput = (iso) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const ist = new Date(d.getTime() + IST_OFFSET_MS);
+      return ist.toISOString().split('T')[0];
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const todayInIST = () => {
+    const now = new Date();
+    const ist = new Date(now.getTime() + IST_OFFSET_MS);
+    return ist.toISOString().split('T')[0];
+  };
+
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
   const [assignSeatOpen, setAssignSeatOpen] = useState(false);
   // Aadhaar conflict dialog state
@@ -220,8 +264,8 @@ function Students() {
   contact: '',
   sex: '',
   fatherName: '',
-  // default membership_date to today (YYYY-MM-DD)
-  membership_date: new Date().toISOString().split('T')[0],
+  // default membership_date to today in IST (YYYY-MM-DD)
+  membership_date: todayInIST(),
   aadhaar_number: '',
   address: ''
   });
@@ -449,7 +493,7 @@ function Students() {
     amount: '',
     method: 'cash',
     type: 'monthly_fee',
-    date: new Date().toISOString().split('T')[0],
+  date: todayInIST(),
     notes: ''
   });
 
@@ -458,7 +502,7 @@ function Students() {
     amount: '',
     paymentMode: 'cash',
     remarks: '',
-    paymentDate: new Date().toISOString().split('T')[0]
+  paymentDate: todayInIST()
   });
 
   // Fee configuration states
@@ -1174,7 +1218,7 @@ function Students() {
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setAddDialogOpen(false);
-  setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: new Date().toISOString().split('T')[0], aadhaar_number: '', address: '' });
+  setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: todayInIST(), aadhaar_number: '', address: '' });
   setAddAttempted(false);
       setAvailableSeats([]);
       fetchData();
@@ -1417,8 +1461,8 @@ function Students() {
       sex: selectedItemForAction.sex,
       seatNumber: selectedItemForAction.seat_number || '',
   fatherName: selectedItemForAction.father_name || selectedItemForAction.fatherName || '',
-      membershipDate: selectedItemForAction.membership_date ? selectedItemForAction.membership_date.split('T')[0] : '',
-      membershipTill: selectedItemForAction.membership_till ? selectedItemForAction.membership_till.split('T')[0] : ''
+  membershipDate: selectedItemForAction.membership_date ? isoToISTDateInput(selectedItemForAction.membership_date) : '',
+  membershipTill: selectedItemForAction.membership_till ? isoToISTDateInput(selectedItemForAction.membership_till) : ''
     };
 
   // Include Aadhaar and Address so edit dialog can show existing values
@@ -1480,7 +1524,7 @@ function Students() {
       amount: '',
       method: 'cash',
       type: 'monthly_fee',
-      date: new Date().toISOString().split('T')[0],
+  date: todayInIST(),
       notes: ''
     };
     
@@ -1648,8 +1692,8 @@ function Students() {
       sex: viewStudentData.sex,
       seatNumber: viewStudentData.seat_number || '',
   fatherName: viewStudentData.father_name || viewStudentData.fatherName || '',
-      membershipDate: viewStudentData.membership_date ? viewStudentData.membership_date.split('T')[0] : '',
-      membershipTill: viewStudentData.membership_till ? viewStudentData.membership_till.split('T')[0] : ''
+  membershipDate: viewStudentData.membership_date ? isoToISTDateInput(viewStudentData.membership_date) : '',
+  membershipTill: viewStudentData.membership_till ? isoToISTDateInput(viewStudentData.membership_till) : ''
     };
   // Preserve Aadhaar and Address when transitioning from view -> edit
   editData.aadhaarNumber = viewStudentData.aadhaar_number || viewStudentData.aadhaarNumber || '';
@@ -1716,20 +1760,20 @@ function Students() {
 
       // Now update student's membership_status, clear seat assignment and set membership_till to today
       // Build a normalized payload to satisfy backend validation rules
-      const todayStr = new Date().toISOString().split('T')[0];
-      // Ensure membership_date is before membership_till. If not, set membership_date to yesterday.
+      const todayStr = todayInIST();
+      // Ensure membership_date is before membership_till. If not, set membership_date to yesterday (IST-aware).
       let membershipDateRaw = selectedItemForAction?.membership_date || selectedItemForAction?.membershipDate || null;
       let membershipDateToSend = membershipDateRaw;
       try {
         if (membershipDateRaw) {
           const md = new Date(membershipDateRaw);
-          const mt = new Date(todayStr);
+          const mt = new Date(todayStr + 'T00:00:00');
           if (!isNaN(md.getTime()) && md >= mt) {
             const yesterday = new Date(mt);
             yesterday.setDate(yesterday.getDate() - 1);
-            membershipDateToSend = yesterday.toISOString().split('T')[0];
+            membershipDateToSend = isoToISTDateInput(yesterday.toISOString());
           } else {
-            membershipDateToSend = membershipDateRaw.split('T')[0];
+            membershipDateToSend = isoToISTDateInput(membershipDateRaw);
           }
         }
       } catch (e) {
@@ -3392,7 +3436,22 @@ function Students() {
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{student.name}</Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: 'medium',
+                          color: 'primary.main',
+                          cursor: 'pointer',
+                          '&:hover': { textDecoration: 'underline' }
+                        }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setSelectedItemForAction(student);
+                          await handleViewStudent(student);
+                        }}
+                      >
+                        {student.name}
+                      </Typography>
                     </Box>
                   </TableCell>
                   <TableCell align="center">
@@ -3817,7 +3876,7 @@ function Students() {
         <DialogActions>
           <Button onClick={() => {
             setAddDialogOpen(false);
-            setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: new Date().toISOString().split('T')[0], aadhaar_number: '', address: '' });
+          setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: todayInIST(), aadhaar_number: '', address: '' });
             setAvailableSeats([]);
             setAddAttempted(false);
           }}>
@@ -3905,14 +3964,12 @@ function Students() {
                     {seatHistoryContext?.contextTab === 0 ? (
                       <>
                         <TableCell>Student</TableCell>
-                        <TableCell>Period</TableCell>
-                        <TableCell>Status</TableCell>
+                        <TableCell sx={{ maxWidth: 420, whiteSpace: 'normal' }}>Period</TableCell>
                       </>
                     ) : (
                       <>
                         <TableCell>Seat Number</TableCell>
-                        <TableCell>Period</TableCell>
-                        <TableCell>Status</TableCell>
+                        <TableCell sx={{ maxWidth: 420, whiteSpace: 'normal' }}>Period</TableCell>
                       </>
                     )}
                   </TableRow>
@@ -3980,15 +4037,37 @@ function Students() {
                           : (entry.seat_number || 'N/A')
                         }
                       </TableCell>
-                      <TableCell>
-                        {formatDateForDisplay(entry.start_date)} - {entry.end_date ? formatDateForDisplay(entry.end_date) : 'Current'}
-                      </TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={entry.assignment_status} 
-                          color={entry.assignment_status === 'Current' ? 'success' : 'default'}
-                          size="small"
-                        />
+                      <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: 420 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                          <Box sx={{ flex: 1, pr: 1 }}>
+                            {formatPeriod(entry.start_date, entry.end_date)}
+                          </Box>
+                          <Box sx={{ flex: '0 0 auto' }}>
+                            {(() => {
+                              const status = (entry.assignment_status || '').toString();
+                              if (!status) return null;
+                              if (status.toLowerCase() === 'current' || status === 'Current') {
+                                return (
+                                  <Tooltip title="Current" arrow>
+                                    <Box sx={{ width: 12, height: 12, bgcolor: 'success.main', borderRadius: '50%' }} />
+                                  </Tooltip>
+                                );
+                              }
+                              if (['completed', 'complete', 'finished', 'done', 'completed'].includes(status.toLowerCase())) {
+                                return (
+                                  <Tooltip title={entry.assignment_status} arrow>
+                                    <CheckCircleIcon sx={{ color: 'action.active', fontSize: 18 }} />
+                                  </Tooltip>
+                                );
+                              }
+                              return (
+                                <Tooltip title={entry.assignment_status} arrow>
+                                  <Box sx={{ width: 10, height: 10, bgcolor: 'grey.500', borderRadius: '50%' }} />
+                                </Tooltip>
+                              );
+                            })()}
+                          </Box>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -4739,8 +4818,8 @@ function Students() {
                 sex: aadhaarConflictStudent.sex || '',
                 seatNumber: aadhaarConflictStudent.seat_number || '',
                 fatherName: aadhaarConflictStudent.father_name || '',
-                membershipDate: aadhaarConflictStudent.membership_date ? aadhaarConflictStudent.membership_date.split('T')[0] : '',
-                membershipTill: aadhaarConflictStudent.membership_till ? aadhaarConflictStudent.membership_till.split('T')[0] : '',
+                membershipDate: aadhaarConflictStudent.membership_date ? isoToISTDateInput(aadhaarConflictStudent.membership_date) : '',
+                membershipTill: aadhaarConflictStudent.membership_till ? isoToISTDateInput(aadhaarConflictStudent.membership_till) : '',
                 aadhaarNumber: aadhaarConflictStudent.aadhaar_number || aadhaarConflictStudent.aadhaarNumber || '',
                 address: aadhaarConflictStudent.address || ''
               };
