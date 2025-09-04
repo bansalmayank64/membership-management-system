@@ -43,9 +43,10 @@ function StudentProfile() {
   const [student, setStudent] = useState(null);
   const [payments, setPayments] = useState([]);
   const [openPaymentDialog, setOpenPaymentDialog] = useState(false);
+  const todayInIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
   const [newPayment, setNewPayment] = useState({
     amount: '',
-    date: new Date().toISOString().split('T')[0],
+    date: todayInIST(),
     paymentMode: ''
   });
 

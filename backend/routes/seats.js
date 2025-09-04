@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/database');
 const logger = require('../utils/logger');
+const { toISTDateString } = require('../utils/dateUtils');
 
 const router = express.Router();
 
@@ -81,15 +82,15 @@ router.get('/', async (req, res) => {
     const transformStart = Date.now();
     
     // Transform data to match frontend expectations with enhanced validation
-    const seats = result.rows.map(row => ({
+  const seats = result.rows.map(row => ({
       seatNumber: row.seat_number,
       occupied: row.is_truly_occupied, // Use the enhanced computed field for accurate occupancy status
       studentName: row.student_name,
       gender: row.student_sex,
       studentId: row.student_id,
       contactNumber: row.contact_number,
-  membershipExpiry: row.membership_till ? new Date(row.membership_till.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0] : null,
-  lastPayment: row.last_payment_date ? new Date(row.last_payment_date.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0] : null,
+    membershipExpiry: row.membership_till ? toISTDateString(row.membership_till) : null,
+  lastPayment: row.last_payment_date ? toISTDateString(row.last_payment_date) : null,
       expiring: row.expiring, // Show expiring status directly from calculation
       removed: false, // Status field removed - seats are either present or deleted
       maintenance: false, // Status field removed - maintenance should be handled separately

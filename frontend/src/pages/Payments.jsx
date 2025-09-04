@@ -31,15 +31,9 @@ import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, FormC
 import { useAuth } from '../contexts/AuthContext';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
 import api from '../services/api';
+import { todayInIST, getUtcMidnightForDateInTZ } from '../utils/dateUtils';
 
-// Utility function to convert GMT to IST
-const convertToIST = (dateString) => {
-  if (!dateString) return null;
-  const date = new Date(dateString);
-  // Convert to IST (GMT+5:30)
-  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-  return new Date(date.getTime() + istOffset);
-};
+// use shared utils for timezone-aware formatting
 
 // PaymentCard component for mobile view
 const PaymentCard = ({ payment, onDelete }) => {
@@ -139,7 +133,9 @@ function Payments() {
   const [students, setStudents] = useState([]);
   const [addPaymentOpen, setAddPaymentOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [paymentDataLocal, setPaymentDataLocal] = useState({ amount: '', method: 'cash', type: 'monthly_fee', date: new Date().toISOString().split('T')[0], notes: '' });
+  // Default date should be today's date in Asia/Kolkata (YYYY-MM-DD)
+  // re-use shared todayInIST helper
+  const [paymentDataLocal, setPaymentDataLocal] = useState({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
   const [paymentLoadingLocal, setPaymentLoadingLocal] = useState(false);
   const [feeConfig, setFeeConfig] = useState(null);
   const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
@@ -240,19 +236,9 @@ function Payments() {
 
   const formatDate = (dateString) => {
     try {
-      // Convert GMT to IST first
-      const gmtDate = new Date(dateString);
-      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
-      
-      const formatter = new Intl.DateTimeFormat('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      });
-      return formatter.format(istDate);
+      const d = new Date(dateString);
+      if (isNaN(d.getTime())) return dateString;
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
     } catch (error) {
       return dateString;
     }
@@ -269,15 +255,7 @@ function Payments() {
     try {
       const d = new Date(dateInput);
       if (isNaN(d.getTime())) return 'N/A';
-      // Convert to IST (GMT+5:30)
-      const istOffset = 5.5 * 60 * 60 * 1000;
-      const istDate = new Date(d.getTime() + istOffset);
-      const formatter = new Intl.DateTimeFormat('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-      return formatter.format(istDate);
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
     } catch (err) {
       return 'N/A';
     }
@@ -286,7 +264,7 @@ function Payments() {
   // Open Add Payment dialog
   const handleOpenAddPayment = () => {
     setSelectedStudentId('');
-    setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: new Date().toISOString().split('T')[0], notes: '' });
+  setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
     setFeeConfig(null);
     setMembershipExtensionDays(0);
     setAddPaymentOpen(true);
@@ -352,7 +330,7 @@ function Payments() {
               newDt.setDate(newDt.getDate() + extDays);
             }
           }
-          setMembershipNewTill(newDt ? newDt.toISOString().split('T')[0] : null);
+          setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
         } else {
           setMembershipCurrentTill(null);
           setMembershipNewTill(null);
@@ -388,7 +366,7 @@ function Payments() {
           newDt.setDate(newDt.getDate() + extDays);
         }
       }
-      setMembershipNewTill(newDt ? newDt.toISOString().split('T')[0] : null);
+  setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
     } else {
       setMembershipExtensionDays(0);
       setMembershipNewTill(null);
@@ -433,7 +411,7 @@ function Payments() {
       // success
       setAddPaymentOpen(false);
       setSelectedStudentId('');
-      setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: new Date().toISOString().split('T')[0], notes: '' });
+  setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
       setFeeConfig(null);
       setMembershipExtensionDays(0);
       fetchPayments();
@@ -467,7 +445,7 @@ function Payments() {
         newDt.setDate(newDt.getDate() + extDays);
       }
     }
-    setMembershipNewTill(newDt ? newDt.toISOString().split('T')[0] : null);
+          setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
   }, [paymentDataLocal.type]);
 
   const getAmountStyle = (amount) => {
@@ -524,13 +502,13 @@ function Payments() {
                   const monthlyFee = cfg && cfg.monthly_fees ? Number(cfg.monthly_fees) : null;
                   if (monthlyFee && monthlyFee > 0) {
                     reductionDays = Math.floor((Number(payment.amount) / monthlyFee) * 30);
-                    if (reductionDays > 0 && currentMembershipTill) {
+            if (reductionDays > 0 && currentMembershipTill) {
                       // compute new membership_till by subtracting reductionDays
                       const cur = new Date(currentMembershipTill);
                       if (!isNaN(cur.getTime())) {
                         const newDt = new Date(cur);
                         newDt.setDate(newDt.getDate() - reductionDays);
-                        newMembershipTill = newDt.toISOString().split('T')[0];
+              newMembershipTill = newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
                       }
                     }
                   }

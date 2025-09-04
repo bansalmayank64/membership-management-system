@@ -46,6 +46,16 @@ import { Autocomplete } from '@mui/material';
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
 import logger from '../utils/clientLogger';
+import {
+  isoToISTDateInput,
+  todayInIST,
+  getUtcMidnightForDateInTZ,
+  getTodayUtcMidnightInTZ,
+  MS_PER_DAY,
+  formatDateForDisplay,
+  formatIsoToDMonYYYY,
+  formatPeriod
+} from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { getSeatChartData } from '../services/api';
 import {
@@ -164,64 +174,53 @@ function Students() {
     }
   };
 
-  // Local helper to format dates to IST for display (kept consistent with StudentProfile.jsx)
-  const formatDateForDisplay = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return 'N/A';
-      return date.toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        timeZone: 'Asia/Kolkata'
-      }).replace(/ /g, '-');
-    } catch (err) {
-      return 'N/A';
-    }
-  };
+  // re-use shared utils imported above
 
-  // Format a period as a compact human-friendly range. If start === end, show a single date.
-  const formatPeriod = (startIso, endIso) => {
-    const fmt = (iso) => {
-      if (!iso) return null;
-      try {
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return null;
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
-      } catch (e) {
-        return null;
-      }
-    };
-
-    const s = fmt(startIso);
-    const e = fmt(endIso);
-    if (!s && !e) return 'N/A';
-    if (s && e) {
-      return `${s} — ${e}`;
-    }
-    if (s && !e) return `${s} — Current`;
-    return e || 'N/A';
-  };
-
-  // IST helpers - normalize ISO timestamps to an Asia/Kolkata date string suitable for <input type="date" />
-  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  // IST helpers - timezone-aware implementations suitable for <input type="date" />
+  // Use toLocaleDateString with timeZone to avoid arithmetic on epoch which can double-count offsets
   const isoToISTDateInput = (iso) => {
     if (!iso) return '';
     try {
       const d = new Date(iso);
       if (isNaN(d.getTime())) return '';
-      const ist = new Date(d.getTime() + IST_OFFSET_MS);
-      return ist.toISOString().split('T')[0];
+      // 'en-CA' formatting yields YYYY-MM-DD which matches the <input type="date" value format
+      return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     } catch (e) {
       return '';
     }
   };
 
   const todayInIST = () => {
-    const now = new Date();
-    const ist = new Date(now.getTime() + IST_OFFSET_MS);
-    return ist.toISOString().split('T')[0];
+    // Use current date in Asia/Kolkata regardless of host timezone
+    try {
+      return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    } catch (e) {
+      // Fallback to shared helper
+      return todayInIST();
+    }
+  };
+
+  // Time utilities: compute UTC midnight for a date as observed in a given timezone (default Asia/Kolkata)
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const getUtcMidnightForDateInTZ = (input, tz = 'Asia/Kolkata') => {
+    if (!input) return null;
+    try {
+      const d = new Date(input);
+      if (isNaN(d.getTime())) return null;
+      const ymd = d.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+      const parts = ymd.split('-').map(p => Number(p));
+      if (parts.length < 3 || parts.some(isNaN)) return null;
+      return Date.UTC(parts[0], parts[1] - 1, parts[2]); // UTC ms for that YYYY-MM-DD midnight
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const getTodayUtcMidnightInTZ = (tz = 'Asia/Kolkata') => {
+    const ymd = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    const parts = ymd.split('-').map(p => Number(p));
+    if (parts.length < 3 || parts.some(isNaN)) return Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+    return Date.UTC(parts[0], parts[1] - 1, parts[2]);
   };
 
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
@@ -511,18 +510,13 @@ function Students() {
       }
 
       // Compute remaining days (based on membershipTill) and remaining balance using monthly fees
-      const now = new Date();
-      const IST_NOW = new Date(now.getTime() + IST_OFFSET_MS);
-
       let remainingDays = 0;
       if (editStudent.membershipTill || editStudent.membership_till) {
-        const raw = new Date(editStudent.membershipTill || editStudent.membership_till);
-        if (!isNaN(raw.getTime())) {
-          // Convert membership till to IST by adding offset if it's an ISO timestamp
-          const rawIST = new Date(raw.getTime() + IST_OFFSET_MS);
-          if (rawIST > IST_NOW) {
-            remainingDays = Math.ceil((rawIST.getTime() - IST_NOW.getTime()) / (1000 * 60 * 60 * 24));
-          }
+        const prevTillIso = editStudent.membershipTill || editStudent.membership_till;
+        const prevTillUtcMs = getUtcMidnightForDateInTZ(prevTillIso);
+        const todayUtcMs = getTodayUtcMidnightInTZ();
+        if (prevTillUtcMs && prevTillUtcMs > todayUtcMs) {
+          remainingDays = Math.ceil((prevTillUtcMs - todayUtcMs) / MS_PER_DAY);
         }
       }
 
@@ -539,9 +533,10 @@ function Students() {
       // Determine previous membership till (ISO YYYY-MM-DD) if present in form state
       const prevTillIso = editStudent.membershipTill || editStudent.membership_till || null;
 
-      // New membership_till will be IST today + estimatedExtraDays only when estimatedExtraDays > 0
-      const newTillIST = new Date(IST_NOW.getTime() + estimatedExtraDays * 24 * 60 * 60 * 1000);
-      const computedNewTillIso = newTillIST.toISOString().split('T')[0];
+  // New membership_till will be today (Asia/Kolkata) + estimatedExtraDays only when estimatedExtraDays > 0
+  const todayUtcMs = getTodayUtcMidnightInTZ();
+  const computedNewTillUtcMs = todayUtcMs + (estimatedExtraDays * MS_PER_DAY);
+  const computedNewTillIso = new Date(computedNewTillUtcMs).toLocaleDateString('en-CA', { timeZone: 'UTC' });
       const willChange = (estimatedExtraDays || 0) > 0;
       const newTillIso = willChange ? computedNewTillIso : prevTillIso;
 
@@ -834,22 +829,19 @@ function Students() {
     let expiringSeatsCount = 0;
     let expiredSeatsCount = 0;
 
-    // Use seatData to count only seats (assigned) that are expiring/expired using IST adjustment
-    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    // Use seatData to count only seats (assigned) that are expiring/expired using timezone-aware logic (Asia/Kolkata)
     (seatData || []).forEach(seat => {
       if (!seat) return;
       const student = students.find(s => s && (s.id === seat.studentId || s.seat_number === seat.seatNumber || s.id === seat.studentId));
       const membershipTill = seat.membershipExpiry || student?.membership_till;
       const hasStudent = !!(seat.studentName || student?.name);
 
-      let membershipTillIST = null;
-      if (membershipTill) {
-        const raw = new Date(membershipTill);
-        if (!isNaN(raw.getTime())) membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
-      }
+      const membershipUtcMs = getUtcMidnightForDateInTZ(membershipTill);
+      const todayUtcMs = getTodayUtcMidnightInTZ();
+      const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
 
-      const isExpired = hasStudent && (membershipTillIST ? (membershipTillIST < now) : true);
-      const isExpiring = hasStudent && (membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false);
+      const isExpired = hasStudent && (membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true);
+      const isExpiring = hasStudent && (membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false);
 
       if (isExpiring && !isExpired) expiringSeatsCount += 1;
       if (isExpired) expiredSeatsCount += 1;
@@ -1048,20 +1040,12 @@ function Students() {
         // Check membership expiry and expiring window (use IST-adjusted calculation like students view)
         const membershipTill = seat.membershipExpiry || student?.membership_till;
         const hasStudent = !!(seat.studentName || student?.name);
-        // Adjust to IST consistently (frontend displays IST elsewhere)
-        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-        let membershipTillIST = null;
-        if (membershipTill) {
-          const raw = new Date(membershipTill);
-          if (!isNaN(raw.getTime())) {
-            membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
-          }
-        }
-        const now = new Date();
-        const sevenDaysFromNow = new Date();
-        sevenDaysFromNow.setDate(now.getDate() + 7);
-        const isExpired = hasStudent && (membershipTillIST ? (membershipTillIST < now) : true);
-        const isExpiring = hasStudent && (membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false);
+  // Use timezone-aware midnight comparisons for expiry checks (Asia/Kolkata)
+  const membershipUtcMs = getUtcMidnightForDateInTZ(membershipTill);
+  const todayUtcMs = getTodayUtcMidnightInTZ();
+  const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
+  const isExpired = hasStudent && (membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true);
+  const isExpiring = hasStudent && (membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false);
         
         const processedSeat = {
           ...seat,
@@ -1092,21 +1076,13 @@ function Students() {
       logger.debug('Processing students for view (including inactive)', { sampleStudents: students.slice(0,3) });
       // Use the full validStudents list so both active and inactive records are present
       data = validStudents.map(student => {
-        // Compute expiry flags using IST-adjusted view (consistent with Seats view)
-        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-        let membershipTillIST = null;
-        if (student.membership_till) {
-          const raw = new Date(student.membership_till);
-          if (!isNaN(raw.getTime())) {
-            membershipTillIST = new Date(raw.getTime() + IST_OFFSET_MS);
-          }
-        }
-        const now = new Date();
-        const sevenDaysFromNow = new Date();
-        sevenDaysFromNow.setDate(now.getDate() + 7);
+  // Compute expiry flags using timezone-aware midnight comparisons (Asia/Kolkata)
+  const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
+  const todayUtcMs = getTodayUtcMidnightInTZ();
+  const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
 
-        const isExpired = membershipTillIST ? (membershipTillIST < now) : true; // no end date => expired
-        const isExpiring = membershipTillIST ? (membershipTillIST > now && membershipTillIST <= sevenDaysFromNow) : false;
+  const isExpired = membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true; // no end date => expired
+  const isExpiring = membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
 
         // Normalize status: if backend marked inactive/deactivated, keep it; otherwise derive from seat
         const rawStatus = (student.membership_status || student.status || '').toString().toLowerCase();
@@ -1915,7 +1891,7 @@ function Students() {
         const paymentPayload = {
           student_id: selectedItemForAction.id,
           amount: -Math.abs(deactivateRefundAmount), // negative amount for refund
-          payment_date: new Date().toISOString().split('T')[0],
+          payment_date: todayInIST(),
           payment_mode: 'cash',
           payment_type: 'refund',
           remarks: `Refund on deactivation for ${selectedItemForAction.name} (${deactivateRefundDays} days)`,
@@ -2243,11 +2219,11 @@ function Students() {
       setAddPaymentOpen(false);
       
       // Reset form data
-      const resetData = {
+        const resetData = {
         amount: '',
         method: 'cash',
         type: 'monthly_fee',
-        date: new Date().toISOString().split('T')[0],
+        date: todayInIST(),
         notes: ''
       };
   logger.debug('🔄 [processPayment] Resetting payment form data');

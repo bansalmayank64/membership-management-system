@@ -75,8 +75,9 @@ function Expenses() {
   const [viewMode, setViewMode] = useState(isMobile ? 'cards' : 'table');
   
   // New expense form state
+  const todayInIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
   const [newExpense, setNewExpense] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: todayInIST(),
     type: 'electricity',
     description: '',
     amount: ''
@@ -175,7 +176,7 @@ function Expenses() {
         
         setAddDialogOpen(false);
         setNewExpense({
-          date: new Date().toISOString().split('T')[0],
+          date: todayInIST(),
           type: 'electricity',
           description: '',
           amount: ''
@@ -358,7 +359,7 @@ function Expenses() {
     const a = document.createElement('a');
     a.setAttribute('hidden', '');
     a.setAttribute('href', url);
-    a.setAttribute('download', `expenses_${new Date().toISOString().split('T')[0]}.csv`);
+  a.setAttribute('download', `expenses_${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })}.csv`);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

@@ -247,7 +247,8 @@ router.post('/', async (req, res) => {
       seat_number,
       aadhaar_number,
       address,
-      membership_type
+      membership_type,
+      membership_date
     } = req.body;
 
   logger.info('Validating input data', { requestId });
@@ -340,6 +341,15 @@ router.post('/', async (req, res) => {
     const normalizedSeatNumber = seat_number ? seat_number.trim().toUpperCase() : null;
   const normalizedAadhaar = aadhaar_number ? aadhaar_number.replace(/\D/g, '') : null;
   const normalizedAddress = address ? address.trim() : null;
+  // Normalize membership_date if provided (expect YYYY-MM-DD or ISO string). If invalid, set null so DB can default.
+  let normalizedMembershipDate = null;
+  if (membership_date && typeof membership_date === 'string') {
+    const parsed = new Date(membership_date);
+    if (!isNaN(parsed.getTime())) {
+      // Keep the original YYYY-MM-DD/ISO string as provided by client
+      normalizedMembershipDate = membership_date.trim();
+    }
+  }
 
   logger.info('Validation passed', { requestId, normalized: { name: normalizedName, sex: normalizedSex, contact_number: normalizedContact, father_name: normalizedFatherName, seat_number: normalizedSeatNumber } });
 
@@ -394,12 +404,12 @@ router.post('/', async (req, res) => {
           $6,                             -- sex (user input)
       $7,                             -- membership_type (user input)
       $8,                             -- seat_number (user input)
-          CURRENT_TIMESTAMP,              -- membership_date
+          $9,                             -- membership_date (from client or null)
           null,                           -- membership_till
           'active',                       -- membership_status
           CURRENT_TIMESTAMP,              -- created_at
           CURRENT_TIMESTAMP,              -- updated_at
-          $9                              -- modified_by (req.user.userId)
+          $10                             -- modified_by (req.user.userId)
         )
         RETURNING *
       `;
@@ -414,6 +424,7 @@ router.post('/', async (req, res) => {
   normalizedSex,
   effectiveMembershipType,
   normalizedSeatNumber,
+  normalizedMembershipDate,
   req.user?.userId || req.user?.id || 1
     ];
   logger.queryStart('insert student', studentQuery, studentValues);

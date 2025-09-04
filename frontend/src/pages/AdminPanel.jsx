@@ -130,7 +130,7 @@ function AdminPanel() {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `library-backup-${new Date().toISOString().split('T')[0]}.json`;
+  link.download = `library-backup-${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })}.json`;
         link.click();
         window.URL.revokeObjectURL(url);
         setMessage({ type: 'success', text: 'Backup downloaded successfully!' });
@@ -191,7 +191,7 @@ function AdminPanel() {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `full-data-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+  link.download = `full-data-report-${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })}.xlsx`;
         link.click();
         window.URL.revokeObjectURL(url);
         setMessage({ type: 'success', text: 'Full data report downloaded!' });

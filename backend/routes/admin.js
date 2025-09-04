@@ -7,6 +7,7 @@ const bcrypt = require('bcryptjs');
 const { pool } = require('../config/database');
 const auth = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { formatDateForFilenameInTZ } = require('../utils/dateUtils');
 
 const router = express.Router();
 // Activity routes
@@ -99,7 +100,7 @@ router.get('/full-report', auth, requireAdmin, async (req, res) => {
 
     // Write workbook to buffer
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', `attachment; filename="full-data-report-${new Date().toISOString().split('T')[0]}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="full-data-report-${formatDateForFilenameInTZ()}.xlsx"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buf);
   } catch (err) {

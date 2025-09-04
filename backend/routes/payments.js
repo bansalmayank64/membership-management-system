@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/database');
 const logger = require('../utils/logger');
+const { toISTDateString } = require('../utils/dateUtils');
 
 const router = express.Router();
 
@@ -476,7 +477,7 @@ router.delete('/:id', async (req, res) => {
                   }
 
                   // Persist updated membership_till (store date part only)
-                  const newDateStr = newMembershipTill.toISOString().split('T')[0];
+                  const newDateStr = toISTDateString(newMembershipTill);
                   try {
                     const updRes = await client.query('UPDATE students SET membership_till = $1 WHERE id = $2 RETURNING *', [newDateStr, student.id]);
                     if (updRes.rows.length === 0) {
