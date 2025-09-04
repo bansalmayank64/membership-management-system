@@ -3080,8 +3080,15 @@ function Students() {
                             lineHeight: 1.05,
                             wordBreak: 'break-word',
                             overflowWrap: 'anywhere',
+                            // Prevent native text selection / touch-callout which triggers "Tap to search" on Android
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            msUserSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                            WebkitTapHighlightColor: 'transparent',
                             '&:hover': { textDecoration: 'underline' }
                           }}
+                          onContextMenu={(e) => e.preventDefault()}
                         >
                           {seat.studentName}
                         </Typography>
@@ -3239,6 +3246,12 @@ function Students() {
                             lineHeight: 1.05,
                             wordBreak: 'break-word',
                             overflowWrap: 'anywhere',
+                            // Prevent native text selection / touch-callout which triggers "Tap to search" on Android
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            msUserSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                            WebkitTapHighlightColor: 'transparent',
                             '&:hover': {
                               textDecoration: 'underline'
                             }
@@ -3264,6 +3277,7 @@ function Students() {
                               setViewStudentOpen(true);
                             }
                           }}
+                          onContextMenu={(e) => e.preventDefault()}
                         >
                           {seat.studentName}
                         </Typography>
@@ -3371,7 +3385,25 @@ function Students() {
                     <Box sx={{ minWidth: 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                        <Typography variant="body1" sx={{ fontWeight: 700, cursor: 'pointer', color: 'primary.main', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={async (e) => { e.stopPropagation(); setSelectedItemForAction(student); await handleViewStudent(student); }}>
+                        <Typography
+                          variant="body1"
+                          sx={{
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            // Prevent native text selection / touch-callout which triggers "Tap to search" on Android
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            msUserSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                            WebkitTapHighlightColor: 'transparent'
+                          }}
+                          onClick={async (e) => { e.stopPropagation(); setSelectedItemForAction(student); await handleViewStudent(student); }}
+                          onContextMenu={(e) => e.preventDefault()}
+                        >
                           {student.name}
                         </Typography>
                       </Box>
@@ -3442,13 +3474,20 @@ function Students() {
                           fontWeight: 'medium',
                           color: 'primary.main',
                           cursor: 'pointer',
-                          '&:hover': { textDecoration: 'underline' }
+                          '&:hover': { textDecoration: 'underline' },
+                          // Prevent native text selection / touch-callout which triggers "Tap to search" on Android
+                          userSelect: 'none',
+                          WebkitUserSelect: 'none',
+                          msUserSelect: 'none',
+                          WebkitTouchCallout: 'none',
+                          WebkitTapHighlightColor: 'transparent'
                         }}
                         onClick={async (e) => {
                           e.stopPropagation();
                           setSelectedItemForAction(student);
                           await handleViewStudent(student);
                         }}
+                        onContextMenu={(e) => e.preventDefault()}
                       >
                         {student.name}
                       </Typography>
