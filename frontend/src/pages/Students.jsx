@@ -10,6 +10,7 @@ import {
   Grid,
   IconButton,
   Button,
+  ButtonBase,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -266,6 +267,8 @@ function Students() {
   fatherName: '',
   // default membership_date to today in IST (YYYY-MM-DD)
   membership_date: todayInIST(),
+  // default membership type
+  membership_type: 'full_time',
   aadhaar_number: '',
   address: ''
   });
@@ -281,9 +284,9 @@ function Students() {
   const [activeStatFilter, setActiveStatFilter] = useState(null);
 
   // Keep per-tab filter state so Seats and Students filters are independent
-  const [seatsFilters, setSeatsFilters] = useState({ seatNumber: '', status: '', gender: '' });
+  const [seatsFilters, setSeatsFilters] = useState({ seatNumber: '', status: '', gender: '', membershipType: '' });
   // Include seatNumber in studentsFilters so Students tab can have its own seat-number filter independent from Seats view
-  const [studentsFilters, setStudentsFilters] = useState({ studentName: '', status: '', gender: '', contact: '', seatNumber: '' });
+  const [studentsFilters, setStudentsFilters] = useState({ studentName: '', status: '', gender: '', contact: '', seatNumber: '', membershipType: '' });
   
   // Add Student dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -452,13 +455,148 @@ function Students() {
   fatherName: '',
     membershipDate: '',
     membershipTill: '',
+  membershipType: '',
     aadhaarNumber: '',
     address: ''
   });
 
+  // Membership fee options (fetched from admin fees-config)
+  const [membershipFeeOptions, setMembershipFeeOptions] = useState([]);
+
+  // Membership type change confirmation state (when editing student)
+  const [membershipTypeConfirmOpen, setMembershipTypeConfirmOpen] = useState(false);
+  const [membershipTypePending, setMembershipTypePending] = useState(null);
+  const [membershipTypeAdjustment, setMembershipTypeAdjustment] = useState(null);
+
   // Additional states for edit student seat management
   const [editAvailableSeats, setEditAvailableSeats] = useState([]);
   const [editSeatLoading, setEditSeatLoading] = useState(false);
+
+  // Helper: get monthly fee for a membership type + sex (fallbacks handled)
+  const getMonthlyFeeFor = (membershipType, sex) => {
+    if (!membershipType) return null;
+    const opt = (membershipFeeOptions || []).find(o => (o && (o.membership_type || '').toString() === membershipType.toString()));
+    if (!opt) return opt?.monthly_fees || null;
+    // Prefer gender-specific fees if present
+    if ((sex || '').toString().toLowerCase() === 'female') return opt.female_monthly_fees ?? opt.monthly_fees ?? null;
+    return opt.male_monthly_fees ?? opt.monthly_fees ?? null;
+  };
+
+  // Helper: format ISO date (YYYY-MM-DD) to 'D Mon YYYY' (e.g., '5 Aug 2025')
+  const formatIsoToDMonYYYY = (isoDate) => {
+    if (!isoDate) return '';
+    try {
+      // Expecting 'YYYY-MM-DD'
+      const parts = isoDate.toString().split('-');
+      if (parts.length < 3) return isoDate;
+      const year = Number(parts[0]);
+      const monthIndex = Math.max(0, Math.min(11, Number(parts[1]) - 1));
+  const day = Number(parts[2]);
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dayStr = String(day).padStart(2, '0');
+  return `${dayStr} ${months[monthIndex]} ${year}`;
+    } catch (e) {
+      return isoDate;
+    }
+  };
+
+  // Initiate membership type change from Edit dialog: compute adjustment and open confirm dialog
+  const initiateEditMembershipTypeChange = (newType) => {
+    try {
+      const oldType = editStudent.membershipType || editStudent.membership_type || '';
+      // If same type, just apply
+      if (!newType || newType === oldType) {
+        setEditStudent(prev => ({ ...prev, membershipType: newType }));
+        return;
+      }
+
+      // Compute remaining days (based on membershipTill) and remaining balance using monthly fees
+      const now = new Date();
+      const IST_NOW = new Date(now.getTime() + IST_OFFSET_MS);
+
+      let remainingDays = 0;
+      if (editStudent.membershipTill || editStudent.membership_till) {
+        const raw = new Date(editStudent.membershipTill || editStudent.membership_till);
+        if (!isNaN(raw.getTime())) {
+          // Convert membership till to IST by adding offset if it's an ISO timestamp
+          const rawIST = new Date(raw.getTime() + IST_OFFSET_MS);
+          if (rawIST > IST_NOW) {
+            remainingDays = Math.ceil((rawIST.getTime() - IST_NOW.getTime()) / (1000 * 60 * 60 * 24));
+          }
+        }
+      }
+
+      const sex = editStudent.sex || editStudent.gender || '';
+      const oldFee = getMonthlyFeeFor(oldType, sex) || 0;
+      const newFee = getMonthlyFeeFor(newType, sex) || 0;
+
+      // Remaining monetary balance (pro-rated by days): days * (oldFee/30)
+      const remainingBalance = remainingDays > 0 && oldFee > 0 ? (remainingDays * (oldFee / 30)) : 0;
+
+      // If newFee is zero or no remaining balance, estimated extra days = 0
+      const estimatedExtraDays = (remainingBalance > 0 && newFee > 0) ? Math.floor((remainingBalance / newFee) * 30) : 0;
+
+      // Determine previous membership till (ISO YYYY-MM-DD) if present in form state
+      const prevTillIso = editStudent.membershipTill || editStudent.membership_till || null;
+
+      // New membership_till will be IST today + estimatedExtraDays only when estimatedExtraDays > 0
+      const newTillIST = new Date(IST_NOW.getTime() + estimatedExtraDays * 24 * 60 * 60 * 1000);
+      const computedNewTillIso = newTillIST.toISOString().split('T')[0];
+      const willChange = (estimatedExtraDays || 0) > 0;
+      const newTillIso = willChange ? computedNewTillIso : prevTillIso;
+
+      setMembershipTypePending(newType);
+      setMembershipTypeAdjustment({
+        oldType,
+        newType,
+        sex,
+        remainingDays,
+        oldFee,
+        newFee,
+        remainingBalance: Math.round(remainingBalance),
+        estimatedExtraDays,
+        newMembershipTill: newTillIso,
+        previousMembershipTill: prevTillIso,
+        willChange
+      });
+
+      // Open dialog (even if remainingDays === 0 so user sees effect)
+      setMembershipTypeConfirmOpen(true);
+    } catch (err) {
+      // Fallback: apply without confirmation
+      setEditStudent(prev => ({ ...prev, membershipType: newType }));
+      setMembershipTypeConfirmOpen(false);
+      setMembershipTypePending(null);
+      setMembershipTypeAdjustment(null);
+      logger.error('❌ [initiateEditMembershipTypeChange] Error', err);
+    }
+  };
+
+  const cancelMembershipTypeChange = () => {
+    setMembershipTypeConfirmOpen(false);
+    setMembershipTypePending(null);
+    setMembershipTypeAdjustment(null);
+  };
+
+  const confirmMembershipTypeChange = () => {
+    if (!membershipTypePending) {
+      cancelMembershipTypeChange();
+      return;
+    }
+    // Apply membership type and adjust membershipTill
+    setEditStudent(prev => {
+      // Only update membershipTill when estimatedExtraDays is positive
+      const shouldUpdateTill = membershipTypeAdjustment && (membershipTypeAdjustment.estimatedExtraDays || 0) > 0;
+      return {
+        ...prev,
+        membershipType: membershipTypePending,
+        ...(shouldUpdateTill ? { membershipTill: membershipTypeAdjustment.newMembershipTill } : {})
+      };
+    });
+    setMembershipTypeConfirmOpen(false);
+    setMembershipTypePending(null);
+    setMembershipTypeAdjustment(null);
+  };
 
   const [assignSeatData, setAssignSeatData] = useState({
     seatNumber: '',
@@ -511,6 +649,17 @@ function Students() {
 
   useEffect(() => {
     fetchData();
+    // Fetch membership fee options for dropdown previews
+    (async () => {
+      try {
+        const resp = await fetch('/api/admin/fees-config', { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+        if (!resp.ok) return;
+        const rows = await resp.json();
+        setMembershipFeeOptions(rows || []);
+      } catch (e) {
+        // ignore
+      }
+    })();
   }, []);
 
   // Measure header height (including margin-bottom) and update sticky top offset
@@ -828,8 +977,8 @@ function Students() {
 
   const clearAllFilters = () => {
   // Clear both per-tab storage and the active UI values
-  setSeatsFilters({ seatNumber: '', status: '', gender: '' });
-  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '', seatNumber: '' });
+  setSeatsFilters({ seatNumber: '', status: '', gender: '', membershipType: '' });
+  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '', seatNumber: '', membershipType: '' });
   setSeatNumberFilter('');
   setStatusFilter('');
   setStudentNameFilter('');
@@ -1007,6 +1156,17 @@ function Students() {
   const seatNumberFilterLocal = currentTab === 0 ? (seatsFilters.seatNumber || '') : (studentsFilters.seatNumber || '');
   const statusFilterLocal = currentTab === 0 ? (seatsFilters.status || '') : (studentsFilters.status || '');
   const genderFilterLocal = currentTab === 0 ? (seatsFilters.gender || '') : (studentsFilters.gender || '');
+  const membershipTypeFilterLocal = currentTab === 0 ? (seatsFilters.membershipType || '') : (studentsFilters.membershipType || '');
+
+  // Helper to normalize membership type keys for robust comparison (e.g. "Full Time" -> "full_time")
+  const normalizeMembershipKey = (s) => {
+    if (!s && s !== 0) return '';
+    try {
+      return s.toString().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    } catch (e) {
+      return '';
+    }
+  };
 
     if (seatNumberFilterLocal) {
       const filterVal = seatNumberFilterLocal.toString();
@@ -1074,6 +1234,21 @@ function Students() {
         data = data.filter(item => (item.occupantSexRestriction || '') === genderFilterLocal);
       } else {
         data = data.filter(item => item.gender === genderFilterLocal);
+      }
+    }
+    if (membershipTypeFilterLocal) {
+      if (currentTab === 0) {
+        // Seats view: check the assigned student's membership_type if present
+        data = data.filter(item => {
+          const student = students.find(s => s && (s.seat_number === item.seatNumber || s.seat_number === item.seatNumber || s.id === item.studentId));
+          const mt = ((student && (student.membership_type || student.membershipType)) || (item.membership_type || item.membershipType) || '').toString();
+          return normalizeMembershipKey(mt) === normalizeMembershipKey(membershipTypeFilterLocal);
+        });
+      } else {
+        data = data.filter(item => {
+          const mt = (item.membership_type || item.membershipType || '').toString();
+          return normalizeMembershipKey(mt) === normalizeMembershipKey(membershipTypeFilterLocal);
+        });
       }
     }
     
@@ -1175,6 +1350,7 @@ function Students() {
       const studentData = {
         name: newStudent.name.trim(),
         sex: newStudent.sex,
+  membership_type: newStudent.membership_type,
         father_name: newStudent.fatherName?.trim() || null,
         contact_number: newStudent.contact?.trim() || null,
   seat_number: newStudent.seat_number || null,
@@ -1462,7 +1638,9 @@ function Students() {
       seatNumber: selectedItemForAction.seat_number || '',
   fatherName: selectedItemForAction.father_name || selectedItemForAction.fatherName || '',
   membershipDate: selectedItemForAction.membership_date ? isoToISTDateInput(selectedItemForAction.membership_date) : '',
-  membershipTill: selectedItemForAction.membership_till ? isoToISTDateInput(selectedItemForAction.membership_till) : ''
+  membershipTill: selectedItemForAction.membership_till ? isoToISTDateInput(selectedItemForAction.membership_till) : '',
+  // Ensure frontend form has a normalized membership type (backend may use membership_type)
+  membershipType: selectedItemForAction.membership_type || selectedItemForAction.membershipType 
     };
 
   // Include Aadhaar and Address so edit dialog can show existing values
@@ -1499,7 +1677,8 @@ function Students() {
     if (selectedItemForAction.sex) {
       try {
         console.log(`💰 [handleAddPayment] Fetching fee configuration for gender: ${selectedItemForAction.sex}`);
-        const response = await fetch(`/api/students/fee-config/${selectedItemForAction.sex}`, {
+  const membershipType = selectedItemForAction?.membership_type ;
+  const response = await fetch(`/api/students/fee-config/${membershipType}/${selectedItemForAction.sex}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'
@@ -1579,7 +1758,8 @@ function Students() {
 
         // Fetch monthly fee config for this student's gender
         if (selectedItemForAction?.sex) {
-          const resp = await fetch(`/api/students/fee-config/${selectedItemForAction.sex}`, {
+          const membershipType = selectedItemForAction?.membership_type ;
+          const resp = await fetch(`/api/students/fee-config/${membershipType}/${selectedItemForAction.sex}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
               'Content-Type': 'application/json'
@@ -1693,7 +1873,9 @@ function Students() {
       seatNumber: viewStudentData.seat_number || '',
   fatherName: viewStudentData.father_name || viewStudentData.fatherName || '',
   membershipDate: viewStudentData.membership_date ? isoToISTDateInput(viewStudentData.membership_date) : '',
-  membershipTill: viewStudentData.membership_till ? isoToISTDateInput(viewStudentData.membership_till) : ''
+  membershipTill: viewStudentData.membership_till ? isoToISTDateInput(viewStudentData.membership_till) : '',
+  // Map backend membership_type to frontend membershipType so the edit form is accurate
+  membershipType: viewStudentData.membership_type || viewStudentData.membershipType 
     };
   // Preserve Aadhaar and Address when transitioning from view -> edit
   editData.aadhaarNumber = viewStudentData.aadhaar_number || viewStudentData.aadhaarNumber || '';
@@ -2252,6 +2434,7 @@ function Students() {
 
     const updateData = {
       name: editStudent.name,
+  membership_type: editStudent.membershipType || editStudent.membership_type ,
       contact_number: editStudent.contactNumber,
       father_name: editStudent.fatherName || null,
       sex: editStudent.sex,
@@ -2725,6 +2908,7 @@ function Students() {
       if (studentsFilters.studentName) activeFilters.name = studentsFilters.studentName;
       if (studentsFilters.status) activeFilters.status = studentsFilters.status;
       if (studentsFilters.gender) activeFilters.gender = studentsFilters.gender;
+  if (studentsFilters.membershipType) activeFilters.membershipType = studentsFilters.membershipType;
       if (studentsFilters.contact) activeFilters.contact = studentsFilters.contact;
     }
 
@@ -2735,6 +2919,7 @@ function Students() {
         case 'seat': setSeatsFilters(prev => ({ ...prev, seatNumber: '' })); break;
         case 'status': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, status: '' })); } else { setStudentsFilters(prev => ({ ...prev, status: '' })); } break;
   case 'gender': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, gender: '' })); } else { setStudentsFilters(prev => ({ ...prev, gender: '' })); } break;
+  case 'membershipType': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, membershipType: '' })); } else { setStudentsFilters(prev => ({ ...prev, membershipType: '' })); } break;
         case 'name': setStudentsFilters(prev => ({ ...prev, studentName: '' })); break;
         case 'contact': setStudentsFilters(prev => ({ ...prev, contact: '' })); break;
       }
@@ -2789,6 +2974,27 @@ function Students() {
                 <MenuItem value="female">Female</MenuItem>
               </Select>
             </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Membership Type</InputLabel>
+              <Select
+                value={seatsFilters.membershipType}
+                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
+                label="Membership Type"
+              >
+                <MenuItem value="">All</MenuItem>
+                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
+                  membershipFeeOptions.map(opt => (
+                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
+                  ))
+                ) : (
+                  <>
+                    <MenuItem value="full_time">Full Time</MenuItem>
+                    <MenuItem value="half_time">Half Time</MenuItem>
+                    <MenuItem value="two_hours">Two Hours</MenuItem>
+                  </>
+                )}
+              </Select>
+            </FormControl>
           </Stack>
         )}
 
@@ -2836,6 +3042,27 @@ function Students() {
                 <MenuItem value="">All</MenuItem>
                 <MenuItem value="male">Male</MenuItem>
                 <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Membership Type</InputLabel>
+              <Select
+                value={studentsFilters.membershipType}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
+                label="Membership Type"
+              >
+                <MenuItem value="">All</MenuItem>
+                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
+                  membershipFeeOptions.map(opt => (
+                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
+                  ))
+                ) : (
+                  <>
+                    <MenuItem value="full_time">Full Time</MenuItem>
+                    <MenuItem value="half_time">Half Time</MenuItem>
+                    <MenuItem value="two_hours">Two Hours</MenuItem>
+                  </>
+                )}
               </Select>
             </FormControl>
           </Stack>
@@ -2948,6 +3175,27 @@ function Students() {
                 <MenuItem value="female">Female</MenuItem>
               </Select>
             </FormControl>
+            <FormControl size="small" sx={{ minWidth: 140, flex: '0 0 auto' }}>
+              <InputLabel>Membership Type</InputLabel>
+              <Select
+                value={seatsFilters.membershipType}
+                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
+                label="Membership Type"
+              >
+                <MenuItem value="">All</MenuItem>
+                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
+                  membershipFeeOptions.map(opt => (
+                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
+                  ))
+                ) : (
+                  <>
+                    <MenuItem value="full_time">Full Time</MenuItem>
+                    <MenuItem value="half_time">Half Time</MenuItem>
+                    <MenuItem value="two_hours">Two Hours</MenuItem>
+                  </>
+                )}
+              </Select>
+            </FormControl>
           </Paper>
         );
       }
@@ -2986,6 +3234,27 @@ function Students() {
                 <MenuItem value="">All</MenuItem>
                 <MenuItem value="male">Male</MenuItem>
                 <MenuItem value="female">Female</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 140, flex: '0 0 auto' }}>
+              <InputLabel>Membership Type</InputLabel>
+              <Select
+                value={studentsFilters.membershipType}
+                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
+                label="Membership Type"
+              >
+                <MenuItem value="">All</MenuItem>
+                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
+                  membershipFeeOptions.map(opt => (
+                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
+                  ))
+                ) : (
+                  <>
+                    <MenuItem value="full_time">Full Time</MenuItem>
+                    <MenuItem value="half_time">Half Time</MenuItem>
+                    <MenuItem value="two_hours">Two Hours</MenuItem>
+                  </>
+                )}
               </Select>
             </FormControl>
           </Paper>
@@ -3385,27 +3654,31 @@ function Students() {
                     <Box sx={{ minWidth: 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                        <Typography
-                          variant="body1"
-                          sx={{
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            color: 'primary.main',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            // Prevent native text selection / touch-callout which triggers "Tap to search" on Android
-                            userSelect: 'none',
-                            WebkitUserSelect: 'none',
-                            msUserSelect: 'none',
-                            WebkitTouchCallout: 'none',
-                            WebkitTapHighlightColor: 'transparent'
-                          }}
+                        <ButtonBase
+                          disableRipple
                           onClick={async (e) => { e.stopPropagation(); setSelectedItemForAction(student); await handleViewStudent(student); }}
                           onContextMenu={(e) => e.preventDefault()}
+                          sx={{ textAlign: 'left', width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', px: 0 }}
                         >
-                          {student.name}
-                        </Typography>
+                          <Typography
+                            variant="body1"
+                            sx={{
+                              fontWeight: 700,
+                              color: 'primary.main',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              // keep selection disabled for safety
+                              userSelect: 'none',
+                              WebkitUserSelect: 'none',
+                              msUserSelect: 'none',
+                              WebkitTouchCallout: 'none',
+                              WebkitTapHighlightColor: 'transparent'
+                            }}
+                          >
+                            {student.name}
+                          </Typography>
+                        </ButtonBase>
                       </Box>
                       <Typography variant="caption" color="text.secondary" display="block">{formatDateForDisplay(student.membership_till || student.membershipTill)} • ID {student.id}</Typography>
                     </Box>
@@ -3468,29 +3741,32 @@ function Students() {
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       {student.sex === 'female' ? <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> : <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />}
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontWeight: 'medium',
-                          color: 'primary.main',
-                          cursor: 'pointer',
-                          '&:hover': { textDecoration: 'underline' },
-                          // Prevent native text selection / touch-callout which triggers "Tap to search" on Android
-                          userSelect: 'none',
-                          WebkitUserSelect: 'none',
-                          msUserSelect: 'none',
-                          WebkitTouchCallout: 'none',
-                          WebkitTapHighlightColor: 'transparent'
-                        }}
+                      <ButtonBase
+                        disableRipple
                         onClick={async (e) => {
                           e.stopPropagation();
                           setSelectedItemForAction(student);
                           await handleViewStudent(student);
                         }}
                         onContextMenu={(e) => e.preventDefault()}
+                        sx={{ textAlign: 'left', display: 'inline-flex', alignItems: 'center', px: 0 }}
                       >
-                        {student.name}
-                      </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 'medium',
+                            color: 'primary.main',
+                            '&:hover': { textDecoration: 'underline' },
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            msUserSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                            WebkitTapHighlightColor: 'transparent'
+                          }}
+                        >
+                          {student.name}
+                        </Typography>
+                      </ButtonBase>
                     </Box>
                   </TableCell>
                   <TableCell align="center">
@@ -3824,6 +4100,36 @@ function Students() {
                 </Typography>
               )}
             </FormControl>
+            <FormControl fullWidth sx={{ mt: 0.5 }}>
+              <InputLabel>Membership Type</InputLabel>
+              <Select
+                value={newStudent.membership_type}
+                onChange={(e) => setNewStudent(prev => ({ ...prev, membership_type: e.target.value }))}
+                label="Membership Type"
+              >
+                {membershipFeeOptions.length > 0 ? membershipFeeOptions.map(opt => (
+                  <MenuItem key={opt.membership_type} value={opt.membership_type}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, width: '100%' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 300 }}>{opt.membership_type.replace('_', ' ').toUpperCase()}</Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <ManIcon sx={{ fontSize: 14, color: 'primary.main' }} />
+                            <Typography variant="caption" color="text.secondary">₹{opt.male_monthly_fees}</Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <WomanIcon sx={{ fontSize: 14, color: 'secondary.main' }} />
+                            <Typography variant="caption" color="text.secondary">₹{opt.female_monthly_fees}</Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </MenuItem>
+                )) : (
+                  <MenuItem value="full_time">Full Time</MenuItem>
+                )}
+              </Select>
+            </FormControl>
             <FormControl fullWidth disabled={!newStudent.sex || seatLoading}>
               <InputLabel>Seat Number</InputLabel>
               <Select
@@ -4021,55 +4327,75 @@ function Students() {
                           ? (entry.student_name ? (
                               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                                 {/* Student Name - Clickable */}
-                                <Typography 
-                                  variant="body2" 
-                                  component="span"
-                                  sx={{ 
-                                    fontWeight: 'medium',
-                                    cursor: 'pointer',
-                                    color: 'primary.main',
-                                    display: 'inline-block',
-                                    padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    transition: 'all 0.2s ease',
-                                    '&:hover': {
-                                      textDecoration: 'underline',
-                                      backgroundColor: 'primary.light',
-                                      color: 'primary.contrastText'
-                                    }
-                                  }}
+                                <ButtonBase
+                                  disableRipple
                                   onClick={async (event) => {
                                     await handleStudentClick(event, entry.student_id, entry.student_name);
                                   }}
+                                  onContextMenu={(e) => e.preventDefault()}
+                                  sx={{ display: 'inline-flex', alignItems: 'center', px: 0 }}
                                 >
-                                  {entry.student_name}
-                                </Typography>
-                                
-                                {/* Student ID - Clickable */}
-                                {entry.student_id && (
                                   <Typography 
-                                    variant="caption" 
+                                    variant="body2" 
                                     component="span"
                                     sx={{ 
-                                      color: 'text.secondary',
-                                      cursor: 'pointer',
+                                      fontWeight: 'medium',
+                                      color: 'primary.main',
                                       display: 'inline-block',
-                                      padding: '1px 4px',
-                                      borderRadius: '3px',
-                                      fontSize: '0.7rem',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
                                       transition: 'all 0.2s ease',
                                       '&:hover': {
                                         textDecoration: 'underline',
-                                        backgroundColor: 'grey.200',
-                                        color: 'primary.main'
-                                      }
+                                        backgroundColor: 'primary.light',
+                                        color: 'primary.contrastText'
+                                      },
+                                      userSelect: 'none',
+                                      WebkitUserSelect: 'none',
+                                      msUserSelect: 'none',
+                                      WebkitTouchCallout: 'none',
+                                      WebkitTapHighlightColor: 'transparent'
                                     }}
+                                  >
+                                    {entry.student_name}
+                                  </Typography>
+                                </ButtonBase>
+                                
+                                {/* Student ID - Clickable */}
+                                {entry.student_id && (
+                                  <ButtonBase
+                                    disableRipple
                                     onClick={async (event) => {
                                       await handleStudentClick(event, entry.student_id, entry.student_name);
                                     }}
+                                    onContextMenu={(e) => e.preventDefault()}
+                                    sx={{ display: 'inline-flex', alignItems: 'center', px: 0 }}
                                   >
-                                    ID: {entry.student_id}
-                                  </Typography>
+                                    <Typography 
+                                      variant="caption" 
+                                      component="span"
+                                      sx={{ 
+                                        color: 'text.secondary',
+                                        display: 'inline-block',
+                                        padding: '1px 4px',
+                                        borderRadius: '3px',
+                                        fontSize: '0.7rem',
+                                        transition: 'all 0.2s ease',
+                                        '&:hover': {
+                                          textDecoration: 'underline',
+                                          backgroundColor: 'grey.200',
+                                          color: 'primary.main'
+                                        },
+                                        userSelect: 'none',
+                                        WebkitUserSelect: 'none',
+                                        msUserSelect: 'none',
+                                        WebkitTouchCallout: 'none',
+                                        WebkitTapHighlightColor: 'transparent'
+                                      }}
+                                    >
+                                      ID: {entry.student_id}
+                                    </Typography>
+                                  </ButtonBase>
                                 )}
                               </Box>
                             ) : 'N/A')
@@ -4311,7 +4637,7 @@ function Students() {
                   📅 Membership Extension Available
                 </Typography>
                 <Typography variant="body2" color="info.contrastText">
-                  Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
+                  Membership: {feeConfig.membership_type || selectedItemForAction?.membership_type } • Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
                 </Typography>
                 <Typography variant="body2" color="info.contrastText">
                   Extension Days: {membershipExtensionDays} days
@@ -4332,7 +4658,7 @@ function Students() {
                   ⚠️ Membership Refund Information
                 </Typography>
                 <Typography variant="body2" color="error.contrastText">
-                  Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
+                  Membership: {feeConfig.membership_type || selectedItemForAction?.membership_type } • Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
                 </Typography>
                 <Typography variant="body2" color="error.contrastText">
                   Reduction Days: {membershipExtensionDays} days
@@ -4445,6 +4771,36 @@ function Students() {
                 </Typography>
               )}
             </FormControl>
+            <FormControl fullWidth sx={{ mt: 0.5 }}>
+              <InputLabel>Membership Type</InputLabel>
+              <Select
+                value={editStudent.membershipType || editStudent.membership_type }
+                onChange={(e) => initiateEditMembershipTypeChange(e.target.value)}
+                label="Membership Type"
+              >
+                {membershipFeeOptions.length > 0 ? membershipFeeOptions.map(opt => (
+                  <MenuItem key={opt.membership_type} value={opt.membership_type}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, width: '100%' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{opt.membership_type.replace('_', ' ').toUpperCase()}</Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <ManIcon sx={{ fontSize: 14, color: 'primary.main' }} />
+                            <Typography variant="caption" color="text.secondary">₹{opt.male_monthly_fees}</Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <WomanIcon sx={{ fontSize: 14, color: 'secondary.main' }} />
+                            <Typography variant="caption" color="text.secondary">₹{opt.female_monthly_fees}</Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </MenuItem>
+                )) : (
+                  <MenuItem value="full_time">Full Time</MenuItem>
+                )}
+              </Select>
+            </FormControl>
             <TextField
               fullWidth
               label="Membership Start Date"
@@ -4526,6 +4882,42 @@ function Students() {
           >
             {editStudentLoading ? 'Updating...' : 'Update Student'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Membership Type Change Confirmation Dialog */}
+      <Dialog open={membershipTypeConfirmOpen} onClose={cancelMembershipTypeChange} maxWidth="sm" fullWidth>
+        <DialogTitle>Confirm Membership Type Change</DialogTitle>
+        <DialogContent>
+          {!membershipTypeAdjustment ? (
+            <Typography>No adjustment data available.</Typography>
+          ) : (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="body2">You are changing membership from <strong>{membershipTypeAdjustment.oldType || 'Unknown'}</strong> to <strong>{membershipTypeAdjustment.newType}</strong>.</Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Remaining days on current membership: <strong>{membershipTypeAdjustment.remainingDays}</strong>
+              </Typography>
+              <Typography variant="body2">
+                Remaining balance (approx): <strong>₹{membershipTypeAdjustment.remainingBalance}</strong>
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                New membership monthly fee: <strong>₹{membershipTypeAdjustment.newFee || 'N/A'}</strong>
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Estimated Updated days for new membership from today: <strong>{membershipTypeAdjustment.estimatedExtraDays}</strong>
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Resulting Membership Till (IST): <strong>{membershipTypeAdjustment.willChange ? formatIsoToDMonYYYY(membershipTypeAdjustment.newMembershipTill) : (membershipTypeAdjustment.previousMembershipTill ? formatIsoToDMonYYYY(membershipTypeAdjustment.previousMembershipTill) : 'No change')}</strong>
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+                Confirming will update the student's membership type and set the membership end date to the value above (pro-rated from remaining balance).
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelMembershipTypeChange}>Cancel</Button>
+          <Button variant="contained" onClick={confirmMembershipTypeChange}>Confirm Change</Button>
         </DialogActions>
       </Dialog>
 
@@ -4616,6 +5008,12 @@ function Students() {
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
+                  <Typography variant="subtitle2" color="text.secondary">Membership Type</Typography>
+                  <Typography variant="body1" sx={{ mb: 2, textTransform: 'capitalize' }}>
+                    {((viewStudentData.membership_type || viewStudentData.membershipType) || 'N/A').toString().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
                   <Typography variant="subtitle2" color="text.secondary">Total Paid</Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                     <Typography
@@ -4681,7 +5079,7 @@ function Students() {
             <Box sx={{ mt: 2, p: 2, borderRadius: 1, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
               <Typography variant="subtitle2">Refund Summary</Typography>
               <Typography variant="body2" color="text.secondary">Remaining Membership Days: {deactivateRefundDays} day(s)</Typography>
-              <Typography variant="body2" color="text.secondary">Monthly Fee: ₹{deactivateFeeConfig?.monthly_fees ?? 'N/A'}</Typography>
+              <Typography variant="body2" color="text.secondary">Membership: {deactivateFeeConfig?.membership_type || selectedItemForAction?.membership_type } • Monthly Fee: ₹{deactivateFeeConfig?.monthly_fees ?? 'N/A'}</Typography>
               <Typography variant="body2" sx={{ mt: 1, fontWeight: 600 }}>Estimated Refund: ₹{deactivateRefundAmount}</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                 Proceeding will create a refund entry and set membership end date to today.
@@ -4859,6 +5257,8 @@ function Students() {
                 fatherName: aadhaarConflictStudent.father_name || '',
                 membershipDate: aadhaarConflictStudent.membership_date ? isoToISTDateInput(aadhaarConflictStudent.membership_date) : '',
                 membershipTill: aadhaarConflictStudent.membership_till ? isoToISTDateInput(aadhaarConflictStudent.membership_till) : '',
+                // Normalize membership type for the edit form
+                membershipType: aadhaarConflictStudent.membership_type || aadhaarConflictStudent.membershipType ,
                 aadhaarNumber: aadhaarConflictStudent.aadhaar_number || aadhaarConflictStudent.aadhaarNumber || '',
                 address: aadhaarConflictStudent.address || ''
               };

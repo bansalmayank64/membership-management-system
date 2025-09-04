@@ -208,7 +208,7 @@ router.post('/', async (req, res) => {
 
       const normalizedPaymentMode = payment_mode.toLowerCase();
       rl.businessLogic('Verifying student exists and getting details');
-      const studentCheckQuery = 'SELECT id, name, sex, membership_till FROM students WHERE id = $1';
+  const studentCheckQuery = 'SELECT id, name, sex, membership_till, membership_type FROM students WHERE id = $1';
       const studentCheck = await client.query(studentCheckQuery, [student_id]);
       if (studentCheck.rows.length === 0) {
         throw new Error(`Student with ID ${student_id} not found`);
@@ -220,10 +220,13 @@ router.post('/', async (req, res) => {
       // Handle membership extension for monthly fee payments
       if (extend_membership && payment_type === 'monthly_fee') {
         rl.businessLogic('Processing membership extension');
-        const feeConfigQuery = 'SELECT monthly_fees FROM student_fees_config WHERE gender = $1';
-        const feeConfigResult = await client.query(feeConfigQuery, [student.sex]);
+        // Determine membership_type for student (default to 'full_time' if missing)
+        const membershipType = student.membership_type;
+        const feeConfigQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+        const feeConfigResult = await client.query(feeConfigQuery, [membershipType]);
         if (feeConfigResult.rows.length > 0) {
-          const monthlyFees = parseFloat(feeConfigResult.rows[0].monthly_fees);
+          const cfg = feeConfigResult.rows[0];
+          const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
           const paymentAmount = Math.abs(parseFloat(amount));
           membershipExtensionDays = Math.floor((paymentAmount / monthlyFees) * 30);
           rl.info('Membership extension calculated', { monthlyFees, paymentAmount, membershipExtensionDays });
@@ -243,10 +246,12 @@ router.post('/', async (req, res) => {
       // Handle membership reduction for refunds when requested
       if (extend_membership && payment_type === 'refund') {
         rl.businessLogic('Processing membership reduction for refund');
-        const feeConfigQuery = 'SELECT monthly_fees FROM student_fees_config WHERE gender = $1';
-        const feeConfigResult = await client.query(feeConfigQuery, [student.sex]);
+        const membershipType = student.membership_type;
+        const feeConfigQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+        const feeConfigResult = await client.query(feeConfigQuery, [membershipType]);
         if (feeConfigResult.rows.length > 0) {
-          const monthlyFees = parseFloat(feeConfigResult.rows[0].monthly_fees);
+          const cfg = feeConfigResult.rows[0];
+          const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
           const paymentAmount = Math.abs(parseFloat(amount));
           const membershipReductionDays = Math.floor((paymentAmount / monthlyFees) * 30);
           rl.info('Membership reduction calculated', { monthlyFees, paymentAmount, membershipReductionDays });
@@ -445,13 +450,15 @@ router.delete('/:id', async (req, res) => {
       // If payment is tied to a student and can affect membership, attempt to adjust membership_till
       try {
         if (payment.student_id && payment.payment_type) {
-          const studentFetch = await client.query('SELECT id, sex, membership_till FROM students WHERE id = $1 FOR UPDATE', [payment.student_id]);
+          const studentFetch = await client.query('SELECT id, sex, membership_till, membership_type FROM students WHERE id = $1 FOR UPDATE', [payment.student_id]);
           if (studentFetch.rows.length > 0) {
             const student = studentFetch.rows[0];
-            // Lookup fee config for student's gender
-            const feeCfg = await client.query('SELECT monthly_fees FROM student_fees_config WHERE gender = $1', [student.sex]);
+            // Lookup fee config for student's membership type and gender
+            const membershipType = student.membership_type;
+            const feeCfg = await client.query('SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1', [membershipType]);
             if (feeCfg.rows.length > 0) {
-              const monthlyFees = parseFloat(feeCfg.rows[0].monthly_fees);
+              const cfg = feeCfg.rows[0];
+              const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
               if (monthlyFees > 0) {
                 const amountAbs = Math.abs(Number(payment.amount || 0));
                 const adjustDays = Math.floor((amountAbs / monthlyFees) * 30);

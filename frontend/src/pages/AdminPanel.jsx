@@ -262,8 +262,9 @@ function AdminPanel() {
         setFeesConfig(feesData);
         // Initialize temporary state with current values
         const tempConfig = {};
+        // feesData now contains membership_type rows with male_monthly_fees and female_monthly_fees
         feesData.forEach(config => {
-          tempConfig[config.gender] = config.monthly_fees;
+          tempConfig[config.membership_type] = { male: config.male_monthly_fees, female: config.female_monthly_fees };
         });
         setTempFeesConfig(tempConfig);
       }
@@ -633,48 +634,54 @@ function AdminPanel() {
     setLoading(true);
     try {
       const updates = [];
-      
-      // Check which fees have changed
+
+      // Check which membership_type fees have changed
       feesConfig.forEach(config => {
-        const tempValue = tempFeesConfig[config.gender];
-        if (tempValue !== undefined && tempValue !== config.monthly_fees) {
-          updates.push({
-            gender: config.gender,
-            monthly_fees: parseFloat(tempValue)
-          });
+        const mType = config.membership_type;
+        const temp = tempFeesConfig[mType] || {};
+        const maleTemp = temp.male;
+        const femaleTemp = temp.female;
+        const maleOrig = config.male_monthly_fees;
+        const femaleOrig = config.female_monthly_fees;
+
+        if (maleTemp !== undefined && parseFloat(maleTemp) !== parseFloat(maleOrig)) {
+          updates.push({ membership_type: mType, male_monthly_fees: parseFloat(maleTemp), female_monthly_fees: femaleOrig });
+        }
+        if (femaleTemp !== undefined && parseFloat(femaleTemp) !== parseFloat(femaleOrig)) {
+          // If we already pushed an update for this membership_type due to male change, update that entry
+          const existing = updates.find(u => u.membership_type === mType);
+          if (existing) {
+            existing.female_monthly_fees = parseFloat(femaleTemp);
+          } else {
+            updates.push({ membership_type: mType, male_monthly_fees: maleOrig, female_monthly_fees: parseFloat(femaleTemp) });
+          }
         }
       });
 
       if (updates.length === 0) {
-        setMessage({ 
-          type: 'info', 
-          text: 'No changes to update.' 
-        });
+        setMessage({ type: 'info', text: 'No changes to update.' });
         setLoading(false);
         return;
       }
 
-      // Update each changed fee
+      // Update each changed membership_type row
       for (const update of updates) {
-        const response = await fetch(`/api/admin/fees-config/${update.gender}`, {
+        const response = await fetch(`/api/admin/fees-config/${update.membership_type}`, {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ monthly_fees: update.monthly_fees })
+          body: JSON.stringify({ male_monthly_fees: update.male_monthly_fees, female_monthly_fees: update.female_monthly_fees })
         });
 
         if (!response.ok) {
           const error = await response.json();
-          throw new Error(error.error || `Failed to update ${update.gender} fees`);
+          throw new Error(error.error || `Failed to update fees for ${update.membership_type}`);
         }
       }
 
-      setMessage({ 
-        type: 'success', 
-        text: `Monthly fees updated successfully for ${updates.map(u => u.gender).join(', ')} students!` 
-      });
+      setMessage({ type: 'success', text: `Monthly fees updated successfully for ${updates.map(u => u.membership_type).join(', ')}` });
       fetchFeesConfig(); // Refresh the data
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -683,10 +690,13 @@ function AdminPanel() {
     }
   };
 
-  const handleTempFeesChange = (gender, value) => {
+  const handleTempFeesChange = (membershipType, gender, value) => {
     setTempFeesConfig(prev => ({
       ...prev,
-      [gender]: parseFloat(value) || 0
+      [membershipType]: {
+        ...(prev[membershipType] || {}),
+        [gender]: parseFloat(value) || 0
+      }
     }));
   };
 
@@ -1152,30 +1162,35 @@ function AdminPanel() {
             
             <Grid container spacing={3}>
               {feesConfig.map((config) => (
-                <Grid item xs={12} md={6} key={config.gender}>
+                <Grid item xs={12} md={6} key={config.membership_type}>
                   <Card>
                     <CardContent>
                       <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <MoneyIcon color={config.gender === 'male' ? 'info' : 'secondary'} />
-                        {config.gender.charAt(0).toUpperCase() + config.gender.slice(1)} Students
+                        <MoneyIcon color="primary" />
+                        {config.membership_type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
                       </Typography>
-                      
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
+
+                      <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
                         <TextField
-                          label="Monthly Fees (₹)"
+                          label="Male (₹)"
                           type="number"
-                          value={tempFeesConfig[config.gender] !== undefined ? tempFeesConfig[config.gender] : config.monthly_fees}
+                          value={(tempFeesConfig[config.membership_type] && tempFeesConfig[config.membership_type].male) !== undefined ? tempFeesConfig[config.membership_type].male : config.male_monthly_fees}
                           inputProps={{ min: 0, step: 10 }}
-                          onChange={(e) => handleTempFeesChange(config.gender, e.target.value)}
+                          onChange={(e) => handleTempFeesChange(config.membership_type, 'male', e.target.value)}
+                          fullWidth
+                        />
+                        <TextField
+                          label="Female (₹)"
+                          type="number"
+                          value={(tempFeesConfig[config.membership_type] && tempFeesConfig[config.membership_type].female) !== undefined ? tempFeesConfig[config.membership_type].female : config.female_monthly_fees}
+                          inputProps={{ min: 0, step: 10 }}
+                          onChange={(e) => handleTempFeesChange(config.membership_type, 'female', e.target.value)}
                           fullWidth
                         />
                       </Box>
-                      
+
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        Current fees: ₹{config.monthly_fees} per month
-                        {tempFeesConfig[config.gender] !== undefined && tempFeesConfig[config.gender] !== config.monthly_fees && (
-                          <span style={{ color: 'orange', fontWeight: 'bold' }}> → ₹{tempFeesConfig[config.gender]} (pending)</span>
-                        )}
+                        Current male fees: ₹{config.male_monthly_fees} • Current female fees: ₹{config.female_monthly_fees}
                       </Typography>
                     </CardContent>
                   </Card>

@@ -116,8 +116,36 @@ module.exports = function registerAdminImports(router, { pool, upload, auth, req
       }
 
       // Restore student_fees_config
+      // Support both legacy backups (gender + monthly_fees) and new schema (membership_type + male_monthly_fees/female_monthly_fees)
+      const legacyFees = {}; // map membership_type -> { male: number|null, female: number|null, created_at, updated_at }
       for (const row of backup.student_fees_config || []) {
-        await client.query(`INSERT INTO student_fees_config (id, gender, monthly_fees, created_at, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`, [row.id, row.gender, row.monthly_fees, row.created_at, row.updated_at]);
+        // New-schema backup entry: insert directly if membership_type is present
+        if (row.membership_type && (row.male_monthly_fees !== undefined || row.female_monthly_fees !== undefined)) {
+          await client.query(
+            `INSERT INTO student_fees_config (id, membership_type, male_monthly_fees, female_monthly_fees, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+            [row.id, row.membership_type, row.male_monthly_fees, row.female_monthly_fees, row.created_at, row.updated_at]
+          );
+          continue;
+        }
+
+        // Legacy-format entry (gender + monthly_fees) -> accumulate into a default membership_type 'full_time'
+        if (row.gender && row.monthly_fees !== undefined) {
+          const mType = 'full_time';
+          legacyFees[mType] = legacyFees[mType] || { male: null, female: null, created_at: row.created_at, updated_at: row.updated_at };
+          legacyFees[mType][row.gender] = row.monthly_fees;
+          if (row.created_at && !legacyFees[mType].created_at) legacyFees[mType].created_at = row.created_at;
+          if (row.updated_at && !legacyFees[mType].updated_at) legacyFees[mType].updated_at = row.updated_at;
+        }
+      }
+
+      // Insert accumulated legacy fees as membership_type rows (use upsert to avoid duplicates)
+      for (const [membership_type, vals] of Object.entries(legacyFees)) {
+        const maleFees = vals.male !== null ? vals.male : 0;
+        const femaleFees = vals.female !== null ? vals.female : 0;
+        await client.query(
+          `INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees, created_at, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (membership_type) DO UPDATE SET male_monthly_fees = EXCLUDED.male_monthly_fees, female_monthly_fees = EXCLUDED.female_monthly_fees`,
+          [membership_type, maleFees, femaleFees, vals.created_at || new Date(), vals.updated_at || new Date()]
+        );
       }
 
       await client.query('COMMIT');

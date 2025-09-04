@@ -392,8 +392,8 @@ router.get('/seats', auth, requireAdmin, async (req, res) => {
 router.get('/fees-config', auth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * FROM student_fees_config 
-      ORDER BY gender
+  SELECT * FROM student_fees_config 
+  ORDER BY membership_type
     `);
 
     res.json(result.rows);
@@ -406,41 +406,42 @@ router.get('/fees-config', auth, requireAdmin, async (req, res) => {
 // Mount activity routes under /api/admin/activity
 router.use('/activity', auth, requireAdmin, activityRoutes);
 
-// Update fees configuration
-router.put('/fees-config/:gender', auth, requireAdmin, async (req, res) => {
-  const { gender } = req.params;
-  const { monthly_fees } = req.body;
+// Update fees configuration by membership type
+router.put('/fees-config/:membershipType', auth, requireAdmin, async (req, res) => {
+  const { membershipType } = req.params;
+  const { male_monthly_fees, female_monthly_fees } = req.body;
 
   try {
-    if (!['male', 'female'].includes(gender)) {
-      return res.status(400).json({ error: 'Invalid gender. Must be male or female' });
+    const validTypes = ['full_time', 'half_time', 'two_hours'];
+    if (!membershipType || !validTypes.includes(membershipType)) {
+      return res.status(400).json({ error: 'Invalid membershipType. Must be one of full_time, half_time, two_hours' });
     }
 
-    if (!monthly_fees || monthly_fees <= 0) {
-      return res.status(400).json({ error: 'Monthly fees must be a positive number' });
+    if ((male_monthly_fees === undefined || male_monthly_fees <= 0) || (female_monthly_fees === undefined || female_monthly_fees <= 0)) {
+      return res.status(400).json({ error: 'Both male_monthly_fees and female_monthly_fees must be positive numbers' });
     }
 
     const result = await pool.query(`
       UPDATE student_fees_config 
-      SET monthly_fees = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE gender = $2
+      SET male_monthly_fees = $1, female_monthly_fees = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE membership_type = $3
       RETURNING *
-    `, [monthly_fees, gender]);
+    `, [male_monthly_fees, female_monthly_fees, membershipType]);
 
     if (result.rows.length === 0) {
       // If no record exists, create one
       const insertResult = await pool.query(`
-        INSERT INTO student_fees_config (gender, monthly_fees)
-        VALUES ($1, $2)
+        INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees)
+        VALUES ($1, $2, $3)
         RETURNING *
-      `, [gender, monthly_fees]);
+      `, [membershipType, male_monthly_fees, female_monthly_fees]);
       
       return res.json(insertResult.rows[0]);
     }
 
     res.json(result.rows[0]);
   } catch (error) {
-    logger.error('Error updating fees config', { error: error.message, stack: error.stack, gender });
+    logger.error('Error updating fees config', { error: error.message, stack: error.stack, membershipType });
     res.status(500).json({ error: 'Failed to update fees configuration' });
   }
 });

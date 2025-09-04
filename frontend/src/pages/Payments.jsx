@@ -143,6 +143,8 @@ function Payments() {
   const [paymentLoadingLocal, setPaymentLoadingLocal] = useState(false);
   const [feeConfig, setFeeConfig] = useState(null);
   const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
+  const [membershipCurrentTill, setMembershipCurrentTill] = useState(null);
+  const [membershipNewTill, setMembershipNewTill] = useState(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 15 : 25);
   const [filters, setFilters] = useState({
@@ -261,6 +263,26 @@ function Payments() {
     return `₹${numAmount.toLocaleString()}`;
   };
 
+  // Short date formatter like '23 Aug 2025'
+  const formatShortDate = (dateInput) => {
+    if (!dateInput) return 'N/A';
+    try {
+      const d = new Date(dateInput);
+      if (isNaN(d.getTime())) return 'N/A';
+      // Convert to IST (GMT+5:30)
+      const istOffset = 5.5 * 60 * 60 * 1000;
+      const istDate = new Date(d.getTime() + istOffset);
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
+      return formatter.format(istDate);
+    } catch (err) {
+      return 'N/A';
+    }
+  };
+
   // Open Add Payment dialog
   const handleOpenAddPayment = () => {
     setSelectedStudentId('');
@@ -277,10 +299,13 @@ function Payments() {
     if (!student || !student.sex) {
       setFeeConfig(null);
       setMembershipExtensionDays(0);
+  setMembershipCurrentTill(null);
+  setMembershipNewTill(null);
       return;
     }
     try {
-      const resp = await fetch(`/api/students/fee-config/${student.sex}`, {
+  const membershipType = student.membership_type;
+  const resp = await fetch(`/api/students/fee-config/${membershipType}/${student.sex}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
@@ -301,6 +326,41 @@ function Payments() {
       } else {
         setMembershipExtensionDays(0);
       }
+      // Fetch full student details to read current membership_till
+      try {
+        const studentResp = await fetch(`/api/students/${studentId}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          }
+        });
+        if (studentResp.ok) {
+          const fullStudent = await studentResp.json();
+          const curTill = fullStudent.membership_till || null;
+          setMembershipCurrentTill(curTill);
+
+          // compute projected new membership till based on extensionDays and payment type
+          const extDays = Math.floor((parseFloat(paymentDataLocal.amount || 0) / (cfg && cfg.monthly_fees ? cfg.monthly_fees : 1)) * 30) || 0;
+          let baseDate = curTill ? new Date(curTill) : new Date();
+          if (isNaN(baseDate.getTime())) baseDate = new Date();
+          let newDt = null;
+          if (extDays > 0) {
+            if (paymentDataLocal.type === 'refund') {
+              newDt = new Date(baseDate);
+              newDt.setDate(newDt.getDate() - extDays);
+            } else {
+              newDt = new Date(baseDate);
+              newDt.setDate(newDt.getDate() + extDays);
+            }
+          }
+          setMembershipNewTill(newDt ? newDt.toISOString().split('T')[0] : null);
+        } else {
+          setMembershipCurrentTill(null);
+          setMembershipNewTill(null);
+        }
+      } catch (err) {
+        setMembershipCurrentTill(null);
+        setMembershipNewTill(null);
+      }
     } catch (err) {
       setFeeConfig(null);
       setMembershipExtensionDays(0);
@@ -314,8 +374,24 @@ function Payments() {
     if (amount > 0 && feeConfig && feeConfig.monthly_fees) {
       const days = Math.floor((amount / feeConfig.monthly_fees) * 30);
       setMembershipExtensionDays(days);
+      // recompute projected membership date
+      const extDays = Math.floor((amount / feeConfig.monthly_fees) * 30) || 0;
+      let baseDate = membershipCurrentTill ? new Date(membershipCurrentTill) : new Date();
+      if (isNaN(baseDate.getTime())) baseDate = new Date();
+      let newDt = null;
+      if (extDays > 0) {
+        if (paymentDataLocal.type === 'refund') {
+          newDt = new Date(baseDate);
+          newDt.setDate(newDt.getDate() - extDays);
+        } else {
+          newDt = new Date(baseDate);
+          newDt.setDate(newDt.getDate() + extDays);
+        }
+      }
+      setMembershipNewTill(newDt ? newDt.toISOString().split('T')[0] : null);
     } else {
       setMembershipExtensionDays(0);
+      setMembershipNewTill(null);
     }
   };
 
@@ -368,6 +444,32 @@ function Payments() {
     }
   };
 
+  // Recompute projected membership date when payment type changes
+  useEffect(() => {
+    if (!feeConfig) return;
+    const amount = parseFloat(paymentDataLocal.amount || 0);
+    if (!(amount > 0 && feeConfig && feeConfig.monthly_fees)) {
+      setMembershipExtensionDays(0);
+      setMembershipNewTill(null);
+      return;
+    }
+    const extDays = Math.floor((amount / feeConfig.monthly_fees) * 30);
+    setMembershipExtensionDays(extDays);
+    let baseDate = membershipCurrentTill ? new Date(membershipCurrentTill) : new Date();
+    if (isNaN(baseDate.getTime())) baseDate = new Date();
+    let newDt = null;
+    if (extDays > 0) {
+      if (paymentDataLocal.type === 'refund') {
+        newDt = new Date(baseDate);
+        newDt.setDate(newDt.getDate() - extDays);
+      } else {
+        newDt = new Date(baseDate);
+        newDt.setDate(newDt.getDate() + extDays);
+      }
+    }
+    setMembershipNewTill(newDt ? newDt.toISOString().split('T')[0] : null);
+  }, [paymentDataLocal.type]);
+
   const getAmountStyle = (amount) => {
     const numAmount = Number(amount) || 0;
     return {
@@ -412,7 +514,9 @@ function Payments() {
               // Fetch fee config for student's gender if available
               const sex = student.sex || student.gender || null;
               if (sex) {
-                const cfgResp = await fetch(`/api/students/fee-config/${sex}`, {
+                // Use the fetched student object (not a non-existent `selectedStudent`) to read membership type
+                const membershipType = (student && (student.membership_type || student.membershipType));
+                const cfgResp = await fetch(`/api/students/fee-config/${membershipType}/${sex}`, {
                   headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
                 });
                 if (cfgResp.ok) {
@@ -843,10 +947,16 @@ function Payments() {
               📅 Membership Extension Available
             </Typography>
             <Typography variant="body2" color="info.contrastText">
-              Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
+              Membership: {feeConfig.membership_type || (students.find(s => s.id === selectedStudentId)?.membership_type)} • Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
             </Typography>
             <Typography variant="body2" color="info.contrastText">
               Extension Days: {membershipExtensionDays} days
+            </Typography>
+            <Typography variant="body2" color="info.contrastText">
+              Current membership till: {membershipCurrentTill ? formatShortDate(membershipCurrentTill) : 'N/A'}
+            </Typography>
+            <Typography variant="body2" color="info.contrastText">
+              New membership till: {membershipNewTill ? formatShortDate(membershipNewTill) : 'N/A'}
             </Typography>
           </Box>
         )}
@@ -865,10 +975,16 @@ function Payments() {
               🔄 Membership Refund Information
             </Typography>
             <Typography variant="body2" color="error.contrastText">
-              Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
+              Membership: {feeConfig.membership_type || (students.find(s => s.id === selectedStudentId)?.membership_type) } • Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
             </Typography>
             <Typography variant="body2" color="error.contrastText">
               This refund will reduce membership by {membershipExtensionDays} days
+            </Typography>
+            <Typography variant="body2" color="error.contrastText">
+              Current membership till: {membershipCurrentTill ? formatShortDate(membershipCurrentTill) : 'N/A'}
+            </Typography>
+            <Typography variant="body2" color="error.contrastText">
+              New membership till: {membershipNewTill ? formatShortDate(membershipNewTill) : 'N/A'}
             </Typography>
           </Box>
         )}
@@ -909,13 +1025,13 @@ function Payments() {
               <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>Membership impact</Typography>
                 {deleteInfo.currentMembershipTill ? (
-                  <Typography variant="body2">Current membership till: {new Date(deleteInfo.currentMembershipTill).toLocaleDateString()}</Typography>
+                  <Typography variant="body2">Current membership till: {formatShortDate(deleteInfo.currentMembershipTill)}</Typography>
                 ) : (
                   <Typography variant="body2">Current membership till: N/A</Typography>
                 )}
                 <Typography variant="body2">Reduction days: {deleteInfo.reductionDays || 0} day(s)</Typography>
                 {deleteInfo.newMembershipTill ? (
-                  <Typography variant="body2">New membership till: {new Date(deleteInfo.newMembershipTill).toLocaleDateString()}</Typography>
+                  <Typography variant="body2">New membership till: {formatShortDate(deleteInfo.newMembershipTill)}</Typography>
                 ) : null}
               </Box>
             )}

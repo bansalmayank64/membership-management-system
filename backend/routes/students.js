@@ -246,7 +246,8 @@ router.post('/', async (req, res) => {
       sex, 
       seat_number,
       aadhaar_number,
-      address
+      address,
+      membership_type
     } = req.body;
 
   logger.info('Validating input data', { requestId });
@@ -270,6 +271,14 @@ router.post('/', async (req, res) => {
       validationErrors.push('*Gender is required');
     } else if (!['Male', 'Female', 'male', 'female', 'M', 'F', 'm', 'f'].includes(sex.trim())) {
       validationErrors.push('*Gender must be either Male or Female (database constraint: male/female)');
+    }
+
+    // Membership type validation (optional) - default to 'full_time' if not provided
+    const validMembershipTypes = ['full_time', 'half_time', 'two_hours', 'special'];
+    if (membership_type && typeof membership_type === 'string') {
+      if (!validMembershipTypes.includes(membership_type)) {
+        validationErrors.push('*membership_type must be one of: ' + validMembershipTypes.join(', '));
+      }
     }
 
     // Contact number validation (Optional) - VARCHAR(20) UNIQUE
@@ -367,6 +376,7 @@ router.post('/', async (req, res) => {
           aadhaar_number,
           address,
           sex,
+          membership_type,
           seat_number,
           membership_date,
           membership_till,
@@ -382,27 +392,30 @@ router.post('/', async (req, res) => {
           $4,                             -- aadhaar_number (user input)
           $5,                             -- address (user input)
           $6,                             -- sex (user input)
-          $7,                             -- seat_number (user input)
+      $7,                             -- membership_type (user input)
+      $8,                             -- seat_number (user input)
           CURRENT_TIMESTAMP,              -- membership_date
           null,                           -- membership_till
           'active',                       -- membership_status
           CURRENT_TIMESTAMP,              -- created_at
           CURRENT_TIMESTAMP,              -- updated_at
-          $8                              -- modified_by (req.user.userId)
+          $9                              -- modified_by (req.user.userId)
         )
         RETURNING *
       `;
       
-      const studentValues = [
+    const effectiveMembershipType = (membership_type && validMembershipTypes.includes(membership_type)) ? membership_type : 'full_time';
+    const studentValues = [
   normalizedName,
   normalizedFatherName,
   normalizedContact,
   normalizedAadhaar,
   normalizedAddress,
   normalizedSex,
+  effectiveMembershipType,
   normalizedSeatNumber,
   req.user?.userId || req.user?.id || 1
-      ];
+    ];
   logger.queryStart('insert student', studentQuery, studentValues);
   const studentResult = await client.query(studentQuery, studentValues);
   logger.querySuccess('insert student', null, studentResult, false);
@@ -462,24 +475,24 @@ router.put('/:id', async (req, res) => {
   const startTime = Date.now();
   const requestId = req.requestId || `req-${Date.now()}`;
   logger.info('PUT /api/students/:id start', { requestId, studentId: req.params.id, body: logger.maskSensitiveData(req.body) });
-  
   try {
     const { id } = req.params;
-    const { 
-      name, 
-      father_name, 
-      contact_number, 
-      sex, 
-      seat_number, 
+    const {
+      name,
+      father_name,
+      contact_number,
+      sex,
+      seat_number,
       membership_date,
-      membership_till, 
+      membership_till,
       membership_status,
       aadhaar_number,
       address,
-      modified_by 
+      modified_by,
+      membership_type
     } = req.body;
 
-  logger.info('Validating update input', { requestId, studentId: id });
+    logger.info('Validating update input', { requestId, studentId: id });
 
     // Enhanced input validation with database schema constraints
     const validationErrors = [];
@@ -600,6 +613,14 @@ router.put('/:id', async (req, res) => {
       validationErrors.push('Membership status must be one of: active, inactive, suspended, expired (database constraint: active, expired, suspended)');
     }
 
+    // Membership type validation (optional) - default to existing or 'full_time'
+    const validMembershipTypes = ['full_time', 'half_time', 'two_hours', 'special'];
+    if (membership_type && typeof membership_type === 'string') {
+      if (!validMembershipTypes.includes(membership_type)) {
+        validationErrors.push('*membership_type must be one of: ' + validMembershipTypes.join(', '));
+      }
+    }
+
     // Normalize membership status (do not reassign destructured const)
     const effectiveMembershipStatus = membership_status || 'active';
 
@@ -634,14 +655,14 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-      // Update student information
+    // Update student information
       logger.info('Updating student record', { requestId, studentId: id });
     const updateQuery = `
       UPDATE students 
       SET name = $1, father_name = $2, contact_number = $3, aadhaar_number = $4, address = $5, sex = $6, 
-          seat_number = $7, membership_date = $8, membership_till = $9, 
-          membership_status = $10, modified_by = $11, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $12
+        membership_type = $7, seat_number = $8, membership_date = $9, membership_till = $10, 
+          membership_status = $11, modified_by = $12, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $13
       RETURNING *
     `;
     
@@ -652,6 +673,7 @@ router.put('/:id', async (req, res) => {
       normalizedAadhaar,
       normalizedAddress,
       normalizedSex, 
+      (membership_type && validMembershipTypes.includes(membership_type)) ? membership_type : (currentStudentRow ? currentStudentRow.membership_type : 'full_time'),
       normalizedSeatNumber,
       membership_date, 
       membership_till, 
@@ -844,33 +866,60 @@ router.get('/:id/history', async (req, res) => {
   }
 });
 
-// GET /api/students/fee-config/:gender - Get fee configuration for a gender
-router.get('/fee-config/:gender', async (req, res) => {
+// New: GET /api/students/fee-config/:membershipType/:gender - Get fee configuration for a membership type and gender
+router.get('/fee-config/:membershipType/:gender', async (req, res) => {
   const requestId = `student-fee-config-${Date.now()}`;
   const startTime = Date.now();
   try {
-    logger.info('GET /api/students/fee-config start', { requestId, params: req.params });
-    const { gender } = req.params;
+    logger.info('GET /api/students/fee-config by membershipType+gender start', { requestId, params: req.params });
+    const { membershipType, gender } = req.params;
+    const validTypes = ['full_time', 'half_time', 'two_hours'];
+    if (!membershipType || !validTypes.includes(membershipType)) {
+      logger.warn('Invalid membershipType parameter for fee-config', { requestId, membershipType });
+      return res.status(400).json({ error: 'Valid membershipType is required (full_time, half_time, two_hours)', requestId, timestamp: new Date().toISOString() });
+    }
     if (!gender || !['male', 'female'].includes(gender.toLowerCase())) {
       logger.warn('Invalid gender parameter for fee-config', { requestId, gender });
-      return res.status(400).json({ error: 'Valid gender (male/female) is required', requestId: requestId, timestamp: new Date().toISOString() });
+      return res.status(400).json({ error: 'Valid gender (male/female) is required', requestId, timestamp: new Date().toISOString() });
     }
 
-    logger.info('Fetching fee configuration from DB', { requestId, gender });
-    const query = 'SELECT * FROM student_fees_config WHERE gender = $1';
-    const result = await pool.query(query, [gender.toLowerCase()]);
+    logger.info('Fetching fee configuration from DB', { requestId, membershipType, gender });
+    const query = 'SELECT * FROM student_fees_config WHERE membership_type = $1';
+    const result = await pool.query(query, [membershipType]);
 
     if (result.rows.length === 0) {
-      logger.info('Fee configuration not found', { requestId, gender });
-      return res.status(404).json({ error: `Fee configuration not found for gender: ${gender}`, requestId: requestId, timestamp: new Date().toISOString() });
+      logger.info('Fee configuration not found', { requestId, membershipType });
+      return res.status(404).json({ error: `Fee configuration not found for membership type: ${membershipType}`, requestId: requestId, timestamp: new Date().toISOString() });
     }
 
     const feeConfig = result.rows[0];
-    logger.info('Fee configuration found', { requestId, gender });
-    res.json(feeConfig);
+    // Select gender-specific fee
+    const fee = gender.toLowerCase() === 'male' ? feeConfig.male_monthly_fees : feeConfig.female_monthly_fees;
+    logger.info('Fee configuration found', { requestId, membershipType, gender });
+    res.json({ membership_type: membershipType, gender: gender.toLowerCase(), monthly_fees: fee, raw: feeConfig });
+  } catch (error) {
+    logger.requestError('GET', `/api/students/fee-config/${req.params.membershipType}/${req.params.gender}`, requestId, startTime, error);
+    res.status(500).json({ error: 'Failed to fetch fee configuration', requestId: requestId, timestamp: new Date().toISOString() });
+  }
+});
+
+// Backwards-compatible route: GET /api/students/fee-config/:gender
+// Deprecated: maps to default membership_type 'full_time'
+router.get('/fee-config/:gender', async (req, res) => {
+  const requestId = `student-fee-config-legacy-${Date.now()}`;
+  const startTime = Date.now();
+  try {
+    const { gender } = req.params;
+    logger.warn('Deprecated endpoint /fee-config/:gender used; mapping to membership_type=full_time', { requestId, gender });
+    // Reuse the new handler logic by querying membership_type='full_time'
+    const result = await pool.query('SELECT * FROM student_fees_config WHERE membership_type = $1', ['full_time']);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Fee configuration not found for membership_type=full_time' });
+    const feeConfig = result.rows[0];
+    const fee = (gender && gender.toLowerCase() === 'male') ? feeConfig.male_monthly_fees : feeConfig.female_monthly_fees;
+    res.json({ membership_type: 'full_time', gender: gender.toLowerCase(), monthly_fees: fee, raw: feeConfig });
   } catch (error) {
     logger.requestError('GET', `/api/students/fee-config/${req.params.gender}`, requestId, startTime, error);
-    res.status(500).json({ error: 'Failed to fetch fee configuration', requestId: requestId, timestamp: new Date().toISOString() });
+    res.status(500).json({ error: 'Failed to fetch fee configuration (legacy)', requestId: requestId, timestamp: new Date().toISOString() });
   }
 });
 
