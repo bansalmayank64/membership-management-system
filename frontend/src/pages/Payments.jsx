@@ -837,6 +837,7 @@ function Payments() {
         selectedStudentId={selectedStudentId}
         paymentData={paymentDataLocal}
         setPaymentData={setPaymentDataLocal}
+  onAmountChange={handleLocalAmountChange}
         feeConfig={feeConfig}
         membershipExtensionDays={membershipExtensionDays}
         loading={paymentLoadingLocal}

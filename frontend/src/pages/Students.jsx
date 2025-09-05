@@ -3459,22 +3459,29 @@ function Students() {
                   </Box>
 
                   <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-                    <Chip
-                      sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', cursor: (!(student.seatNumber || student.seat_number) && !((student.status || student.membership_status || '').toString().toLowerCase().includes('inactive') || (student.status || '').toString().toLowerCase() === 'deactivated') ? 'pointer' : 'default') }}
-                      icon={student.seatNumber || student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
-                      label={student.seatNumber || student.seat_number || 'Unassigned'}
-                      color={seatChipColor}
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const isAssigned = !!(student.seatNumber || student.seat_number);
-                        const statusVal = (student.status || student.membership_status || '').toString().toLowerCase();
-                        const isInactive = statusVal === 'inactive' || statusVal === 'deactivated';
-                        if (!isAssigned && !isInactive) {
-                          handleAssignSeatToStudent(student);
-                        }
-                      }}
-                    />
+                    {(() => {
+                      const isAssigned = !!(student.seatNumber || student.seat_number);
+                      const statusVal = (student.status || student.membership_status || '').toString().toLowerCase();
+                      const isInactive = statusVal === 'inactive' || statusVal === 'deactivated';
+                      const canAssign = !isAssigned && !isInactive;
+                      const chip = (
+                        <Chip
+                          sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', cursor: canAssign ? 'pointer' : 'default', px: isAssigned ? 1 : 0.75 }}
+                          icon={isAssigned ? <EventSeatIcon sx={{ fontSize: 14 }} /> : <LinkOffIcon sx={{ fontSize: 15, color: 'text.disabled' }} />}
+                          label={isAssigned ? (student.seatNumber || student.seat_number) : ''}
+                          color={isAssigned ? seatChipColor : 'default'}
+                          size="small"
+                          variant={isAssigned ? 'filled' : 'outlined'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (canAssign) handleAssignSeatToStudent(student);
+                          }}
+                        />
+                      );
+                      return canAssign ? (
+                        <Tooltip title="Assign seat" arrow>{chip}</Tooltip>
+                      ) : (!isAssigned ? <Tooltip title="No seat assigned" arrow>{chip}</Tooltip> : chip);
+                    })()}
                   </Box>
 
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -3544,18 +3551,29 @@ function Students() {
                     </Box>
                   </TableCell>
                   <TableCell align="center">
-                    <Chip
-                      icon={student.seat_number ? <EventSeatIcon sx={{ fontSize: 14 }} /> : undefined}
-                      label={student.seat_number || 'Unassigned'}
-                      size="small"
-                      color={student.seat_number ? 'success' : 'default'}
-                      sx={{ cursor: (!student.seat_number && !((student.status || student.membership_status || '').toString().toLowerCase().includes('inactive') || (student.status || '').toString().toLowerCase() === 'deactivated')) ? 'pointer' : 'default' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const isInactive = ((student.status || student.membership_status || '').toString().toLowerCase() === 'inactive') || ((student.status || '').toString().toLowerCase() === 'deactivated');
-                        if (!student.seat_number && !isInactive) handleAssignSeatToStudent(student);
-                      }}
-                    />
+                    {(() => {
+                      const isAssigned = !!student.seat_number;
+                      const statusVal = (student.status || student.membership_status || '').toString().toLowerCase();
+                      const isInactive = statusVal === 'inactive' || statusVal === 'deactivated';
+                      const canAssign = !isAssigned && !isInactive;
+                      const chip = (
+                        <Chip
+                          icon={isAssigned ? <EventSeatIcon sx={{ fontSize: 14 }} /> : <LinkOffIcon sx={{ fontSize: 15, color: 'text.disabled' }} />}
+                          label={isAssigned ? student.seat_number : ''}
+                          size="small"
+                          color={isAssigned ? 'success' : 'default'}
+                          variant={isAssigned ? 'filled' : 'outlined'}
+                          sx={{ cursor: canAssign ? 'pointer' : 'default', px: isAssigned ? 1 : 0.75 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (canAssign) handleAssignSeatToStudent(student);
+                          }}
+                        />
+                      );
+                      return canAssign ? (
+                        <Tooltip title="Assign seat" arrow>{chip}</Tooltip>
+                      ) : (!isAssigned ? <Tooltip title="No seat assigned" arrow>{chip}</Tooltip> : chip);
+                    })()}
                   </TableCell>
                   <TableCell>
                     <Box>

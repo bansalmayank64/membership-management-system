@@ -34,6 +34,8 @@ const AddPaymentDialog = ({
   // Common payment data
   paymentData,
   setPaymentData,
+  // Optional specialized amount change handler (Payments tab needs to recalc extension days)
+  onAmountChange = null,
   // Fee configuration and membership extension
   feeConfig,
   membershipExtensionDays,
@@ -185,7 +187,14 @@ const AddPaymentDialog = ({
             label="Amount"
             type="number"
             value={currentPaymentData.amount}
-            onChange={(e) => handlePaymentDataChange('amount', e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (onAmountChange) {
+                onAmountChange(val);
+              } else {
+                handlePaymentDataChange('amount', val);
+              }
+            }}
             disabled={isFreeMembershipStudent}
             helperText={isFreeMembershipStudent ? 'Payments disabled for free membership students' : ''}
           />
