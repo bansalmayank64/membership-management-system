@@ -71,7 +71,7 @@ CREATE TABLE students (
     aadhaar_number VARCHAR(20) NOT NULL UNIQUE,
     address TEXT NOT NULL,
     sex VARCHAR(10) CHECK (sex IN ('male','female')) NOT NULL,
-    membership_type VARCHAR(20) NOT NULL CHECK (membership_type IN ('full_time', 'half_time', 'two_hours', 'special')) DEFAULT 'full_time',
+    membership_type VARCHAR(50) NOT NULL DEFAULT 'full_time',
     seat_number VARCHAR(20),
     membership_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     membership_till TIMESTAMP,
@@ -109,10 +109,10 @@ CREATE TABLE expenses (
     modified_by INTEGER NOT NULL REFERENCES users(id)
 );
 
--- Student fees configuration table for membership types (full_time, half_time, two_hours)
+-- Student fees configuration table for membership types (flexible - any membership type allowed)
 CREATE TABLE student_fees_config (
     id SERIAL PRIMARY KEY,
-    membership_type VARCHAR(20) NOT NULL CHECK (membership_type IN ('full_time', 'half_time', 'two_hours', 'special')),
+    membership_type VARCHAR(50) NOT NULL,
     male_monthly_fees NUMERIC(10,2) NOT NULL,
     female_monthly_fees NUMERIC(10,2) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -335,9 +335,10 @@ ON CONFLICT (username) DO NOTHING;
 -- Insert default fee configuration for membership types (example values)
 INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees) VALUES
 ('full_time', 600.00, 550.00),
-('half_time', 350.00, 325.00),
-('two_hours', 200.00, 180.00),
-('special', 100.00, 80.00)
+('half_time', 400.00, 350.00),
+('two_hours', 200.00, 200.00),
+('special', 650.00, 550.00),
+('free', 0.00, 0.00)
 ON CONFLICT (membership_type) DO UPDATE SET
     male_monthly_fees = EXCLUDED.male_monthly_fees,
     female_monthly_fees = EXCLUDED.female_monthly_fees;

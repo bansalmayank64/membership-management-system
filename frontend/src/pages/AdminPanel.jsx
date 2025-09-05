@@ -66,6 +66,23 @@ function AdminPanel() {
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({ open: false, action: '', data: null });
   
+  // New membership type form state
+  const [newMembershipTypeForm, setNewMembershipTypeForm] = useState({
+    membership_type: '',
+    male_monthly_fees: '',
+    female_monthly_fees: ''
+  });
+  
+  // Edit membership type state
+  const [editMembershipTypeForm, setEditMembershipTypeForm] = useState({
+    original_name: '',
+    new_name: '',
+    male_monthly_fees: '',
+    female_monthly_fees: ''
+  });
+  
+  const [editMembershipDialogOpen, setEditMembershipDialogOpen] = useState(false);
+  
   const { user } = useAuth();
 
   const isAdmin = user && user.role === 'admin';
@@ -690,6 +707,181 @@ function AdminPanel() {
     }
   };
 
+  const handleAddMembershipType = async () => {
+    if (!newMembershipTypeForm.membership_type.trim()) {
+      setMessage({ type: 'error', text: 'Membership type is required' });
+      return;
+    }
+
+    if (!newMembershipTypeForm.male_monthly_fees || !newMembershipTypeForm.female_monthly_fees) {
+      setMessage({ type: 'error', text: 'Both male and female fees are required' });
+      return;
+    }
+
+    if (parseFloat(newMembershipTypeForm.male_monthly_fees) <= 0 || parseFloat(newMembershipTypeForm.female_monthly_fees) <= 0) {
+      setMessage({ type: 'error', text: 'Fees must be positive numbers' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/fees-config', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          membership_type: newMembershipTypeForm.membership_type.trim(),
+          male_monthly_fees: parseFloat(newMembershipTypeForm.male_monthly_fees),
+          female_monthly_fees: parseFloat(newMembershipTypeForm.female_monthly_fees)
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add new membership type');
+      }
+
+      setMessage({ type: 'success', text: `New membership type "${newMembershipTypeForm.membership_type}" added successfully` });
+      setNewMembershipTypeForm({ membership_type: '', male_monthly_fees: '', female_monthly_fees: '' });
+      fetchFeesConfig(); // Refresh the data
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteMembershipType = async (membershipType) => {
+    if (membershipType === 'full_time') {
+      setMessage({ type: 'error', text: 'Cannot delete the default full_time membership type' });
+      return;
+    }
+
+    const confirmed = window.confirm(`Are you sure you want to delete the "${membershipType}" membership type? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/admin/fees-config/${membershipType}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete membership type');
+      }
+
+      setMessage({ type: 'success', text: `Membership type "${membershipType}" deleted successfully` });
+      fetchFeesConfig(); // Refresh the data
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditMembershipType = (config) => {
+    if (config.membership_type === 'full_time') {
+      // For full_time, only allow fee editing, not renaming
+      setEditMembershipTypeForm({
+        original_name: config.membership_type,
+        new_name: config.membership_type,
+        male_monthly_fees: config.male_monthly_fees,
+        female_monthly_fees: config.female_monthly_fees
+      });
+    } else {
+      // For other types, allow full editing
+      setEditMembershipTypeForm({
+        original_name: config.membership_type,
+        new_name: config.membership_type,
+        male_monthly_fees: config.male_monthly_fees,
+        female_monthly_fees: config.female_monthly_fees
+      });
+    }
+    setEditMembershipDialogOpen(true);
+  };
+
+  const handleSaveEditMembershipType = async () => {
+    if (!editMembershipTypeForm.new_name.trim()) {
+      setMessage({ type: 'error', text: 'Membership type name is required' });
+      return;
+    }
+
+    if (!editMembershipTypeForm.male_monthly_fees || !editMembershipTypeForm.female_monthly_fees) {
+      setMessage({ type: 'error', text: 'Both male and female fees are required' });
+      return;
+    }
+
+    if (parseFloat(editMembershipTypeForm.male_monthly_fees) <= 0 || parseFloat(editMembershipTypeForm.female_monthly_fees) <= 0) {
+      setMessage({ type: 'error', text: 'Fees must be positive numbers' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Check if name changed (and it's not full_time)
+      const nameChanged = editMembershipTypeForm.original_name !== editMembershipTypeForm.new_name.trim() 
+                         && editMembershipTypeForm.original_name !== 'full_time';
+
+      if (nameChanged) {
+        // Rename the membership type
+        const renameResponse = await fetch(`/api/admin/fees-config/${editMembershipTypeForm.original_name}/rename`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            new_membership_type: editMembershipTypeForm.new_name.trim()
+          })
+        });
+
+        if (!renameResponse.ok) {
+          const error = await renameResponse.json();
+          throw new Error(error.error || 'Failed to rename membership type');
+        }
+      }
+
+      // Update the fees (use new name if renamed, otherwise use original)
+      const targetName = nameChanged ? editMembershipTypeForm.new_name.trim() : editMembershipTypeForm.original_name;
+      
+      const feesResponse = await fetch(`/api/admin/fees-config/${targetName}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          male_monthly_fees: parseFloat(editMembershipTypeForm.male_monthly_fees),
+          female_monthly_fees: parseFloat(editMembershipTypeForm.female_monthly_fees)
+        })
+      });
+
+      if (!feesResponse.ok) {
+        const error = await feesResponse.json();
+        throw new Error(error.error || 'Failed to update fees');
+      }
+
+      const successMessage = nameChanged 
+        ? `Membership type renamed to "${editMembershipTypeForm.new_name}" and fees updated successfully`
+        : `Fees updated successfully for "${editMembershipTypeForm.original_name}"`;
+      
+      setMessage({ type: 'success', text: successMessage });
+      setEditMembershipDialogOpen(false);
+      setEditMembershipTypeForm({ original_name: '', new_name: '', male_monthly_fees: '', female_monthly_fees: '' });
+      fetchFeesConfig(); // Refresh the data
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleTempFeesChange = (membershipType, gender, value) => {
     setTempFeesConfig(prev => ({
       ...prev,
@@ -1160,62 +1352,141 @@ function AdminPanel() {
               Monthly Fees Configuration
             </Typography>
             
+            {/* Add New Membership Type Form */}
+            <Card sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AddIcon color="primary" />
+                  Add New Membership Type
+                </Typography>
+                
+                <Grid container spacing={2} sx={{ mt: 1 }}>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      label="Membership Type Name"
+                      value={newMembershipTypeForm.membership_type}
+                      onChange={(e) => setNewMembershipTypeForm({ 
+                        ...newMembershipTypeForm, 
+                        membership_type: e.target.value 
+                      })}
+                      fullWidth
+                      placeholder="e.g., student, senior_citizen, corporate"
+                      helperText="Enter a unique name (no spaces, use underscore for separation)"
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <TextField
+                      label="Male Monthly Fee (₹)"
+                      type="number"
+                      value={newMembershipTypeForm.male_monthly_fees}
+                      onChange={(e) => setNewMembershipTypeForm({ 
+                        ...newMembershipTypeForm, 
+                        male_monthly_fees: e.target.value 
+                      })}
+                      inputProps={{ min: 0, step: 10 }}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <TextField
+                      label="Female Monthly Fee (₹)"
+                      type="number"
+                      value={newMembershipTypeForm.female_monthly_fees}
+                      onChange={(e) => setNewMembershipTypeForm({ 
+                        ...newMembershipTypeForm, 
+                        female_monthly_fees: e.target.value 
+                      })}
+                      inputProps={{ min: 0, step: 10 }}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={2}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleAddMembershipType}
+                      disabled={loading}
+                      fullWidth
+                      sx={{ height: '56px' }}
+                      startIcon={<AddIcon />}
+                    >
+                      {loading ? 'Adding...' : 'Add'}
+                    </Button>
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+            
+            {/* Existing Membership Types */}
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <EditIcon color="primary" />
+              Existing Membership Types
+            </Typography>
+            
             <Grid container spacing={3}>
               {feesConfig.map((config) => (
                 <Grid item xs={12} md={6} key={config.membership_type}>
                   <Card>
                     <CardContent>
-                      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <MoneyIcon color="primary" />
-                        {config.membership_type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                      </Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                        <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <MoneyIcon color="primary" />
+                          {config.membership_type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                          {config.membership_type === 'full_time' && (
+                            <Chip label="Default" size="small" color="primary" variant="outlined" />
+                          )}
+                        </Typography>
+                        
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleEditMembershipType(config)}
+                            color="primary"
+                            title="Edit membership type"
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          
+                          {config.membership_type !== 'full_time' && (
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleDeleteMembershipType(config.membership_type)}
+                              color="error"
+                              title="Delete membership type"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                        </Box>
+                      </Box>
 
                       <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
                         <TextField
                           label="Male (₹)"
                           type="number"
-                          value={(tempFeesConfig[config.membership_type] && tempFeesConfig[config.membership_type].male) !== undefined ? tempFeesConfig[config.membership_type].male : config.male_monthly_fees}
-                          inputProps={{ min: 0, step: 10 }}
-                          onChange={(e) => handleTempFeesChange(config.membership_type, 'male', e.target.value)}
+                          value={config.male_monthly_fees}
+                          inputProps={{ min: 0, step: 10, readOnly: true }}
                           fullWidth
+                          disabled
                         />
                         <TextField
                           label="Female (₹)"
                           type="number"
-                          value={(tempFeesConfig[config.membership_type] && tempFeesConfig[config.membership_type].female) !== undefined ? tempFeesConfig[config.membership_type].female : config.female_monthly_fees}
-                          inputProps={{ min: 0, step: 10 }}
-                          onChange={(e) => handleTempFeesChange(config.membership_type, 'female', e.target.value)}
+                          value={config.female_monthly_fees}
+                          inputProps={{ min: 0, step: 10, readOnly: true }}
                           fullWidth
+                          disabled
                         />
                       </Box>
 
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        Current male fees: ₹{config.male_monthly_fees} • Current female fees: ₹{config.female_monthly_fees}
+                        Current fees: Male ₹{config.male_monthly_fees} • Female ₹{config.female_monthly_fees}
                       </Typography>
                     </CardContent>
                   </Card>
                 </Grid>
               ))}
             </Grid>
-            
-            {/* Update Button */}
-            {feesConfig.length > 0 && (
-              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  onClick={handleUpdateFees}
-                  disabled={loading || !Object.keys(tempFeesConfig).some(gender => {
-                    const config = feesConfig.find(c => c.gender === gender);
-                    return config && tempFeesConfig[gender] !== config.monthly_fees;
-                  })}
-                  sx={{ minWidth: 150, py: 1.5 }}
-                >
-                  {loading ? 'Updating...' : 'Update Fees'}
-                </Button>
-              </Box>
-            )}
             
             {feesConfig.length === 0 && (
               <Alert severity="info">
@@ -1461,6 +1732,66 @@ function AdminPanel() {
           }}
           onCancel={() => setConfirmDialog({ open: false, action: '', data: null })}
         />
+
+        {/* Edit Membership Type Dialog */}
+        <Dialog open={editMembershipDialogOpen} onClose={() => setEditMembershipDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>
+            Edit Membership Type
+            {editMembershipTypeForm.original_name === 'full_time' && (
+              <Chip label="Protected Type - Name cannot be changed" size="small" color="warning" sx={{ ml: 2 }} />
+            )}
+          </DialogTitle>
+          <DialogContent>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+              <TextField
+                label="Membership Type Name"
+                value={editMembershipTypeForm.new_name}
+                onChange={(e) => setEditMembershipTypeForm({ 
+                  ...editMembershipTypeForm, 
+                  new_name: e.target.value 
+                })}
+                fullWidth
+                disabled={editMembershipTypeForm.original_name === 'full_time'}
+                helperText={editMembershipTypeForm.original_name === 'full_time' ? 'The full_time membership type cannot be renamed' : 'Enter the membership type name'}
+              />
+              
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label="Male Monthly Fee (₹)"
+                  type="number"
+                  value={editMembershipTypeForm.male_monthly_fees}
+                  onChange={(e) => setEditMembershipTypeForm({ 
+                    ...editMembershipTypeForm, 
+                    male_monthly_fees: e.target.value 
+                  })}
+                  inputProps={{ min: 0, step: 10 }}
+                  fullWidth
+                />
+                <TextField
+                  label="Female Monthly Fee (₹)"
+                  type="number"
+                  value={editMembershipTypeForm.female_monthly_fees}
+                  onChange={(e) => setEditMembershipTypeForm({ 
+                    ...editMembershipTypeForm, 
+                    female_monthly_fees: e.target.value 
+                  })}
+                  inputProps={{ min: 0, step: 10 }}
+                  fullWidth
+                />
+              </Box>
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setEditMembershipDialogOpen(false)}>Cancel</Button>
+            <Button 
+              onClick={handleSaveEditMembershipType} 
+              variant="contained" 
+              disabled={loading}
+            >
+              {loading ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Paper>
       
       <Footer />

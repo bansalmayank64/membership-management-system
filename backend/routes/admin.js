@@ -407,15 +407,51 @@ router.get('/fees-config', auth, requireAdmin, async (req, res) => {
 // Mount activity routes under /api/admin/activity
 router.use('/activity', auth, requireAdmin, activityRoutes);
 
+// Add new membership type
+router.post('/fees-config', auth, requireAdmin, async (req, res) => {
+  const { membership_type, male_monthly_fees, female_monthly_fees } = req.body;
+
+  try {
+    if (!membership_type || !membership_type.trim()) {
+      return res.status(400).json({ error: 'Membership type is required' });
+    }
+
+    if ((male_monthly_fees === undefined || male_monthly_fees <= 0) || (female_monthly_fees === undefined || female_monthly_fees <= 0)) {
+      return res.status(400).json({ error: 'Both male_monthly_fees and female_monthly_fees must be positive numbers' });
+    }
+
+    // Check if membership type already exists
+    const existingResult = await pool.query(
+      'SELECT id FROM student_fees_config WHERE membership_type = $1', 
+      [membership_type.trim()]
+    );
+
+    if (existingResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Membership type already exists' });
+    }
+
+    // Insert new membership type
+    const insertResult = await pool.query(`
+      INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `, [membership_type.trim(), male_monthly_fees, female_monthly_fees]);
+    
+    res.json(insertResult.rows[0]);
+  } catch (error) {
+    logger.error('Error adding new membership type', { error: error.message, stack: error.stack, membership_type });
+    res.status(500).json({ error: 'Failed to add new membership type' });
+  }
+});
+
 // Update fees configuration by membership type
 router.put('/fees-config/:membershipType', auth, requireAdmin, async (req, res) => {
   const { membershipType } = req.params;
   const { male_monthly_fees, female_monthly_fees } = req.body;
 
   try {
-    const validTypes = ['full_time', 'half_time', 'two_hours'];
-    if (!membershipType || !validTypes.includes(membershipType)) {
-      return res.status(400).json({ error: 'Invalid membershipType. Must be one of full_time, half_time, two_hours' });
+    if (!membershipType || !membershipType.trim()) {
+      return res.status(400).json({ error: 'Invalid membershipType' });
     }
 
     if ((male_monthly_fees === undefined || male_monthly_fees <= 0) || (female_monthly_fees === undefined || female_monthly_fees <= 0)) {
@@ -444,6 +480,138 @@ router.put('/fees-config/:membershipType', auth, requireAdmin, async (req, res) 
   } catch (error) {
     logger.error('Error updating fees config', { error: error.message, stack: error.stack, membershipType });
     res.status(500).json({ error: 'Failed to update fees configuration' });
+  }
+});
+
+// Delete membership type (protected route - cannot delete full_time)
+router.delete('/fees-config/:membershipType', auth, requireAdmin, async (req, res) => {
+  const { membershipType } = req.params;
+
+  try {
+    if (!membershipType || !membershipType.trim()) {
+      return res.status(400).json({ error: 'Invalid membershipType' });
+    }
+
+    // Protect full_time membership type from deletion
+    if (membershipType === 'full_time') {
+      return res.status(403).json({ 
+        error: 'Cannot delete the default full_time membership type',
+        protected: true
+      });
+    }
+
+    // Check if any students are using this membership type
+    const studentsUsingType = await pool.query(
+      'SELECT COUNT(*) as count FROM students WHERE membership_type = $1', 
+      [membershipType]
+    );
+
+    const studentCount = parseInt(studentsUsingType.rows[0].count);
+    
+    if (studentCount > 0) {
+      return res.status(400).json({ 
+        error: `Cannot delete membership type. ${studentCount} student(s) are currently using this membership type.`,
+        studentsCount: studentCount
+      });
+    }
+
+    // Delete the membership type
+    const result = await pool.query(
+      'DELETE FROM student_fees_config WHERE membership_type = $1 RETURNING *', 
+      [membershipType]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Membership type not found' });
+    }
+
+    res.json({ 
+      message: 'Membership type deleted successfully',
+      deleted: result.rows[0]
+    });
+
+  } catch (error) {
+    logger.error('Error deleting membership type', { error: error.message, stack: error.stack, membershipType });
+    res.status(500).json({ error: 'Failed to delete membership type' });
+  }
+});
+
+// Update membership type name (protected route - cannot rename full_time)
+router.put('/fees-config/:membershipType/rename', auth, requireAdmin, async (req, res) => {
+  const { membershipType } = req.params;
+  const { new_membership_type } = req.body;
+
+  try {
+    if (!membershipType || !membershipType.trim()) {
+      return res.status(400).json({ error: 'Invalid current membershipType' });
+    }
+
+    if (!new_membership_type || !new_membership_type.trim()) {
+      return res.status(400).json({ error: 'New membership type name is required' });
+    }
+
+    // Protect full_time membership type from renaming
+    if (membershipType === 'full_time') {
+      return res.status(403).json({ 
+        error: 'Cannot rename the default full_time membership type',
+        protected: true
+      });
+    }
+
+    const newName = new_membership_type.trim();
+
+    // Check if new name already exists
+    const existingCheck = await pool.query(
+      'SELECT id FROM student_fees_config WHERE membership_type = $1', 
+      [newName]
+    );
+
+    if (existingCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'A membership type with this name already exists' });
+    }
+
+    // Start transaction to update both config and student records
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Update the fees config table
+      const configResult = await client.query(`
+        UPDATE student_fees_config 
+        SET membership_type = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE membership_type = $2
+        RETURNING *
+      `, [newName, membershipType]);
+
+      if (configResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Membership type not found' });
+      }
+
+      // Update all students using this membership type
+      const studentsResult = await client.query(
+        'UPDATE students SET membership_type = $1 WHERE membership_type = $2',
+        [newName, membershipType]
+      );
+
+      await client.query('COMMIT');
+
+      res.json({
+        message: 'Membership type renamed successfully',
+        updated: configResult.rows[0],
+        studentsUpdated: studentsResult.rowCount
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    logger.error('Error renaming membership type', { error: error.message, stack: error.stack, membershipType });
+    res.status(500).json({ error: 'Failed to rename membership type' });
   }
 });
 

@@ -43,7 +43,6 @@ import {
   ListItemText
 } from '@mui/material';
 import { Autocomplete } from '@mui/material';
-import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
 import logger from '../utils/clientLogger';
 import {
@@ -79,7 +78,8 @@ import {
   LinkOff as LinkOffIcon,
   CalendarToday as CalendarTodayIcon,
   AccessTime as AccessTimeIcon,
-  Person as PersonIcon
+  Person as PersonIcon,
+  Clear as ClearIcon
 } from '@mui/icons-material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import CloseIcon from '@mui/icons-material/Close';
@@ -2880,377 +2880,169 @@ function Students() {
       if (seatsFilters.seatNumber) activeFilters.seat = seatsFilters.seatNumber;
       if (seatsFilters.status) activeFilters.status = seatsFilters.status;
       if (seatsFilters.gender) activeFilters.gender = seatsFilters.gender;
+      if (seatsFilters.membershipType) activeFilters.membershipType = seatsFilters.membershipType;
     } else {
       if (studentsFilters.studentName) activeFilters.name = studentsFilters.studentName;
       if (studentsFilters.status) activeFilters.status = studentsFilters.status;
       if (studentsFilters.gender) activeFilters.gender = studentsFilters.gender;
-  if (studentsFilters.membershipType) activeFilters.membershipType = studentsFilters.membershipType;
+      if (studentsFilters.membershipType) activeFilters.membershipType = studentsFilters.membershipType;
       if (studentsFilters.contact) activeFilters.contact = studentsFilters.contact;
     }
 
     const filterCount = Object.keys(activeFilters).length;
 
-    const handleFilterRemove = (filterKey) => {
-      switch (filterKey) {
-        case 'seat': setSeatsFilters(prev => ({ ...prev, seatNumber: '' })); break;
-        case 'status': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, status: '' })); } else { setStudentsFilters(prev => ({ ...prev, status: '' })); } break;
-  case 'gender': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, gender: '' })); } else { setStudentsFilters(prev => ({ ...prev, gender: '' })); } break;
-  case 'membershipType': if (currentTab === 0) { setSeatsFilters(prev => ({ ...prev, membershipType: '' })); } else { setStudentsFilters(prev => ({ ...prev, membershipType: '' })); } break;
-        case 'name': setStudentsFilters(prev => ({ ...prev, studentName: '' })); break;
-        case 'contact': setStudentsFilters(prev => ({ ...prev, contact: '' })); break;
-      }
-    };
-
-    const filterContent = (
-      <>
-        {currentTab === 0 && (
-          <Stack spacing={2}>
-            <TextField
+    // Desktop: use same mobile-style inline filters for both mobile and desktop
+    if (currentTab === 0) {
+      // Seats filter (single-row compact bar)
+      return (
+        <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+          <TextField
+            size="small"
+            placeholder="Seat #"
+            value={seatsFilters.seatNumber}
+            onChange={(e) => { setSeatsFilters(prev => ({ ...prev, seatNumber: e.target.value })); }}
+            sx={{ minWidth: 80, flex: '0 0 auto' }}
+            InputProps={{
+              startAdornment: <SearchIcon sx={{ mr: 1 }} />,
+              endAdornment: (
+                <InputAdornment position="end">
+                  {seatsFilters.seatNumber ? (
+                    <IconButton size="small" onClick={() => setSeatsFilters(prev => ({ ...prev, seatNumber: '' }))} aria-label="clear seat number">
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  ) : null}
+                </InputAdornment>
+              )
+            }}
+          />
+          <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={seatsFilters.status}
+              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, status: e.target.value })); }}
+              label="Status"
+              sx={{ pl: 0.5 }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="occupied">Occupied</MenuItem>
+              <MenuItem value="available">Available</MenuItem>
+              <MenuItem value="expiring">Expiring</MenuItem>
+              <MenuItem value="expired">Expired</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+            <InputLabel>Gender</InputLabel>
+            <Select
+              value={seatsFilters.gender}
+              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, gender: e.target.value })); }}
+              label="Gender"
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="male">Male</MenuItem>
+              <MenuItem value="female">Female</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 140, flex: '0 0 auto' }}>
+            <InputLabel>Membership Type</InputLabel>
+            <Select
+              value={seatsFilters.membershipType}
+              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
+              label="Membership Type"
+            >
+              <MenuItem value="">All</MenuItem>
+              {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
+                membershipFeeOptions.map(opt => (
+                  <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
+                ))
+              ) : (
+                <MenuItem value="" disabled>No membership types available</MenuItem>
+              )}
+            </Select>
+          </FormControl>
+          {filterCount > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<ClearIcon />}
+              onClick={clearAllFilters}
               size="small"
-              label="Seat Number"
-              value={seatsFilters.seatNumber}
-              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, seatNumber: e.target.value })); }}
-              fullWidth
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    {seatsFilters.seatNumber ? (
-                      <IconButton size="small" onClick={() => setSeatsFilters(prev => ({ ...prev, seatNumber: '' }))} aria-label="clear seat number">
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    ) : null}
-                  </InputAdornment>
-                )
-              }}
-              sx={{ maxWidth: 120 }}
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={seatsFilters.status}
-                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, status: e.target.value })); }}
-                label="Status"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="expiring">Expiring</MenuItem>
-                <MenuItem value="expired">Expired</MenuItem>
-                <MenuItem value="occupied">Occupied</MenuItem>
-                <MenuItem value="available">Available</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={seatsFilters.gender}
-                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, gender: e.target.value })); }}
-                label="Gender"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Membership Type</InputLabel>
-              <Select
-                value={seatsFilters.membershipType}
-                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
-                label="Membership Type"
-              >
-                <MenuItem value="">All</MenuItem>
-                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
-                  membershipFeeOptions.map(opt => (
-                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
-                  ))
-                ) : (
-                  <>
-                    <MenuItem value="full_time">Full Time</MenuItem>
-                    <MenuItem value="half_time">Half Time</MenuItem>
-                    <MenuItem value="two_hours">Two Hours</MenuItem>
-                  </>
-                )}
-              </Select>
-            </FormControl>
-          </Stack>
-        )}
-
-        {currentTab === 1 && (
-          <Stack spacing={2}>
-            <TextField
-              size="small"
-              label="Student Name"
-              value={studentsFilters.studentName}
-              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
-              fullWidth
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    {studentsFilters.studentName ? (
-                      <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    ) : null}
-                  </InputAdornment>
-                )
-              }}
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={studentsFilters.status}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, status: e.target.value })); }}
-                label="Status"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="assigned">Assigned</MenuItem>
-                <MenuItem value="expiring">Expiring</MenuItem>
-                <MenuItem value="unassigned">Unassigned</MenuItem>
-                <MenuItem value="expired">Expired</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={studentsFilters.gender}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
-                label="Gender"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Membership Type</InputLabel>
-              <Select
-                value={studentsFilters.membershipType}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
-                label="Membership Type"
-              >
-                <MenuItem value="">All</MenuItem>
-                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
-                  membershipFeeOptions.map(opt => (
-                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
-                  ))
-                ) : (
-                  <>
-                    <MenuItem value="full_time">Full Time</MenuItem>
-                    <MenuItem value="half_time">Half Time</MenuItem>
-                    <MenuItem value="two_hours">Two Hours</MenuItem>
-                  </>
-                )}
-              </Select>
-            </FormControl>
-          </Stack>
-        )}
-
-        {currentTab === 2 && (
-          <Stack spacing={2}>
-            <TextField
-              size="small"
-              label="Student Name"
-              value={studentsFilters.studentName}
-              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
-              fullWidth
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    {studentsFilters.studentName ? (
-                      <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    ) : null}
-                  </InputAdornment>
-                )
-              }}
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={studentsFilters.status}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, status: e.target.value })); }}
-                label="Status"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="expired">Expired</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={studentsFilters.gender}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
-                label="Gender"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              label="Contact"
-              value={studentsFilters.contact}
-              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, contact: e.target.value })); }}
-              fullWidth
-            />
-          </Stack>
-        )}
-      </>
-    );
-
-    // On mobile, show inline top filters instead of the floating filter button
-    if (isMobile) {
-      if (currentTab === 0) {
-        // Seats mobile top filter (single-row compact bar)
-        return (
-          <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
-            <TextField
-              size="small"
-              placeholder="Seat #"
-              value={seatsFilters.seatNumber}
-              onChange={(e) => { setSeatsFilters(prev => ({ ...prev, seatNumber: e.target.value })); }}
-              sx={{ minWidth: 80, flex: '0 0 auto' }}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1 }} />,
-                endAdornment: (
-                  <InputAdornment position="end">
-                    {seatsFilters.seatNumber ? (
-                      <IconButton size="small" onClick={() => setSeatsFilters(prev => ({ ...prev, seatNumber: '' }))} aria-label="clear seat number">
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    ) : null}
-                  </InputAdornment>
-                )
-              }}
-            />
-            <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={seatsFilters.status}
-                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, status: e.target.value })); }}
-                label="Status"
-                sx={{ pl: 0.5 }}
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="occupied">Occupied</MenuItem>
-                <MenuItem value="available">Available</MenuItem>
-                <MenuItem value="expiring">Expiring</MenuItem>
-                <MenuItem value="expired">Expired</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={seatsFilters.gender}
-                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, gender: e.target.value })); }}
-                label="Gender"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 140, flex: '0 0 auto' }}>
-              <InputLabel>Membership Type</InputLabel>
-              <Select
-                value={seatsFilters.membershipType}
-                onChange={(e) => { setSeatsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
-                label="Membership Type"
-              >
-                <MenuItem value="">All</MenuItem>
-                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
-                  membershipFeeOptions.map(opt => (
-                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
-                  ))
-                ) : (
-                  <>
-                    <MenuItem value="full_time">Full Time</MenuItem>
-                    <MenuItem value="half_time">Half Time</MenuItem>
-                    <MenuItem value="two_hours">Two Hours</MenuItem>
-                  </>
-                )}
-              </Select>
-            </FormControl>
-          </Paper>
-        );
-      }
-
-      // Students mobile top search
-      if (currentTab === 1) {
-        // Students mobile top search (single-row compact)
-        return (
-          <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
-              <TextField
-                size="small"
-                placeholder="Search name / ID / mobile"
-                value={studentsFilters.studentName}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
-                sx={{ minWidth: 200, flex: '1 0 auto' }}
-                InputProps={{
-                  startAdornment: <SearchIcon sx={{ mr: 1 }} />,
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      {studentsFilters.studentName ? (
-                        <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
-                          <CloseIcon fontSize="small" />
-                        </IconButton>
-                      ) : null}
-                    </InputAdornment>
-                  )
-                }}
-              />
-            <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={studentsFilters.gender}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
-                label="Gender"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 140, flex: '0 0 auto' }}>
-              <InputLabel>Membership Type</InputLabel>
-              <Select
-                value={studentsFilters.membershipType}
-                onChange={(e) => { setStudentsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
-                label="Membership Type"
-              >
-                <MenuItem value="">All</MenuItem>
-                {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
-                  membershipFeeOptions.map(opt => (
-                    <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
-                  ))
-                ) : (
-                  <>
-                    <MenuItem value="full_time">Full Time</MenuItem>
-                    <MenuItem value="half_time">Half Time</MenuItem>
-                    <MenuItem value="two_hours">Two Hours</MenuItem>
-                  </>
-                )}
-              </Select>
-            </FormControl>
-          </Paper>
-        );
-      }
+              sx={{ minWidth: 100, flex: '0 0 auto', ml: 1 }}
+            >
+              Clear All
+            </Button>
+          )}
+        </Paper>
+      );
     }
 
-    // Desktop: keep existing MobileFilters collapse UI
-    return (
-      <MobileFilters
-        title={currentTab === 0 ? "Seat Filters" : "Student Filters"}
-        filterCount={filterCount}
-        onClearAll={clearAllFilters}
-        activeFilters={activeFilters}
-        onFilterRemove={handleFilterRemove}
-        variant={isMobile ? "drawer" : "collapse"}
-      >
-        {filterContent}
-      </MobileFilters>
-    );
+    // Students filter (single-row compact)
+    if (currentTab === 1) {
+      return (
+        <Paper sx={{ p: 1, mb: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+          <TextField
+            size="small"
+            placeholder="Search name / ID / mobile"
+            value={studentsFilters.studentName}
+            onChange={(e) => { setStudentsFilters(prev => ({ ...prev, studentName: e.target.value })); }}
+            sx={{ minWidth: 200, flex: '1 0 auto' }}
+            InputProps={{
+              startAdornment: <SearchIcon sx={{ mr: 1 }} />,
+              endAdornment: (
+                <InputAdornment position="end">
+                  {studentsFilters.studentName ? (
+                    <IconButton size="small" onClick={() => setStudentsFilters(prev => ({ ...prev, studentName: '' }))} aria-label="clear student search">
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  ) : null}
+                </InputAdornment>
+              )
+            }}
+          />
+          <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+            <InputLabel>Gender</InputLabel>
+            <Select
+              value={studentsFilters.gender}
+              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, gender: e.target.value })); }}
+              label="Gender"
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="male">Male</MenuItem>
+              <MenuItem value="female">Female</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 140, flex: '0 0 auto' }}>
+            <InputLabel>Membership Type</InputLabel>
+            <Select
+              value={studentsFilters.membershipType}
+              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, membershipType: e.target.value })); }}
+              label="Membership Type"
+            >
+              <MenuItem value="">All</MenuItem>
+              {membershipFeeOptions && membershipFeeOptions.length > 0 ? (
+                membershipFeeOptions.map(opt => (
+                  <MenuItem key={opt.membership_type} value={opt.membership_type}>{(opt.membership_type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</MenuItem>
+                ))
+              ) : (
+                <MenuItem value="" disabled>No membership types available</MenuItem>
+              )}
+            </Select>
+          </FormControl>
+          {filterCount > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<ClearIcon />}
+              onClick={clearAllFilters}
+              size="small"
+              sx={{ minWidth: 100, flex: '0 0 auto', ml: 1 }}
+            >
+              Clear All
+            </Button>
+          )}
+        </Paper>
+      );
+    }
+    return null; // No additional filters needed as we use the inline design for all cases
   };
 
   // Render Seats View (desktop: table; mobile: card list similar to Active students)
@@ -4102,7 +3894,7 @@ function Students() {
                     </Box>
                   </MenuItem>
                 )) : (
-                  <MenuItem value="full_time">Full Time</MenuItem>
+                  <MenuItem value="" disabled>No membership types available</MenuItem>
                 )}
               </Select>
             </FormControl>
@@ -4773,7 +4565,7 @@ function Students() {
                     </Box>
                   </MenuItem>
                 )) : (
-                  <MenuItem value="full_time">Full Time</MenuItem>
+                  <MenuItem value="" disabled>No membership types available</MenuItem>
                 )}
               </Select>
             </FormControl>

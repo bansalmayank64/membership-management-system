@@ -8,13 +8,6 @@ frontend/dist/
 frontend/.vite/
 public/assets/*
 
-# Environment variables
-.env
-frontend/.env
-frontend/.env.local
-frontend/.env.production
-backend/.env
-
 # Logs
 *.log
 npm-debug.log*

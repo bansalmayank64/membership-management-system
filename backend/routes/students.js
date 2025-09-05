@@ -274,13 +274,9 @@ router.post('/', async (req, res) => {
       validationErrors.push('*Gender must be either Male or Female (database constraint: male/female)');
     }
 
-    // Membership type validation (optional) - default to 'full_time' if not provided
-    const validMembershipTypes = ['full_time', 'half_time', 'two_hours', 'special'];
-    if (membership_type && typeof membership_type === 'string') {
-      if (!validMembershipTypes.includes(membership_type)) {
-        validationErrors.push('*membership_type must be one of: ' + validMembershipTypes.join(', '));
-      }
-    }
+    // Membership type validation removed - now accepts any membership type value
+    // Default to 'full_time' if not provided for backward compatibility
+    const defaultMembershipType = 'full_time';
 
     // Contact number validation (Optional) - VARCHAR(20) UNIQUE
     if (contact_number && typeof contact_number === 'string') {
@@ -414,7 +410,7 @@ router.post('/', async (req, res) => {
         RETURNING *
       `;
       
-    const effectiveMembershipType = (membership_type && validMembershipTypes.includes(membership_type)) ? membership_type : 'full_time';
+    const effectiveMembershipType = (membership_type && membership_type.trim()) ? membership_type.trim() : defaultMembershipType;
     const studentValues = [
   normalizedName,
   normalizedFatherName,
@@ -624,13 +620,8 @@ router.put('/:id', async (req, res) => {
       validationErrors.push('Membership status must be one of: active, inactive, suspended, expired (database constraint: active, expired, suspended)');
     }
 
-    // Membership type validation (optional) - default to existing or 'full_time'
-    const validMembershipTypes = ['full_time', 'half_time', 'two_hours', 'special'];
-    if (membership_type && typeof membership_type === 'string') {
-      if (!validMembershipTypes.includes(membership_type)) {
-        validationErrors.push('*membership_type must be one of: ' + validMembershipTypes.join(', '));
-      }
-    }
+    // Membership type validation removed - now accepts any membership type value
+    // Default to existing value or 'full_time' for backward compatibility
 
     // Normalize membership status (do not reassign destructured const)
     const effectiveMembershipStatus = membership_status || 'active';
@@ -684,7 +675,7 @@ router.put('/:id', async (req, res) => {
       normalizedAadhaar,
       normalizedAddress,
       normalizedSex, 
-      (membership_type && validMembershipTypes.includes(membership_type)) ? membership_type : (currentStudentRow ? currentStudentRow.membership_type : 'full_time'),
+      (membership_type && membership_type.trim()) ? membership_type.trim() : (currentStudentRow ? currentStudentRow.membership_type : 'full_time'),
       normalizedSeatNumber,
       membership_date, 
       membership_till, 
@@ -884,11 +875,12 @@ router.get('/fee-config/:membershipType/:gender', async (req, res) => {
   try {
     logger.info('GET /api/students/fee-config by membershipType+gender start', { requestId, params: req.params });
     const { membershipType, gender } = req.params;
-    const validTypes = ['full_time', 'half_time', 'two_hours'];
-    if (!membershipType || !validTypes.includes(membershipType)) {
-      logger.warn('Invalid membershipType parameter for fee-config', { requestId, membershipType });
-      return res.status(400).json({ error: 'Valid membershipType is required (full_time, half_time, two_hours)', requestId, timestamp: new Date().toISOString() });
+    
+    if (!membershipType || !membershipType.trim()) {
+      logger.warn('Missing membershipType parameter for fee-config', { requestId, membershipType });
+      return res.status(400).json({ error: 'membershipType is required', requestId, timestamp: new Date().toISOString() });
     }
+    
     if (!gender || !['male', 'female'].includes(gender.toLowerCase())) {
       logger.warn('Invalid gender parameter for fee-config', { requestId, gender });
       return res.status(400).json({ error: 'Valid gender (male/female) is required', requestId, timestamp: new Date().toISOString() });
