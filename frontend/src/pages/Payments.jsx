@@ -27,6 +27,7 @@ import { Autocomplete } from '@mui/material';
 import { Refresh as RefreshIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
+import AddPaymentDialog from '../components/AddPaymentDialog';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
@@ -298,7 +299,7 @@ function Payments() {
       setFeeConfig(cfg);
       // compute membership extension days if amount present
       const amount = parseFloat(paymentDataLocal.amount || 0);
-      if (amount > 0 && cfg && cfg.monthly_fees) {
+  if (amount > 0 && cfg && parseFloat(cfg.monthly_fees) > 0) {
         const days = Math.floor((amount / cfg.monthly_fees) * 30);
         setMembershipExtensionDays(days);
       } else {
@@ -349,7 +350,7 @@ function Payments() {
   const handleLocalAmountChange = (val) => {
     setPaymentDataLocal(prev => ({ ...prev, amount: val }));
     const amount = parseFloat(val || 0);
-    if (amount > 0 && feeConfig && feeConfig.monthly_fees) {
+  if (amount > 0 && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
       const days = Math.floor((amount / feeConfig.monthly_fees) * 30);
       setMembershipExtensionDays(days);
       // recompute projected membership date
@@ -381,6 +382,12 @@ function Payments() {
     // basic validation
     if (!paymentDataLocal.amount || isNaN(paymentDataLocal.amount) || parseFloat(paymentDataLocal.amount) <= 0) {
       setError('Valid payment amount is required');
+      return;
+    }
+
+    // Check for free membership students (monthly fee = 0) - only for monthly_fee payments, allow refunds
+  if (paymentDataLocal.type === 'monthly_fee' && feeConfig && parseFloat(feeConfig.monthly_fees) <= 0) {
+      setError('Cannot add monthly fee payment for free membership students (monthly fee = ₹0)');
       return;
     }
 
@@ -426,7 +433,7 @@ function Payments() {
   useEffect(() => {
     if (!feeConfig) return;
     const amount = parseFloat(paymentDataLocal.amount || 0);
-    if (!(amount > 0 && feeConfig && feeConfig.monthly_fees)) {
+  if (!(amount > 0 && feeConfig && parseFloat(feeConfig.monthly_fees) > 0)) {
       setMembershipExtensionDays(0);
       setMembershipNewTill(null);
       return;
@@ -821,176 +828,20 @@ function Payments() {
         )}
       </Paper>
       {/* Add Payment Dialog (select student + amount) */}
-  <Dialog open={addPaymentOpen} onClose={() => setAddPaymentOpen(false)} maxWidth="sm" fullWidth scroll="paper" fullScreen={isMobile}>
-        <DialogTitle>Add/Refund Payment</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {/* Searchable student selector */}
-            <FormControl fullWidth>
-              {/* Using Autocomplete for searchable dropdown by student name/ID */}
-              {/* eslint-disable-next-line react/jsx-no-undef */}
-              <Autocomplete
-                options={students.filter(s => s && s.id)}
-                getOptionLabel={(option) => {
-                  if (!option) return '';
-                  const seatPart = option.seat_number ? ` • 🪑${option.seat_number}` : '';
-                  return `${option.name || ''}${seatPart} (${option.id || ''})`;
-                }}
-                value={students.find(s => s.id === selectedStudentId) || null}
-                onChange={(e, value) => handleStudentSelect(value ? value.id : '')}
-                renderOption={(props, option) => (
-                  <li {...props} key={option.id}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{option.name}</Typography>
-                        {option.seat_number && (
-                          <Typography variant="caption" color="text.secondary">🪑{option.seat_number}</Typography>
-                        )}
-                        <Typography variant="caption" color="text.secondary">#{option.id}</Typography>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {option.contact_number || 'No contact'} · {option.father_name || 'No father name'}
-                      </Typography>
-                    </Box>
-                  </li>
-                )}
-                renderInput={(params) => (
-                  <TextField {...params} label="Select Student" placeholder="Search by name, ID or seat" />
-                )}
-                isOptionEqualToValue={(option, value) => option.id === value.id}
-                clearOnEscape
-                fullWidth
-              />
-            </FormControl>
-            <TextField
-              fullWidth
-              label="Amount"
-              type="number"
-              value={paymentDataLocal.amount}
-              onChange={(e) => handleLocalAmountChange(e.target.value)}
-            />
-            <FormControl fullWidth>
-              <InputLabel>Payment Method</InputLabel>
-              <Select
-                value={paymentDataLocal.method}
-                onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, method: e.target.value }))}
-                label="Payment Method"
-              >
-                <MenuItem value="cash">Cash</MenuItem>
-                <MenuItem value="online">Online</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel>Payment Type</InputLabel>
-              <Select
-                value={paymentDataLocal.type}
-                onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, type: e.target.value }))}
-                label="Payment Type"
-              >
-                <MenuItem value="monthly_fee">Monthly Fee</MenuItem>
-                <MenuItem value="refund">Refund</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              fullWidth
-              label="Payment Date"
-              type="date"
-              value={paymentDataLocal.date}
-              onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, date: e.target.value }))}
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              fullWidth
-              label="Notes"
-              value={paymentDataLocal.notes}
-              onChange={(e) => setPaymentDataLocal(prev => ({ ...prev, notes: e.target.value }))}
-              multiline
-              rows={3}
-            />
-          </Stack>
-        </DialogContent>
-
-        {/* Membership Extension / Refund Information */}
-        {feeConfig && membershipExtensionDays > 0 && paymentDataLocal.type === 'monthly_fee' && (
-          <Box sx={{ 
-            p: 2, 
-            bgcolor: 'info.light', 
-            borderRadius: 1,
-            border: '1px solid',
-            borderColor: 'info.main',
-            mx: 3,
-            mb: 1
-          }}>
-            <Typography variant="body2" color="info.contrastText" sx={{ fontWeight: 'medium' }}>
-              📅 Membership Extension Available
-            </Typography>
-            <Typography variant="body2" color="info.contrastText">
-              Membership: {feeConfig.membership_type || (students.find(s => s.id === selectedStudentId)?.membership_type)} • Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
-            </Typography>
-            <Typography variant="body2" color="info.contrastText">
-              Extension Days: {membershipExtensionDays} days
-            </Typography>
-            <Typography variant="body2" color="info.contrastText">
-              Current membership till: {membershipCurrentTill ? formatShortDate(membershipCurrentTill) : 'N/A'}
-            </Typography>
-            <Typography variant="body2" color="info.contrastText">
-              New membership till: {membershipNewTill ? formatShortDate(membershipNewTill) : 'N/A'}
-            </Typography>
-          </Box>
-        )}
-
-        {feeConfig && membershipExtensionDays > 0 && paymentDataLocal.type === 'refund' && (
-          <Box sx={{ 
-            p: 2, 
-            bgcolor: 'error.light', 
-            borderRadius: 1,
-            border: '1px solid',
-            borderColor: 'error.main',
-            mx: 3,
-            mb: 1
-          }}>
-            <Typography variant="body2" color="error.contrastText" sx={{ fontWeight: 'medium' }}>
-              🔄 Membership Refund Information
-            </Typography>
-            <Typography variant="body2" color="error.contrastText">
-              Membership: {feeConfig.membership_type || (students.find(s => s.id === selectedStudentId)?.membership_type) } • Monthly Fee: ₹{feeConfig.monthly_fees} ({students.find(s => s.id === selectedStudentId)?.sex || 'N/A'})
-            </Typography>
-            <Typography variant="body2" color="error.contrastText">
-              This refund will reduce membership by {membershipExtensionDays} days
-            </Typography>
-            <Typography variant="body2" color="error.contrastText">
-              Current membership till: {membershipCurrentTill ? formatShortDate(membershipCurrentTill) : 'N/A'}
-            </Typography>
-            <Typography variant="body2" color="error.contrastText">
-              New membership till: {membershipNewTill ? formatShortDate(membershipNewTill) : 'N/A'}
-            </Typography>
-          </Box>
-        )}
-
-        <DialogActions>
-          <Button onClick={() => setAddPaymentOpen(false)}>Cancel</Button>
-          {user && user.role === 'admin' && (
-            <Button
-              variant="contained"
-              onClick={() => processLocalPayment(false)}
-              disabled={!selectedStudentId || !paymentDataLocal.amount || paymentLoadingLocal}
-            >
-              {paymentDataLocal.type === 'refund' ? 'Refund Payment' : 'Add Payment'}
-            </Button>
-          )}
-          {feeConfig && membershipExtensionDays > 0 && (
-            <Button
-              variant="contained"
-              onClick={() => processLocalPayment(true)}
-              disabled={!selectedStudentId || !paymentDataLocal.amount || paymentLoadingLocal}
-            >
-              {paymentDataLocal.type === 'refund'
-                ? `Refund Payment & Reduce ${membershipExtensionDays} Days`
-                : `Add Payment & Extend ${membershipExtensionDays} Days`}
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      <AddPaymentDialog
+        open={addPaymentOpen}
+        onClose={() => setAddPaymentOpen(false)}
+        onSubmit={processLocalPayment}
+        students={students}
+        onStudentSelect={handleStudentSelect}
+        selectedStudentId={selectedStudentId}
+        paymentData={paymentDataLocal}
+        setPaymentData={setPaymentDataLocal}
+        feeConfig={feeConfig}
+        membershipExtensionDays={membershipExtensionDays}
+        loading={paymentLoadingLocal}
+        isMobile={isMobile}
+      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>

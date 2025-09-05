@@ -217,6 +217,33 @@ router.post('/', async (req, res) => {
       const student = studentCheck.rows[0];
       rl.info('Student verified', { studentId: student.id, name: student.name, gender: student.sex });
 
+      // Fetch fee configuration early to enforce free membership (monthly fee = 0) restriction
+      let monthlyFees = null;
+      try {
+        if (student.membership_type) {
+          const feeCfgQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+          const feeCfgRes = await client.query(feeCfgQuery, [student.membership_type]);
+          if (feeCfgRes.rows.length > 0) {
+            const cfg = feeCfgRes.rows[0];
+            monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
+            if (isNaN(monthlyFees)) monthlyFees = null;
+          }
+        }
+      } catch (feeErr) {
+        rl.warn('Failed to fetch fee configuration while validating payment', { error: feeErr.message });
+      }
+
+      // If monthly fee is explicitly zero, block ALL payments (both monthly_fee and refund) per business rule
+  if (monthlyFees !== null && !isNaN(monthlyFees) && monthlyFees <= 0) {
+        rl.validationError('payment', ['Payments are disabled for free membership students (monthly fee = 0)']);
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'Payments are disabled for free membership students (monthly fee = 0)',
+          requestId: rl.requestId,
+          timestamp: new Date().toISOString()
+        });
+      }
+
       let membershipExtensionDays = 0;
       // Handle membership extension for monthly fee payments
       if (extend_membership && payment_type === 'monthly_fee') {
@@ -229,7 +256,11 @@ router.post('/', async (req, res) => {
           const cfg = feeConfigResult.rows[0];
           const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
           const paymentAmount = Math.abs(parseFloat(amount));
-          membershipExtensionDays = Math.floor((paymentAmount / monthlyFees) * 30);
+          if (monthlyFees > 0) {
+            membershipExtensionDays = Math.floor((paymentAmount / monthlyFees) * 30);
+          } else {
+            membershipExtensionDays = 0; // Guard against division by zero
+          }
           rl.info('Membership extension calculated', { monthlyFees, paymentAmount, membershipExtensionDays });
           if (membershipExtensionDays > 0) {
             const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
@@ -254,7 +285,7 @@ router.post('/', async (req, res) => {
           const cfg = feeConfigResult.rows[0];
           const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
           const paymentAmount = Math.abs(parseFloat(amount));
-          const membershipReductionDays = Math.floor((paymentAmount / monthlyFees) * 30);
+          const membershipReductionDays = monthlyFees > 0 ? Math.floor((paymentAmount / monthlyFees) * 30) : 0; // Guard division by zero
           rl.info('Membership reduction calculated', { monthlyFees, paymentAmount, membershipReductionDays });
           if (membershipReductionDays > 0) {
             const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();

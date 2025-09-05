@@ -44,6 +44,7 @@ import {
 } from '@mui/material';
 import { Autocomplete } from '@mui/material';
 import Footer from '../components/Footer';
+import AddPaymentDialog from '../components/AddPaymentDialog';
 import logger from '../utils/clientLogger';
 import {
   isoToISTDateInput,
@@ -726,7 +727,7 @@ function Students() {
 
   // Effect to calculate membership extension days when payment amount changes
   useEffect(() => {
-    if (paymentData.amount && feeConfig && feeConfig.monthly_fees) {
+  if (paymentData.amount && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
       const amount = parseFloat(paymentData.amount);
       const monthlyFee = feeConfig.monthly_fees;
       
@@ -1744,7 +1745,7 @@ function Students() {
           if (resp.ok) {
             const cfg = await resp.json();
             setDeactivateFeeConfig(cfg);
-            if (cfg && cfg.monthly_fees) {
+            if (cfg && parseFloat(cfg.monthly_fees) > 0) {
               const dailyRate = cfg.monthly_fees / 30;
               const refundAmount = Math.round(dailyRate * extraDays);
               setDeactivateRefundAmount(refundAmount);
@@ -2161,6 +2162,11 @@ function Students() {
     }
     if (!paymentData.date) {
       validationErrors.push('Payment date is required');
+    }
+
+    // Check for free membership students (monthly fee = 0) - only for monthly_fee payments, allow refunds
+  if (paymentData.type === 'monthly_fee' && feeConfig && parseFloat(feeConfig.monthly_fees) <= 0) {
+      validationErrors.push('Cannot add monthly fee payment for free membership students (monthly fee = ₹0)');
     }
     
     if (validationErrors.length > 0) {
@@ -4339,133 +4345,21 @@ function Students() {
       </Dialog>
 
       {/* Add Payment Dialog */}
-      <Dialog open={addPaymentOpen} onClose={() => {
-        setAddPaymentOpen(false);
-        handleActionClose();
-      }} maxWidth="sm" fullWidth scroll="paper" fullScreen={isMobile}>
-        <DialogTitle>Add/Refund Payment - {selectedItemForAction?.name}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              fullWidth
-              label="Amount"
-              type="number"
-              value={paymentData.amount}
-              onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })}
-            />
-            <FormControl fullWidth>
-              <InputLabel>Payment Method</InputLabel>
-              <Select
-                value={paymentData.method}
-                onChange={(e) => setPaymentData({ ...paymentData, method: e.target.value })}
-                label="Payment Method"
-              >
-                <MenuItem value="cash">Cash</MenuItem>
-                <MenuItem value="online">Online</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel>Payment Type</InputLabel>
-              <Select
-                value={paymentData.type}
-                onChange={(e) => setPaymentData({ ...paymentData, type: e.target.value })}
-                label="Payment Type"
-              >
-                <MenuItem value="monthly_fee">Monthly Fee</MenuItem>
-                <MenuItem value="refund">Refund</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              fullWidth
-              label="Date"
-              type="date"
-              value={paymentData.date}
-              onChange={(e) => setPaymentData({ ...paymentData, date: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              fullWidth
-              label="Notes (Optional)"
-              multiline
-              rows={2}
-              value={paymentData.notes}
-              onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })}
-            />
-            
-            {/* Membership Extension Information (only for monthly_fee) */}
-            {feeConfig && membershipExtensionDays > 0 && paymentData.type === 'monthly_fee' && (
-              <Box sx={{ 
-                p: 2, 
-                bgcolor: 'info.light', 
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'info.main'
-              }}>
-                <Typography variant="body2" color="info.contrastText" sx={{ fontWeight: 'medium' }}>
-                  📅 Membership Extension Available
-                </Typography>
-                <Typography variant="body2" color="info.contrastText">
-                  Membership: {feeConfig.membership_type || selectedItemForAction?.membership_type } • Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
-                </Typography>
-                <Typography variant="body2" color="info.contrastText">
-                  Extension Days: {membershipExtensionDays} days
-                </Typography>
-              </Box>
-            )}
-
-            {/* Membership Refund Information (only for refund) */}
-            {feeConfig && membershipExtensionDays > 0 && paymentData.type === 'refund' && (
-              <Box sx={{ 
-                p: 2, 
-                bgcolor: 'error.light', 
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'error.main'
-              }}>
-                <Typography variant="body2" color="error.contrastText" sx={{ fontWeight: 'medium' }}>
-                  ⚠️ Membership Refund Information
-                </Typography>
-                <Typography variant="body2" color="error.contrastText">
-                  Membership: {feeConfig.membership_type || selectedItemForAction?.membership_type } • Monthly Fee: ₹{feeConfig.monthly_fees} ({selectedItemForAction?.sex})
-                </Typography>
-                <Typography variant="body2" color="error.contrastText">
-                  Reduction Days: {membershipExtensionDays} days
-                </Typography>
-                <Typography variant="body2" color="error.contrastText" sx={{ mt: 1 }}>
-                  This refund will reduce the student's membership by {membershipExtensionDays} days if applied.
-                </Typography>
-              </Box>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => {
-            setAddPaymentOpen(false);
-            handleActionClose();
-          }}>Cancel</Button>
-          {user && user.role === 'admin' && (<Button 
-            variant="contained" 
-            onClick={handleConfirmAddPayment}
-            disabled={!paymentData.amount || !paymentData.method || paymentLoading}
-          >
-            {paymentData.type === 'refund' ? 'Refund Payment' : (paymentLoading ? 'Adding...' : 'Add Payment')}
-          </Button>)}
-
-          {/* Extend / Reduce button - label depends on payment type */}
-          {feeConfig && membershipExtensionDays > 0 && (
-            <Button 
-              variant="contained" 
-              onClick={handleConfirmAddPaymentWithMembership}
-              disabled={!paymentData.amount || !paymentData.method || paymentLoading}
-              startIcon={<CalendarTodayIcon />}
-            >
-              {paymentData.type === 'refund'
-                ? `Refund Payment & Reduce ${membershipExtensionDays} Days`
-                : `Add Payment & Extend ${membershipExtensionDays} Days`}
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      <AddPaymentDialog
+        open={addPaymentOpen}
+        onClose={() => {
+          setAddPaymentOpen(false);
+          handleActionClose();
+        }}
+        onSubmit={processPayment}
+        selectedStudent={selectedItemForAction}
+        paymentData={paymentData}
+        setPaymentData={setPaymentData}
+        feeConfig={feeConfig}
+        membershipExtensionDays={membershipExtensionDays}
+        loading={paymentLoading}
+        isMobile={isMobile}
+      />
 
       {/* Edit Student Dialog */}
       <Dialog open={editStudentOpen} onClose={() => {
