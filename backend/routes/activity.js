@@ -133,15 +133,14 @@ router.get('/previous', authenticateToken, async (req, res) => {
         return res.status(400).json({ error: 'unsupported subjectType' });
     }
 
-  // Compare timestamp column (TIMESTAMP without time zone) with the provided
-  // 'before' value which is expected to be an ISO8601/timestamptz from the client.
-  // The DB stores TIMESTAMP WITHOUT TIME ZONE values in local wall-clock time (IST).
-  // To compare correctly, convert the incoming timestamptz to a TIMESTAMP (without time zone)
-  // in the same wall-clock timezone used by stored values. We do this in SQL using:
-  //   $2::timestamptz AT TIME ZONE 'Asia/Kolkata'
-  // which yields a TIMESTAMP (without time zone) representing the local IST time for the
-  // provided instant. This makes the comparison semantically correct.
-  const q = `SELECT * FROM ${table} WHERE ${idCol} = $1 AND ${timestampCol} < ($2::timestamptz AT TIME ZONE 'Asia/Kolkata') ORDER BY ${timestampCol} DESC LIMIT 1`;
+  let q;
+  if (table === 'students_history') {
+    // Treat naive value as UTC wall-clock, so convert incoming timestamptz to UTC local timestamp
+    q = `SELECT * FROM ${table} WHERE ${idCol} = $1 AND ${timestampCol} < ($2::timestamptz AT TIME ZONE 'UTC') ORDER BY ${timestampCol} DESC LIMIT 1`;
+  } else {
+    // Default: naive column stored as IST wall-clock
+    q = `SELECT * FROM ${table} WHERE ${idCol} = $1 AND ${timestampCol} < ($2::timestamptz AT TIME ZONE 'Asia/Kolkata') ORDER BY ${timestampCol} DESC LIMIT 1`;
+  }
     const params = [subjectId, before];
     // interpolate params for logging (safe-ish for debugging)
     try {

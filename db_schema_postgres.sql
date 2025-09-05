@@ -334,7 +334,7 @@ ON CONFLICT (username) DO NOTHING;
 
 -- Insert default fee configuration for membership types (example values)
 INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees) VALUES
-('full_time', 600.00, 550.00),
+('full_time', 700.00, 600.00),
 ('half_time', 400.00, 350.00),
 ('two_hours', 200.00, 200.00),
 ('special', 650.00, 550.00),
