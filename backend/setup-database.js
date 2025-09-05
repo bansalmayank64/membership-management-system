@@ -1,16 +1,9 @@
-const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const logger = require('./utils/logger');
-
-// Database connection
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_nYbqRxpE4B3j@ep-purple-smoke-a1d6n7w6-pooler.ap-southeast-1.aws.neon.tech/gogaji?sslmode=require',
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+// Use the central pool (respects DB_MODE / DEV_DATABASE_URL logic)
+const { pool } = require('./config/database');
 
 async function setupDatabase() {
   try {
@@ -22,7 +15,7 @@ async function setupDatabase() {
 
     // Connect to database
     const client = await pool.connect();
-    logger.info('✅ Connected to Neon PostgreSQL database');
+  logger.info('✅ Connected to PostgreSQL database (setup)');
 
     // Execute schema
     await client.query(schemaSql);
@@ -38,7 +31,8 @@ async function setupDatabase() {
   } catch (error) {
     logger.warn('❌ Error setting up database', { error: error.message });
   } finally {
-    await pool.end();
+  // Do not end the shared pool forcibly; allow process exit if this is a standalone script
+  try { await pool.end(); } catch (_) {}
   }
 }
 

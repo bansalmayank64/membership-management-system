@@ -1,12 +1,8 @@
-const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_nYbqRxpE4B3j@ep-purple-smoke-a1d6n7w6-pooler.ap-southeast-1.aws.neon.tech/gogaji?sslmode=require',
-  ssl: { rejectUnauthorized: false }
-});
+// Reuse central DB pool configuration
+const { pool } = require('./config/database');
 
 async function runMigrations() {
   const migrationPath = path.join(__dirname, '..', 'migrations', '20250901_add_membership_type_to_students.sql');
@@ -26,7 +22,7 @@ async function runMigrations() {
     process.exit(1);
   } finally {
     client.release();
-    await pool.end();
+  try { await pool.end(); } catch (_) {}
   }
 }
 
