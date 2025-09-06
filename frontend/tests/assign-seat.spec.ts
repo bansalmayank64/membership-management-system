@@ -3,8 +3,13 @@ import { setupGlobalMocks, waitForAppReady } from './fixtures/globalMocks';
 
 test.describe('Assign seat flow', () => {
   test('open assign dialog from unassigned chip and assign a seat', async ({ page, login }) => {
+    // Set up authentication first
     await login(page);
+    
+    // Set up API mocks before page navigation
     await setupGlobalMocks(page);
+    
+    // Now navigate to the page
     await page.goto('/');
     await waitForAppReady(page, 'Students');
 

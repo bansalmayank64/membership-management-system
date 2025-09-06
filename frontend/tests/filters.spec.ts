@@ -2,8 +2,13 @@ import { test, expect } from './helpers/auth';
 import { setupGlobalMocks, waitForAppReady } from './fixtures/globalMocks';
 
 test('filters and stats integration', async ({ page, login }) => {
+  // Set up authentication first
   await login(page);
+  
+  // Set up API mocks before page navigation
   await setupGlobalMocks(page);
+  
+  // Now navigate to the page
   await page.goto('/');
   await waitForAppReady(page);
 

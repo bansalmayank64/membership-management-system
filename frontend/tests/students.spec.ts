@@ -3,9 +3,16 @@ import { setupGlobalMocks, waitForAppReady } from './fixtures/globalMocks';
 
 test.describe('Students page interactions', () => {
   test.beforeEach(async ({ page, login }) => {
+    // Set up authentication first
     await login(page);
+    
+    // Set up API mocks before page navigation
     await setupGlobalMocks(page);
+    
+    // Now navigate to the page
     await page.goto('/');
+    
+    // Wait for the app to be ready
     await waitForAppReady(page, 'Students');
   });
 

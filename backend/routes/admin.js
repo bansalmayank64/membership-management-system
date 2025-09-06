@@ -38,7 +38,7 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
-router.get('/full-report', auth, requireAdmin, async (req, res) => {
+router.get('/full-report', auth, async (req, res) => {
   try {
   const requestId = `admin-full-report-${Date.now()}`;
   logger.info('Starting full-report', { requestId, user: req.user?.username });
@@ -142,7 +142,7 @@ registerAdminImports(router, { pool, upload, auth, requireAdmin, XLSX, xlsx, log
 // Import/export/backup/restore/clean routes moved to `admin_imports.js` and registered above
 
 // Get all users
-router.get('/users', auth, requireAdmin, async (req, res) => {
+router.get('/users', auth, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, username, role, permissions, created_at
@@ -223,7 +223,7 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
 
 
 // Get system statistics
-router.get('/stats', auth, requireAdmin, async (req, res) => {
+router.get('/stats', auth, async (req, res) => {
   try {
     const stats = await Promise.all([
       pool.query('SELECT COUNT(*) as total FROM students'),
@@ -355,7 +355,7 @@ router.delete('/seats/:seatNumber', auth, requireAdmin, async (req, res) => {
 });
 
 // Get all seats with student info
-router.get('/seats', auth, requireAdmin, async (req, res) => {
+router.get('/seats', auth, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -390,7 +390,7 @@ router.get('/seats', auth, requireAdmin, async (req, res) => {
 });
 
 // Get fees configuration
-router.get('/fees-config', auth, requireAdmin, async (req, res) => {
+router.get('/fees-config', auth, async (req, res) => {
   try {
     const result = await pool.query(`
   SELECT * FROM student_fees_config 

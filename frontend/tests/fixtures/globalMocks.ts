@@ -3,13 +3,9 @@ import studentsData from './students.json';
 
 // Global mock setup for all API endpoints used by the app
 export async function setupGlobalMocks(page: Page) {
-  // Log all network requests to debug what's being called
-  page.on('request', request => {
-    if (request.url().includes('/api/')) {
-      console.log('API Request:', request.method(), request.url());
-    }
-  });
-
+  // CRITICAL: Set up auth mocks FIRST before any other routes
+  // This ensures authentication happens before the app component mounts
+  
   // Auth endpoints FIRST (most specific routes first)
   await page.route('**/api/auth/verify', async route => {
     console.log('Auth verify endpoint hit successfully');
@@ -27,6 +23,13 @@ export async function setupGlobalMocks(page: Page) {
       contentType: 'application/json', 
       body: JSON.stringify({ success: true, token: 'mock-token', user: { id: 1, name: 'Test User' } }) 
     });
+  });
+
+  // Log all network requests to debug what's being called
+  page.on('request', request => {
+    if (request.url().includes('/api/')) {
+      console.log('API Request:', request.method(), request.url());
+    }
   });
 
   // Students API endpoints
