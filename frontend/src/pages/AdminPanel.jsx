@@ -45,7 +45,8 @@ import {
   Download as DownloadIcon,
   Warning as WarningIcon,
   EventSeat as SeatIcon,
-  AttachMoney as MoneyIcon
+  AttachMoney as MoneyIcon,
+  PowerSettingsNew as PowerSettingsNewIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import Footer from '../components/Footer';
@@ -433,6 +434,78 @@ function AdminPanel() {
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
     } finally {
+      setLoading(false);
+      setConfirmDialog({ open: false, action: '', data: null });
+    }
+  };
+
+  // Logout specific user with progress tracking
+  const [logoutProgress, setLogoutProgress] = useState({ running: false, status: '', userId: null });
+
+  const handleLogoutUser = async (userId, username) => {
+    setLoading(true);
+    setLogoutProgress({ 
+      running: true, 
+      status: `Logging out user "${username}"...`, 
+      userId: userId 
+    });
+    
+    try {
+      // Add a small delay to show the progress indicator
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setLogoutProgress({ 
+        running: true, 
+        status: `Invalidating sessions for "${username}"...`, 
+        userId: userId 
+      });
+      
+      const response = await fetch(`/api/admin/users/${userId}/logout`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setLogoutProgress({ 
+          running: true, 
+          status: `User "${username}" logged out successfully!`, 
+          userId: userId 
+        });
+        
+        // Show success status for a moment before clearing
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        setMessage({ 
+          type: 'success', 
+          text: `✅ User "${username}" has been logged out successfully. All their active sessions have been invalidated and they will need to login again to access the system.` 
+        });
+        
+        // Optionally refresh user list to show any status changes
+        fetchUsers();
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || error.message || 'Logout failed');
+      }
+    } catch (error) {
+      setLogoutProgress({ 
+        running: false, 
+        status: `Failed to logout "${username}"`, 
+        userId: null 
+      });
+      setMessage({ 
+        type: 'error', 
+        text: `❌ Failed to logout user "${username}": ${error.message}` 
+      });
+    } finally {
+      // Clear progress after a delay
+      setTimeout(() => {
+        setLogoutProgress({ running: false, status: '', userId: null });
+      }, 2000);
+      
       setLoading(false);
       setConfirmDialog({ open: false, action: '', data: null });
     }
@@ -1223,19 +1296,41 @@ function AdminPanel() {
                           <EditIcon />
                         </IconButton>
                         {user.username !== 'admin' && (
-                          <IconButton
-                            onClick={() => setConfirmDialog({
-                              open: true,
-                              action: 'deleteUser',
-                              data: user.id,
-                              title: 'Delete User',
-                              content: `Are you sure you want to delete user "${user.username}"? This action cannot be undone.`
-                            })}
-                            color="error"
-                            size="small"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
+                          <>
+                            <IconButton
+                              onClick={() => setConfirmDialog({
+                                open: true,
+                                action: 'logoutUser',
+                                data: user,
+                                title: 'Logout User',
+                                content: `Are you sure you want to logout user "${user.username}"? They will need to login again to access the system.`
+                              })}
+                              color="warning"
+                              size="small"
+                              title="Logout this user"
+                              disabled={logoutProgress.running && logoutProgress.userId === user.id}
+                            >
+                              {logoutProgress.running && logoutProgress.userId === user.id ? (
+                                <CircularProgress size={16} color="warning" />
+                              ) : (
+                                <PowerSettingsNewIcon />
+                              )}
+                            </IconButton>
+                            <IconButton
+                              onClick={() => setConfirmDialog({
+                                open: true,
+                                action: 'deleteUser',
+                                data: user.id,
+                                title: 'Delete User',
+                                content: `Are you sure you want to delete user "${user.username}"? This action cannot be undone.`
+                              })}
+                              color="error"
+                              size="small"
+                              disabled={logoutProgress.running && logoutProgress.userId === user.id}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </>
                         )}
                       </TableCell>
                     </TableRow>
@@ -1243,6 +1338,20 @@ function AdminPanel() {
                 </TableBody>
               </Table>
             </TableContainer>
+
+            {/* Logout Progress Indicator */}
+            {logoutProgress.running && (
+              <Box sx={{ mt: 2 }}>
+                <Card sx={{ backgroundColor: 'warning.light', color: 'warning.contrastText' }}>
+                  <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1 }}>
+                    <CircularProgress size={20} color="inherit" />
+                    <Typography variant="body2">
+                      {logoutProgress.status}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Box>
+            )}
           </Box>
         )}
 
@@ -1724,6 +1833,8 @@ function AdminPanel() {
             setConfirmDialog({ open: false, action: '', data: null });
             if (action === 'deleteUser') {
               handleDeleteUser(data);
+            } else if (action === 'logoutUser') {
+              handleLogoutUser(data.id, data.username);
             } else if (action === 'cleanDatabase') {
               handleCleanDatabase();
             } else if (action === 'deleteSeat') {

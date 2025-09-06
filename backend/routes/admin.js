@@ -221,6 +221,240 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
   }
 });
 
+// Logout specific user (invalidate all their tokens)
+router.post('/users/:id/logout', auth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Check if user exists
+    const userCheck = await pool.query('SELECT username FROM users WHERE id = $1', [id]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const username = userCheck.rows[0].username;
+
+    // Add user to blacklist with current timestamp
+    // All tokens issued before this timestamp will be considered invalid
+    const blacklistResult = await pool.query(`
+      INSERT INTO token_blacklist (user_id, username, blacklisted_by, reason)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (user_id) DO UPDATE SET
+        blacklisted_at = CURRENT_TIMESTAMP,
+        blacklisted_by = $3,
+        reason = $4
+      RETURNING blacklisted_at
+    `, [id, username, req.user.userId || req.user.id, 'Admin logout']);
+
+    const blacklistedAt = blacklistResult.rows[0].blacklisted_at;
+
+    // Log the logout action
+    await pool.query(`
+      INSERT INTO activity_logs (
+        actor_user_id, actor_username, action_type, action_description, 
+        subject_type, subject_id, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
+      req.user.userId || req.user.id,
+      req.user.username,
+      'user_logout',
+      `Admin logged out user: ${username}`,
+      'user',
+      id,
+      JSON.stringify({ target_username: username })
+    ]);
+
+    res.json({ 
+      message: `User ${username} has been logged out successfully`,
+      username: username,
+      loggedOutAt: blacklistedAt
+    });
+
+  } catch (error) {
+    logger.error('Error logging out user', { error: error.message, stack: error.stack, userId: id });
+    res.status(500).json({ error: 'Failed to logout user' });
+  }
+});
+
+// Get user session status
+router.get('/users/:id/session-status', auth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Check if user exists
+    const userCheck = await pool.query(`
+      SELECT id, username, status, created_at, updated_at 
+      FROM users WHERE id = $1
+    `, [id]);
+    
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userCheck.rows[0];
+
+    // Check blacklist status
+    let sessionStatus = 'active';
+    let blacklistInfo = null;
+
+    try {
+      const blacklistCheck = await pool.query(`
+        SELECT 
+          tb.blacklisted_at,
+          tb.reason,
+          u.username as blacklisted_by_username
+        FROM token_blacklist tb
+        LEFT JOIN users u ON tb.blacklisted_by = u.id
+        WHERE tb.user_id = $1
+      `, [id]);
+
+      if (blacklistCheck.rows.length > 0) {
+        sessionStatus = 'logged_out';
+        blacklistInfo = blacklistCheck.rows[0];
+      }
+    } catch (blacklistError) {
+      // If token_blacklist table doesn't exist, session is active
+      if (!blacklistError.message.includes('relation "token_blacklist" does not exist')) {
+        throw blacklistError;
+      }
+    }
+
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        status: user.status,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      },
+      session_status: sessionStatus,
+      blacklist_info: blacklistInfo
+    });
+
+  } catch (error) {
+    logger.error('Error getting user session status', { error: error.message, stack: error.stack, userId: id });
+    res.status(500).json({ error: 'Failed to get user session status' });
+  }
+});
+
+// Restore user access (remove from blacklist)
+router.post('/users/:id/restore-access', auth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Check if user exists
+    const userCheck = await pool.query('SELECT username FROM users WHERE id = $1', [id]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const username = userCheck.rows[0].username;
+
+    // Remove user from blacklist
+    const removeResult = await pool.query(`
+      DELETE FROM token_blacklist WHERE user_id = $1 RETURNING *
+    `, [id]);
+
+    if (removeResult.rows.length === 0) {
+      return res.status(400).json({ error: 'User was not logged out or blacklist entry not found' });
+    }
+
+    // Log the restore action
+    await pool.query(`
+      INSERT INTO activity_logs (
+        actor_user_id, actor_username, action_type, action_description, 
+        subject_type, subject_id, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
+      req.user.userId || req.user.id,
+      req.user.username,
+      'user_access_restored',
+      `Admin restored access for user: ${username}`,
+      'user',
+      id,
+      JSON.stringify({ target_username: username })
+    ]);
+
+    res.json({ 
+      message: `Access restored for user ${username}. They can now login with new tokens.`,
+      username: username,
+      restoredAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Error restoring user access', { error: error.message, stack: error.stack, userId: id });
+    res.status(500).json({ error: 'Failed to restore user access' });
+  }
+});
+
+// Get all blacklisted users
+router.get('/blacklisted-users', auth, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        tb.id,
+        tb.user_id,
+        tb.username,
+        tb.blacklisted_at,
+        tb.reason,
+        u1.username as blacklisted_by_username,
+        u2.status as user_status
+      FROM token_blacklist tb
+      LEFT JOIN users u1 ON tb.blacklisted_by = u1.id
+      LEFT JOIN users u2 ON tb.user_id = u2.id
+      ORDER BY tb.blacklisted_at DESC
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    // If table doesn't exist, return empty array
+    if (error.message.includes('relation "token_blacklist" does not exist')) {
+      return res.json([]);
+    }
+    logger.error('Error fetching blacklisted users', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch blacklisted users' });
+  }
+});
+
+// Clean up old blacklist entries (optional maintenance endpoint)
+router.delete('/blacklist/cleanup', auth, requireAdmin, async (req, res) => {
+  const { days = 30 } = req.query; // Default cleanup entries older than 30 days
+
+  try {
+    const result = await pool.query(`
+      DELETE FROM token_blacklist 
+      WHERE blacklisted_at < NOW() - INTERVAL '${parseInt(days)} days'
+      RETURNING *
+    `);
+
+    // Log the cleanup action
+    await pool.query(`
+      INSERT INTO activity_logs (
+        actor_user_id, actor_username, action_type, action_description, metadata
+      ) VALUES ($1, $2, $3, $4, $5)
+    `, [
+      req.user.userId || req.user.id,
+      req.user.username,
+      'blacklist_cleanup',
+      `Cleaned up blacklist entries older than ${days} days`,
+      JSON.stringify({ days_threshold: parseInt(days), entries_removed: result.rowCount })
+    ]);
+
+    res.json({
+      message: `Cleaned up ${result.rowCount} blacklist entries older than ${days} days`,
+      entriesRemoved: result.rowCount,
+      daysThreshold: parseInt(days)
+    });
+
+  } catch (error) {
+    if (error.message.includes('relation "token_blacklist" does not exist')) {
+      return res.json({ message: 'No blacklist table found - nothing to clean up', entriesRemoved: 0 });
+    }
+    logger.error('Error cleaning up blacklist', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to cleanup blacklist entries' });
+  }
+});
+
 
 // Get system statistics
 router.get('/stats', auth, async (req, res) => {
@@ -232,7 +466,13 @@ router.get('/stats', auth, async (req, res) => {
       pool.query('SELECT COUNT(*) as total FROM expenses'),
       pool.query("SELECT COUNT(*) as total FROM users WHERE status = 'active'"),
       pool.query('SELECT SUM(amount) as total FROM payments'),
-      pool.query('SELECT SUM(amount) as total FROM expenses')
+      pool.query('SELECT SUM(amount) as total FROM expenses'),
+      // Add expired students count - students whose membership_till date has passed
+      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_till < CURRENT_DATE"),
+      // Add expiring soon students count - students whose membership expires in next 7 days
+      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_till >= CURRENT_DATE AND membership_till <= CURRENT_DATE + INTERVAL '7 days'"),
+      // Add unassigned students count - students without seat assignment
+      pool.query("SELECT COUNT(*) as total FROM students WHERE seat_number IS NULL")
     ]);
 
     res.json({
@@ -242,7 +482,10 @@ router.get('/stats', auth, async (req, res) => {
       expenses: parseInt(stats[3].rows[0].total),
       users: parseInt(stats[4].rows[0].total),
       totalRevenue: parseFloat(stats[5].rows[0].total || 0),
-      totalExpenses: parseFloat(stats[6].rows[0].total || 0)
+      totalExpenses: parseFloat(stats[6].rows[0].total || 0),
+      expiredStudents: parseInt(stats[7].rows[0].total),
+      expiringSoon: parseInt(stats[8].rows[0].total),
+      unassignedStudents: parseInt(stats[9].rows[0].total)
     });
   } catch (error) {
     logger.error('Error fetching stats', { error: error.message, stack: error.stack });

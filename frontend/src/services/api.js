@@ -24,6 +24,21 @@ async function handleResponse(response) {
   if (response.status === 401 || response.status === 403) {
     const errorData = await response.json().catch(() => ({}));
     
+    // Check for blacklisted/invalidated tokens first (more specific)
+    if (errorData.error?.includes('invalidated') || 
+        errorData.error?.includes('blacklisted') ||
+        errorData.error?.includes('Token has been invalidated')) {
+      
+      console.warn('🔐 Token has been invalidated by admin, triggering immediate logout...');
+      
+      // Trigger logout through the callback if set
+      if (onTokenExpired) {
+        onTokenExpired('TOKEN_INVALIDATED');
+      }
+      
+      throw new Error('TOKEN_INVALIDATED');
+    }
+    
     // Check if it's a token expiration error
     if (errorData.error?.includes('expired') || 
         errorData.error?.includes('Invalid or expired token') ||
@@ -34,7 +49,7 @@ async function handleResponse(response) {
       
       // Trigger logout through the callback if set
       if (onTokenExpired) {
-        onTokenExpired();
+        onTokenExpired('TOKEN_EXPIRED');
       }
       
       throw new Error('TOKEN_EXPIRED');

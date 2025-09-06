@@ -15,20 +15,140 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('authToken'));
   const [loading, setLoading] = useState(true);
+  const [tokenCheckInterval, setTokenCheckInterval] = useState(null);
 
   useEffect(() => {
     // Set up the token expiration handler
-    setTokenExpirationHandler(() => {
-      console.warn('🔐 Token expired, logging out user...');
-      logout(true); // Show message when token expires during API calls
+    setTokenExpirationHandler((errorType) => {
+      if (errorType === 'TOKEN_INVALIDATED') {
+        console.warn('🔐 Token invalidated by admin, logging out user...');
+        logout(true, 'Your session has been terminated by an administrator. Please login again.');
+      } else {
+        console.warn('🔐 Token expired, logging out user...');
+        logout(true, 'Your session has expired. Please login again.');
+      }
     });
 
     if (token) {
       verifyToken();
+      // Start periodic token validation when user is logged in
+      startTokenValidation();
     } else {
       setLoading(false);
+      // Stop token validation when no token
+      stopTokenValidation();
     }
+
+    // Cleanup interval on unmount
+    return () => stopTokenValidation();
   }, [token]);
+
+  // Periodic token validation to catch blacklisted tokens quickly
+  const startTokenValidation = () => {
+    // Clear any existing interval
+    stopTokenValidation();
+    
+    // Check token status every 5 seconds when user is active
+    const interval = setInterval(async () => {
+      if (token && user) {
+        try {
+          const response = await fetch(`/api/auth/verify`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            
+            // Check for blacklisted token or any auth error
+            if (response.status === 401 || 
+                errorData.error?.includes('invalidated') || 
+                errorData.error?.includes('blacklisted') ||
+                errorData.error?.includes('Token has been invalidated')) {
+              console.warn('🔐 Token has been invalidated by admin, logging out immediately...');
+              logout(true, 'Your session has been terminated by an administrator.');
+              return;
+            }
+            
+            // Other auth errors
+            if (errorData.error?.includes('expired') || 
+                errorData.error?.includes('Invalid or expired token')) {
+              console.warn('🔐 Token expired during background check, logging out...');
+              logout(true, 'Your session has expired.');
+              return;
+            }
+          }
+        } catch (error) {
+          // Network errors during background check - don't logout, just log
+          console.debug('Background token check failed:', error.message);
+        }
+      }
+    }, 5000); // Check every 5 seconds
+    
+    setTokenCheckInterval(interval);
+    
+    // Also add event listeners for user activity to trigger immediate checks
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    let lastActivityCheck = 0;
+    
+    const handleUserActivity = async () => {
+      const now = Date.now();
+      // Throttle activity checks to once per 2 seconds
+      if (now - lastActivityCheck < 2000) return;
+      lastActivityCheck = now;
+      
+      if (token && user) {
+        try {
+          const response = await fetch(`/api/auth/verify`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            
+            if (response.status === 401 || 
+                errorData.error?.includes('invalidated') || 
+                errorData.error?.includes('blacklisted') ||
+                errorData.error?.includes('Token has been invalidated')) {
+              console.warn('🔐 Token invalidated detected during user activity, logging out...');
+              logout(true, 'Your session has been terminated by an administrator.');
+              return;
+            }
+          }
+        } catch (error) {
+          console.debug('Activity-triggered token check failed:', error.message);
+        }
+      }
+    };
+    
+    // Add activity listeners
+    activityEvents.forEach(event => {
+      document.addEventListener(event, handleUserActivity, true);
+    });
+    
+    // Store cleanup function for activity listeners
+    window.authCleanupActivityListeners = () => {
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, handleUserActivity, true);
+      });
+    };
+  };
+
+  const stopTokenValidation = () => {
+    if (tokenCheckInterval) {
+      clearInterval(tokenCheckInterval);
+      setTokenCheckInterval(null);
+    }
+    
+    // Clean up activity listeners
+    if (window.authCleanupActivityListeners) {
+      window.authCleanupActivityListeners();
+      window.authCleanupActivityListeners = null;
+    }
+  };
 
   const verifyToken = async () => {
     try {
@@ -45,15 +165,26 @@ export const AuthProvider = ({ children }) => {
         const errorData = await response.json().catch(() => ({}));
         console.warn('🔐 Token verification failed:', errorData);
         
+        // Check for blacklisted/invalidated token
+        if (errorData.error?.includes('invalidated') || 
+            errorData.error?.includes('blacklisted') ||
+            errorData.error?.includes('Token has been invalidated')) {
+          console.warn('🔐 Token has been invalidated by admin during verification');
+          logout(true, 'Your session has been terminated by an administrator. Please login again.');
+          return;
+        }
+        
         // Check if it's a token expiration error
         if (errorData.error?.includes('expired') || 
             errorData.error?.includes('Invalid or expired token') ||
             errorData.error?.includes('TokenExpiredError') ||
             response.status === 401) {
           console.warn('🔐 Token expired during verification, logging out...');
+          logout(true, 'Your session has expired. Please login again.');
+          return;
         }
         
-        // Token is invalid - logout
+        // Other errors - logout anyway
         logout();
       }
     } catch (error) {
@@ -90,18 +221,27 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = (showMessage = false) => {
+  const logout = (showMessage = false, customMessage = null) => {
+    // Stop token validation immediately
+    stopTokenValidation();
+    
     setToken(null);
     setUser(null);
     localStorage.removeItem('authToken');
     
     if (showMessage) {
-      // You can use a toast notification here if you have one set up
-      console.warn('🔐 Session expired. Please login again.');
+      const message = customMessage || 'Your session has expired. Please login again.';
+      console.warn('🔐 ' + message);
       
-      // Optional: Show an alert (can be replaced with better notification)
-      if (window.confirm('Your session has expired. Click OK to continue to login.')) {
-        // User acknowledged the message
+      // Show a more user-friendly notification
+      if (customMessage?.includes('administrator')) {
+        // Admin logout - more prominent notification
+        alert('⚠️ ' + message);
+      } else {
+        // Regular expiration - gentler notification
+        if (window.confirm('🔐 ' + message + ' Click OK to continue to login.')) {
+          // User acknowledged the message
+        }
       }
     }
   };

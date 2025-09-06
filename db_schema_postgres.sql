@@ -40,6 +40,7 @@ DROP TABLE IF EXISTS seats CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS student_fees_config CASCADE;
 DROP TABLE IF EXISTS activity_logs CASCADE;
+DROP TABLE IF EXISTS token_blacklist CASCADE;
 
 -- Users table (must be first for foreign key references)
 CREATE TABLE users (
@@ -360,3 +361,16 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 
 CREATE INDEX IF NOT EXISTS idx_activity_logs_actor ON activity_logs(actor_user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);
+
+-- Token blacklist table (for user logout functionality)
+CREATE TABLE IF NOT EXISTS token_blacklist (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) UNIQUE,
+    username VARCHAR(50) NOT NULL,
+    blacklisted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    blacklisted_by INTEGER REFERENCES users(id),
+    reason VARCHAR(255) DEFAULT 'Admin logout'
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_user_id ON token_blacklist(user_id);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_blacklisted_at ON token_blacklist(blacklisted_at);

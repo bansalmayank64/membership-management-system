@@ -851,6 +851,24 @@ function Students() {
     const expiringSeats = expiringSeatsCount;
     const expiredSeats = expiredSeatsCount;
     
+    // Calculate expired students (based on membership_till date regardless of seat assignment)
+    // Use the same timezone-aware logic as used for expired/expiring seats
+    const todayUtcMs = getTodayUtcMidnightInTZ();
+    const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
+    
+    const expiredStudents = activeStudents.filter(student => {
+      if (!student.membership_till) return false; // No membership end date means active
+      const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
+      return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : false;
+    }).length;
+    
+    // Calculate expiring students (expiring in next 7 days)
+    const expiringStudents = activeStudents.filter(student => {
+      if (!student.membership_till) return false;
+      const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
+      return membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
+    }).length;
+    
     const unassignedStudents = activeStudents.filter(s => !s.seat_number).length;
     const totalSeats = seatData.length;
     
@@ -872,6 +890,8 @@ function Students() {
       availableSeats,
   expiringSeats,
       expiredSeats,
+      expiredStudents,
+      expiringStudents,
       unassignedStudents,
       totalSeats,
       maleSeats,
@@ -937,6 +957,16 @@ function Students() {
       case 'expired':
         setCurrentTab(0); // Seats view
         setSeatsFilters(prev => ({ ...prev, status: 'expired' }));
+        break;
+      case 'expiredStudents':
+        // Switch to Students view and filter by expired students
+        setCurrentTab(1); // Students view
+        setStudentsFilters(prev => ({ ...prev, status: 'expired' }));
+        break;
+      case 'expiringStudents':
+        // Switch to Students view and filter by expiring students
+        setCurrentTab(1); // Students view
+        setStudentsFilters(prev => ({ ...prev, status: 'expiring' }));
         break;
       case 'assigned':
         // Apply 'assigned' filter in Seats view only
@@ -1196,11 +1226,24 @@ function Students() {
           if (currentTab === 0) {
             return item.expired;
           }
-          // For students view, check if membership is expired
-          if (!item.membership_till) return true; // No membership end date means expired
-          const expiryDate = new Date(item.membership_till);
-          const today = new Date();
-          return expiryDate < today;
+          // For students view, check if membership is expired using timezone-aware logic
+          if (!item.membership_till) return false; // No membership end date means active, not expired
+          const membershipUtcMs = getUtcMidnightForDateInTZ(item.membership_till);
+          const todayUtcMs = getTodayUtcMidnightInTZ();
+          return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : false;
+        });
+      } else if (statusFilterLocal === 'expiring') {
+        // Students view: filter students whose membership expires in next 7 days
+        data = data.filter(item => {
+          if (currentTab === 0) {
+            return item.expiring && !item.expired;
+          }
+          // For students view, check if membership is expiring soon using timezone-aware logic
+          if (!item.membership_till) return false;
+          const membershipUtcMs = getUtcMidnightForDateInTZ(item.membership_till);
+          const todayUtcMs = getTodayUtcMidnightInTZ();
+          const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
+          return membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
         });
       }
     }
@@ -2681,6 +2724,52 @@ function Students() {
               </CardContent>
             </Card>
 
+            {/* Expired Students */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'expiredStudents' ? 'error.light' : 'background.paper',
+                '&:hover': { bgcolor: 'error.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('expiredStudents')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <PersonIcon sx={{ color: 'error.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="error.main">
+                    {stats.expiredStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expired Students</Typography>
+              </CardContent>
+            </Card>
+
+            {/* Expiring Students */}
+            <Card
+              sx={{
+                minWidth: 100,
+                cursor: 'pointer',
+                bgcolor: activeStatFilter === 'expiringStudents' ? 'warning.light' : 'background.paper',
+                '&:hover': { bgcolor: 'warning.light' },
+                borderRadius: 2,
+                boxShadow: 1
+              }}
+              onClick={() => handleStatClick('expiringStudents')}
+            >
+              <CardContent sx={{ p: 1.5, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                  <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 16, mr: 0.5 }} />
+                  <Typography variant="h6" fontWeight="bold" color="warning.main">
+                    {stats.expiringStudents}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring Students</Typography>
+              </CardContent>
+            </Card>
+
             {/* Assigned Seats */}
             <Card
               sx={{
@@ -2837,6 +2926,26 @@ function Students() {
                 <Typography variant="h6" fontWeight="bold" color="error.main">{stats.expiredSeats}</Typography>
               </Box>
               <Typography variant="caption">Expired Seats</Typography>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiredStudents' ? 'error.light' : 'background.paper' }} onClick={() => handleStatClick('expiredStudents')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <PersonIcon sx={{ color: 'error.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="error.main">{stats.expiredStudents}</Typography>
+              </Box>
+              <Typography variant="caption">Expired Students</Typography>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiringStudents' ? 'warning.light' : 'background.paper' }} onClick={() => handleStatClick('expiringStudents')}>
+            <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 18, mr: 0.5 }} />
+                <Typography variant="h6" fontWeight="bold" color="warning.main">{stats.expiringStudents}</Typography>
+              </Box>
+              <Typography variant="caption">Expiring Students</Typography>
             </CardContent>
           </Card>
 
@@ -3004,6 +3113,19 @@ function Students() {
               )
             }}
           />
+          <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={studentsFilters.status}
+              onChange={(e) => { setStudentsFilters(prev => ({ ...prev, status: e.target.value })); }}
+              label="Status"
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="unassigned">Unassigned</MenuItem>
+              <MenuItem value="expired">Expired</MenuItem>
+              <MenuItem value="expiring">Expiring</MenuItem>
+            </Select>
+          </FormControl>
           <FormControl size="small" sx={{ minWidth: 120, flex: '0 0 auto' }}>
             <InputLabel>Gender</InputLabel>
             <Select
