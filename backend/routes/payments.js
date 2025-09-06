@@ -160,11 +160,19 @@ router.post('/', async (req, res) => {
         validationErrors.push('Amount cannot be zero');
       } else if (Math.abs(numAmount) > 99999999.99) {
         validationErrors.push('Amount exceeds maximum allowed value (99,999,999.99)');
+      } else if (Math.abs(numAmount) < 0.01) {
+        validationErrors.push('Amount must be at least 0.01');
       }
       // Check decimal places (NUMERIC(10,2) allows 2 decimal places)
       const decimalParts = amount.toString().split('.');
       if (decimalParts[1] && decimalParts[1].length > 2) {
         validationErrors.push('Amount can have maximum 2 decimal places');
+      }
+      // Additional business rules for refunds
+      if (payment_type === 'refund' && numAmount > 0) {
+        // Allow positive refund amounts, will be converted to negative automatically
+      } else if (payment_type === 'monthly_fee' && numAmount < 0) {
+        validationErrors.push('Monthly fee payments cannot have negative amounts');
       }
     }
 
@@ -209,10 +217,17 @@ router.post('/', async (req, res) => {
 
       const normalizedPaymentMode = payment_mode.toLowerCase();
       rl.businessLogic('Verifying student exists and getting details');
-  const studentCheckQuery = 'SELECT id, name, sex, membership_till, membership_type FROM students WHERE id = $1';
+      const studentCheckQuery = 'SELECT id, name, sex, membership_till, membership_type FROM students WHERE id = $1';
       const studentCheck = await client.query(studentCheckQuery, [student_id]);
       if (studentCheck.rows.length === 0) {
-        throw new Error(`Student with ID ${student_id} not found`);
+        await client.query('ROLLBACK');
+        rl.validationError('student_id', [`Student with ID ${student_id} not found`]);
+        return res.status(400).json({ 
+          error: `Student with ID ${student_id} not found`, 
+          details: [`Student with ID ${student_id} does not exist in the database`],
+          requestId: rl.requestId, 
+          timestamp: new Date().toISOString() 
+        });
       }
       const student = studentCheck.rows[0];
       rl.info('Student verified', { studentId: student.id, name: student.name, gender: student.sex });
@@ -234,7 +249,7 @@ router.post('/', async (req, res) => {
       }
 
       // If monthly fee is explicitly zero, block ALL payments (both monthly_fee and refund) per business rule
-  if (monthlyFees !== null && !isNaN(monthlyFees) && monthlyFees <= 0) {
+      if (monthlyFees !== null && !isNaN(monthlyFees) && monthlyFees <= 0) {
         rl.validationError('payment', ['Payments are disabled for free membership students (monthly fee = 0)']);
         await client.query('ROLLBACK');
         return res.status(400).json({
@@ -242,6 +257,31 @@ router.post('/', async (req, res) => {
           requestId: rl.requestId,
           timestamp: new Date().toISOString()
         });
+      }
+
+      // Enhanced refund validation - check if refund amount exceeds total payments
+      if (payment_type === 'refund') {
+        rl.businessLogic('Validating refund amount against total payments for student');
+        const totalPaymentsQuery = `
+          SELECT COALESCE(SUM(amount), 0) as total_paid 
+          FROM payments 
+          WHERE student_id = $1 AND payment_type = 'monthly_fee' AND amount > 0
+        `;
+        const totalPaymentsResult = await client.query(totalPaymentsQuery, [student_id]);
+        const totalPaid = parseFloat(totalPaymentsResult.rows[0].total_paid) || 0;
+        const refundAmount = Math.abs(parseFloat(amount));
+        
+        if (refundAmount > totalPaid) {
+          rl.validationError('refund', [`Refund amount (${refundAmount}) cannot exceed total payments (${totalPaid})`]);
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: 'Refund amount cannot exceed total payments made by student',
+            details: [`Refund amount: ${refundAmount}, Total paid: ${totalPaid}`],
+            requestId: rl.requestId,
+            timestamp: new Date().toISOString()
+          });
+        }
+        rl.info('Refund validation passed', { refundAmount, totalPaid, studentId: student_id });
       }
 
       let membershipExtensionDays = 0;
@@ -309,7 +349,28 @@ router.post('/', async (req, res) => {
         finalAmount = -Math.abs(finalAmount);
       }
 
-      rl.businessLogic('Inserting payment record');
+      // Enhanced duplicate payment detection
+      rl.businessLogic('Checking for duplicate payments');
+      const duplicateCheckQuery = `
+        SELECT id FROM payments 
+        WHERE student_id = $1 
+          AND ABS(amount - $2) < 0.01 
+          AND payment_type = $3 
+          AND payment_date >= CURRENT_DATE - INTERVAL '1 minute'
+      `;
+      const duplicateCheck = await client.query(duplicateCheckQuery, [student_id, finalAmount, payment_type]);
+      if (duplicateCheck.rows.length > 0) {
+        rl.validationError('duplicate', ['Duplicate payment detected within the last minute']);
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Duplicate payment detected',
+          details: ['A similar payment was already recorded within the last minute'],
+          requestId: rl.requestId,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      rl.businessLogic('Inserting payment record with referential integrity checks');
       const paymentQuery = `
         INSERT INTO payments (
           student_id, amount, payment_date, payment_mode, payment_type, description, modified_by,
@@ -323,17 +384,41 @@ router.post('/', async (req, res) => {
         finalAmount,
         normalizedPaymentMode,
         payment_type,
-        remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : ''}`,
+        remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : membershipExtensionDays < 0 ? ` (Reduced membership by ${Math.abs(membershipExtensionDays)} days)` : ''}`,
         req.user?.userId || req.user?.id || 1
       ];
 
       rl.queryStart('Insert payment', paymentQuery, paymentValues);
       const paymentResult = await client.query(paymentQuery, paymentValues);
+      
+      // Verify the payment was inserted correctly
+      if (paymentResult.rows.length === 0) {
+        throw new Error('Payment insertion failed - no rows returned');
+      }
+      
+      const insertedPayment = paymentResult.rows[0];
+      
+      // Additional verification - check if the payment-student relationship is maintained
+      const verificationQuery = `
+        SELECT p.id, p.student_id, p.amount, s.name as student_name 
+        FROM payments p 
+        JOIN students s ON p.student_id = s.id 
+        WHERE p.id = $1
+      `;
+      const verificationResult = await client.query(verificationQuery, [insertedPayment.id]);
+      if (verificationResult.rows.length === 0) {
+        throw new Error('Payment-student relationship verification failed');
+      }
+      
       rl.transactionCommit();
       await client.query('COMMIT');
 
-      rl.success(paymentResult.rows[0]);
-      res.status(201).json(paymentResult.rows[0]);
+      rl.success(insertedPayment);
+      res.status(201).json({
+        ...insertedPayment,
+        student_name: student.name,
+        membership_extension_days: membershipExtensionDays
+      });
     } catch (error) {
       await client.query('ROLLBACK');
       rl.transactionRollback(error.message);
@@ -388,6 +473,11 @@ router.put('/:id', async (req, res) => {
       } else if (numAmount > 99999999.99) {
         validationErrors.push('Amount exceeds maximum allowed value (99,999,999.99)');
       }
+      // Check decimal places (NUMERIC(10,2) allows 2 decimal places)
+      const decimalParts = amount.toString().split('.');
+      if (decimalParts[1] && decimalParts[1].length > 2) {
+        validationErrors.push('Amount can have maximum 2 decimal places');
+      }
     }
 
     // Payment date validation
@@ -412,7 +502,44 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Validation failed', details: validationErrors, requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
 
-    rl.businessLogic('Preparing payment update query');
+    rl.businessLogic('Preparing payment update query with referential integrity checks');
+    
+    // First, verify the payment exists and check student relationship
+    const existingPaymentQuery = `
+      SELECT p.*, s.name as student_name 
+      FROM payments p 
+      LEFT JOIN students s ON p.student_id = s.id 
+      WHERE p.id = $1
+    `;
+    const existingPaymentResult = await pool.query(existingPaymentQuery, [id]);
+    if (existingPaymentResult.rows.length === 0) {
+      rl.warn('Payment not found for update', { paymentId: id });
+      return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
+    }
+    
+    const existingPayment = existingPaymentResult.rows[0];
+    if (!existingPayment.student_name) {
+      rl.error('Payment-student relationship integrity violation', { paymentId: id, studentId: existingPayment.student_id });
+      return res.status(400).json({ 
+        error: 'Payment-student relationship integrity violation', 
+        details: [`Payment ${id} references non-existent student ${existingPayment.student_id}`],
+        requestId: rl.requestId, 
+        timestamp: new Date().toISOString() 
+      });
+    }
+    
+    // Verify new student exists
+    const newStudentQuery = 'SELECT id, name FROM students WHERE id = $1';
+    const newStudentResult = await pool.query(newStudentQuery, [student_id]);
+    if (newStudentResult.rows.length === 0) {
+      rl.validationError('student_id', [`Student with ID ${student_id} not found`]);
+      return res.status(400).json({ 
+        error: `Student with ID ${student_id} not found`, 
+        requestId: rl.requestId, 
+        timestamp: new Date().toISOString() 
+      });
+    }
+    
     const query = `
       UPDATE payments 
       SET 
@@ -431,7 +558,7 @@ router.put('/:id', async (req, res) => {
     rl.querySuccess('Execute payment update', queryStart, result, true);
 
     if (result.rows.length === 0) {
-      rl.warn('Payment not found for update', { paymentId: id });
+      rl.warn('Payment not found for update after verification', { paymentId: id });
       return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
 
@@ -485,60 +612,116 @@ router.delete('/:id', async (req, res) => {
           const studentFetch = await client.query('SELECT id, sex, membership_till, membership_type FROM students WHERE id = $1 FOR UPDATE', [payment.student_id]);
           if (studentFetch.rows.length > 0) {
             const student = studentFetch.rows[0];
+            
+            // Verify student-payment relationship integrity
+            if (!student.id) {
+              throw new Error(`Student relationship integrity violation for payment ${payment.id}`);
+            }
+            
             // Lookup fee config for student's membership type and gender
             const membershipType = student.membership_type;
-            const feeCfg = await client.query('SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1', [membershipType]);
-            if (feeCfg.rows.length > 0) {
-              const cfg = feeCfg.rows[0];
-              const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
-              if (monthlyFees > 0) {
-                const amountAbs = Math.abs(Number(payment.amount || 0));
-                const adjustDays = Math.floor((amountAbs / monthlyFees) * 30);
-                if (adjustDays > 0) {
-                  const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
-                  const newMembershipTill = new Date(currentMembershipTill);
+            if (!membershipType) {
+              rl.warn('Student has no membership type - skipping membership adjustment', { studentId: student.id });
+            } else {
+              const feeCfg = await client.query('SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1', [membershipType]);
+              if (feeCfg.rows.length > 0) {
+                const cfg = feeCfg.rows[0];
+                const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
+                
+                if (monthlyFees > 0) {
+                  const amountAbs = Math.abs(Number(payment.amount || 0));
+                  const adjustDays = Math.floor((amountAbs / monthlyFees) * 30);
+                  
+                  if (adjustDays > 0) {
+                    const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+                    const newMembershipTill = new Date(currentMembershipTill);
 
-                  // Creation logic: monthly_fee (positive) extended membership; refund (negative) reduced membership
-                  if (payment.payment_type === 'monthly_fee' && Number(payment.amount) > 0) {
-                    // Deleting an extension -> reduce membership by adjustDays
-                    newMembershipTill.setDate(newMembershipTill.getDate() - adjustDays);
-                  } else if (payment.payment_type === 'refund' && Number(payment.amount) < 0) {
-                    // Deleting a refund (which reduced membership) -> add back days
-                    newMembershipTill.setDate(newMembershipTill.getDate() + adjustDays);
-                  }
-
-                  // Persist updated membership_till (store date part only)
-                  const newDateStr = toISTDateString(newMembershipTill);
-                  try {
-                    const updRes = await client.query('UPDATE students SET membership_till = $1 WHERE id = $2 RETURNING *', [newDateStr, student.id]);
-                    if (updRes.rows.length === 0) {
-                      // Should not happen as we locked the student row, but guard anyway
-                      const e = new Error('Failed to update student membership_till during payment delete');
-                      e.context = { studentId: student.id };
-                      rl.error(e, { context: 'failed to persist membership update' });
-                      throw e;
+                    // Reverse the original operation when deleting
+                    if (payment.payment_type === 'monthly_fee' && Number(payment.amount) > 0) {
+                      // Deleting a monthly fee (which extended membership) -> reduce membership
+                      newMembershipTill.setDate(newMembershipTill.getDate() - adjustDays);
+                      rl.info('Reversing membership extension for deleted monthly fee payment', { 
+                        paymentId: payment.id, 
+                        adjustDays: -adjustDays,
+                        originalAmount: payment.amount 
+                      });
+                    } else if (payment.payment_type === 'refund' && Number(payment.amount) < 0) {
+                      // Deleting a refund (which reduced membership) -> add back days
+                      newMembershipTill.setDate(newMembershipTill.getDate() + adjustDays);
+                      rl.info('Reversing membership reduction for deleted refund payment', { 
+                        paymentId: payment.id, 
+                        adjustDays: adjustDays,
+                        originalAmount: payment.amount 
+                      });
                     }
-                    rl.info('Updated student membership_till on payment delete', { studentId: student.id, old: student.membership_till, new: updRes.rows[0].membership_till });
-                  } catch (persistErr) {
-                    rl.error(persistErr, { context: 'persist membership update' });
-                    // Bubble up to outer catch to trigger rollback
-                    throw persistErr;
+
+                    // Validate the new membership date
+                    if (isNaN(newMembershipTill.getTime())) {
+                      throw new Error('Invalid membership date calculation during payment deletion');
+                    }
+
+                    // Persist updated membership_till (store date part only)
+                    const newDateStr = toISTDateString(newMembershipTill);
+                    try {
+                      const updRes = await client.query('UPDATE students SET membership_till = $1 WHERE id = $2 RETURNING *', [newDateStr, student.id]);
+                      if (updRes.rows.length === 0) {
+                        throw new Error('Failed to update student membership_till during payment delete - no rows affected');
+                      }
+                      rl.info('Successfully updated student membership_till on payment delete', { 
+                        studentId: student.id, 
+                        old: student.membership_till, 
+                        new: updRes.rows[0].membership_till,
+                        paymentId: payment.id
+                      });
+                    } catch (persistErr) {
+                      rl.error(persistErr, { context: 'persist membership update', studentId: student.id });
+                      throw new Error(`Membership update failed during payment deletion: ${persistErr.message}`);
+                    }
+                  } else {
+                    rl.info('Computed 0 adjustment days; skipping membership update', { 
+                      paymentId: id, 
+                      amount: payment.amount, 
+                      monthlyFees, 
+                      amountAbs 
+                    });
                   }
                 } else {
-                  rl.info('Computed 0 adjustment days; skipping membership update', { paymentId: id, amount: payment.amount });
+                  rl.warn('Invalid or zero monthly_fees configuration; skipping membership update', { 
+                    gender: student.sex, 
+                    monthlyFees, 
+                    membershipType 
+                  });
                 }
               } else {
-                rl.warn('Invalid monthly_fees configuration; skipping membership update', { gender: student.sex });
+                rl.warn('No fee configuration found for membership type; skipping membership update', { 
+                  membershipType, 
+                  gender: student.sex 
+                });
               }
-            } else {
-              rl.warn('No fee configuration found for gender; skipping membership update', { gender: student.sex });
             }
+          } else {
+            rl.warn('Student not found for payment; skipping membership update', { 
+              studentId: payment.student_id, 
+              paymentId: payment.id 
+            });
           }
+        } else {
+          rl.info('Payment has no student relationship or payment type; skipping membership update', { 
+            paymentId: payment.id,
+            studentId: payment.student_id,
+            paymentType: payment.payment_type
+          });
         }
       } catch (innerErr) {
-        // Log and rethrow to ensure transaction is rolled back by outer handler
-        rl.error(innerErr, { context: 'membership update after payment delete' });
-        throw new Error('Membership update failed during payment deletion: ' + (innerErr.message || String(innerErr)));
+        // Log detailed error information for debugging
+        rl.error(innerErr, { 
+          context: 'membership update after payment delete',
+          paymentId: payment.id,
+          studentId: payment.student_id,
+          paymentType: payment.payment_type,
+          paymentAmount: payment.amount
+        });
+        throw new Error(`Membership update failed during payment deletion: ${innerErr.message || String(innerErr)}`);
       }
 
       await client.query('COMMIT');
@@ -578,8 +761,104 @@ router.get('/summary/stats', async (req, res) => {
     const result = await pool.query(query);
     res.json(result.rows[0]);
   } catch (error) {
-  logger.error('Error fetching payment summary', { error: error.message, stack: error.stack });
-  res.status(500).json({ error: 'Failed to fetch payment summary' });
+    logger.error('Error fetching payment summary', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch payment summary' });
+  }
+});
+
+// POST /api/payments/validate - Validate payment data before submission
+router.post('/validate', async (req, res) => {
+  const rl = logger.createRequestLogger('POST', '/api/payments/validate', req);
+  try {
+    const { student_id, amount, payment_type } = req.body;
+    
+    const validationResults = {
+      valid: true,
+      errors: [],
+      warnings: [],
+      limits: {}
+    };
+    
+    // Student validation
+    if (!student_id || isNaN(student_id)) {
+      validationResults.errors.push('Valid student ID is required');
+      validationResults.valid = false;
+    } else {
+      // Check if student exists
+      const studentQuery = 'SELECT id, name, membership_type, sex FROM students WHERE id = $1';
+      const studentResult = await pool.query(studentQuery, [student_id]);
+      if (studentResult.rows.length === 0) {
+        validationResults.errors.push(`Student with ID ${student_id} not found`);
+        validationResults.valid = false;
+      } else {
+        const student = studentResult.rows[0];
+        
+        // Get fee configuration for limits
+        if (student.membership_type) {
+          const feeCfgQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+          const feeCfgRes = await pool.query(feeCfgQuery, [student.membership_type]);
+          if (feeCfgRes.rows.length > 0) {
+            const cfg = feeCfgRes.rows[0];
+            const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
+            validationResults.limits.monthly_fee = monthlyFees;
+            validationResults.limits.max_single_payment = monthlyFees * 12; // 12 months max
+            
+            if (monthlyFees <= 0) {
+              validationResults.errors.push('Payments are disabled for free membership students');
+              validationResults.valid = false;
+            }
+          }
+        }
+        
+        // For refunds, check available refund amount
+        if (payment_type === 'refund') {
+          const totalPaidQuery = `
+            SELECT COALESCE(SUM(amount), 0) as total_paid 
+            FROM payments 
+            WHERE student_id = $1 AND payment_type = 'monthly_fee' AND amount > 0
+          `;
+          const totalPaidResult = await pool.query(totalPaidQuery, [student_id]);
+          const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid) || 0;
+          validationResults.limits.max_refund_amount = totalPaid;
+        }
+      }
+    }
+    
+    // Amount validation
+    if (!amount) {
+      validationResults.errors.push('Payment amount is required');
+      validationResults.valid = false;
+    } else if (isNaN(amount)) {
+      validationResults.errors.push('Amount must be a valid number');
+      validationResults.valid = false;
+    } else {
+      const numAmount = Math.abs(parseFloat(amount));
+      
+      // Basic limits
+      if (numAmount < 0.01) {
+        validationResults.errors.push('Amount must be at least 0.01');
+        validationResults.valid = false;
+      } else if (numAmount > 99999999.99) {
+        validationResults.errors.push('Amount exceeds maximum allowed value (99,999,999.99)');
+        validationResults.valid = false;
+      }
+      
+      // Business rule limits
+      if (validationResults.limits.max_single_payment && numAmount > validationResults.limits.max_single_payment) {
+        validationResults.warnings.push(`Amount (${numAmount}) exceeds recommended single payment limit (${validationResults.limits.max_single_payment})`);
+      }
+      
+      if (payment_type === 'refund' && validationResults.limits.max_refund_amount && numAmount > validationResults.limits.max_refund_amount) {
+        validationResults.errors.push(`Refund amount (${numAmount}) cannot exceed total payments (${validationResults.limits.max_refund_amount})`);
+        validationResults.valid = false;
+      }
+    }
+    
+    rl.success(validationResults);
+    res.json(validationResults);
+  } catch (error) {
+    rl.error(error);
+    res.status(500).json({ error: 'Payment validation failed', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 

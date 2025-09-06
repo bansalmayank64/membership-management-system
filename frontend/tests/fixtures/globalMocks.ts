@@ -204,10 +204,10 @@ export async function dismissDialogs(page: Page) {
 // Wait for app to be ready with data loaded
 export async function waitForAppReady(page: Page, tabName?: string) {
   // Wait for app to become interactive (root not aria-hidden)
-  await page.locator('#root:not([aria-hidden="true"])').waitFor({ timeout: 15000 });
+  await page.locator('#root:not([aria-hidden="true"])').waitFor({ timeout: 20000 });
   
-  // Wait a moment for React to render
-  await page.waitForTimeout(2000);
+  // Wait for initial render with shorter timeout
+  await page.waitForTimeout(1000);
   
   // Dismiss any blocking dialogs first
   await dismissDialogs(page);
@@ -217,10 +217,10 @@ export async function waitForAppReady(page: Page, tabName?: string) {
     const tab = page.locator('button[role="tab"]', { hasText: tabName });
     if (await tab.count() > 0) {
       await tab.click();
-      await page.waitForTimeout(1500); // Allow tab switch and data loading
+      await page.waitForTimeout(1000); // Reduced from 1500ms
     }
   }
   
-  // Extra time for API calls to complete
-  await page.waitForTimeout(1000);
+  // Reduced extra wait time for API calls
+  await page.waitForTimeout(500);
 }
