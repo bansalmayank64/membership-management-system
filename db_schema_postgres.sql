@@ -338,7 +338,7 @@ INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_mont
 ('full_time', 700.00, 600.00),
 ('half_time', 400.00, 350.00),
 ('two_hours', 200.00, 200.00),
-('special', 650.00, 550.00),
+('Old student', 650.00, 600.00),
 ('free', 0.00, 0.00)
 ON CONFLICT (membership_type) DO UPDATE SET
     male_monthly_fees = EXCLUDED.male_monthly_fees,

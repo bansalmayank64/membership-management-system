@@ -27,6 +27,8 @@ function mapArgs(args) {
 }
 
 const isProd = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD;
+const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+
 const debugEnabled = (() => {
   try {
     // allow override in any env
@@ -34,7 +36,8 @@ const debugEnabled = (() => {
       return window.localStorage.getItem('debugLogs') === 'true';
     }
   } catch (e) {}
-  return !isProd;
+  // Always enable debug logs in development environment
+  return true || isDev || !isProd;
 })();
 
 const clientLogger = {

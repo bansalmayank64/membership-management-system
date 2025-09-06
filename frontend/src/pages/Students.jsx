@@ -84,7 +84,7 @@ import {
 } from '@mui/icons-material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import CloseIcon from '@mui/icons-material/Close';
- 
+
 function Students() {
   // Theme and mobile breakpoint detection
   const theme = useTheme();
@@ -232,15 +232,15 @@ function Students() {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
-  
+
   // Menu states
   const [actionMenuAnchor, setActionMenuAnchor] = useState(null);
   const [selectedItemForAction, setSelectedItemForAction] = useState(null);
-  
+
   // Reactivation state
   const [reactivateSelectedSeat, setReactivateSelectedSeat] = useState('');
   const [reactivateAvailableSeats, setReactivateAvailableSeats] = useState([]);
-  
+
   // Assign seat state
   const [assignSeatDialogOpen, setAssignSeatDialogOpen] = useState(false);
   const [assignSelectedSeat, setAssignSelectedSeat] = useState('');
@@ -249,28 +249,28 @@ function Students() {
   // Unassign confirmation dialog state
   const [confirmUnassignOpen, setConfirmUnassignOpen] = useState(false);
   const [unassignTargetSeat, setUnassignTargetSeat] = useState(null);
-  
+
   // History data
   const [seatHistoryData, setSeatHistoryData] = useState([]);
   const [paymentHistoryData, setPaymentHistoryData] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  
+
   // Form states
   const [addStudentLoading, setAddStudentLoading] = useState(false);
   const [availableSeats, setAvailableSeats] = useState([]);
   const [seatLoading, setSeatLoading] = useState(false);
   const [newStudent, setNewStudent] = useState({
-  name: '',
-  seat_number: '',
-  contact: '',
-  sex: '',
-  fatherName: '',
-  // default membership_date to today in IST (YYYY-MM-DD)
-  membership_date: todayInIST(),
-  // default membership type
-  membership_type: 'full_time',
-  aadhaar_number: '',
-  address: ''
+    name: '',
+    seat_number: '',
+    contact: '',
+    sex: '',
+    fatherName: '',
+    // default membership_date to today in IST (YYYY-MM-DD)
+    membership_date: todayInIST(),
+    // default membership type
+    membership_type: 'full_time',
+    aadhaar_number: '',
+    address: ''
   });
 
   // Track whether user attempted to submit the Add Student form
@@ -287,7 +287,7 @@ function Students() {
   const [seatsFilters, setSeatsFilters] = useState({ seatNumber: '', status: '', gender: '', membershipType: '' });
   // Include seatNumber in studentsFilters so Students tab can have its own seat-number filter independent from Seats view
   const [studentsFilters, setStudentsFilters] = useState({ studentName: '', status: '', gender: '', contact: '', seatNumber: '', membershipType: '' });
-  
+
   // Add Student dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   // Seat history dialog state
@@ -310,7 +310,7 @@ function Students() {
       setAvailableSeats([]);
       return;
     }
-    
+
     setSeatLoading(true);
     try {
       const response = await fetch(`/api/students/available-seats/${gender}`, {
@@ -319,9 +319,9 @@ function Students() {
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) throw new Error('Failed to fetch available seats');
-      
+
       const data = await response.json();
       setAvailableSeats(data.availableSeats || []);
     } catch (err) {
@@ -334,8 +334,8 @@ function Students() {
 
   // Handle gender change in add student form
   const handleGenderChange = (gender) => {
-    setNewStudent({ 
-      ...newStudent, 
+    setNewStudent({
+      ...newStudent,
       sex: gender,
       seat_number: '' // Reset seat selection when gender changes
     });
@@ -348,7 +348,7 @@ function Students() {
       setEditAvailableSeats([]);
       return;
     }
-    
+
     setEditSeatLoading(true);
     try {
       const response = await fetch(`/api/students/available-seats/${gender}`, {
@@ -357,12 +357,12 @@ function Students() {
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) throw new Error('Failed to fetch available seats');
-      
+
       const data = await response.json();
       let availableSeats = data.availableSeats || [];
-      
+
       // If editing and student has a current seat, include it in the options
       if (currentSeatNumber) {
         const currentSeatExists = availableSeats.some(seat => seat.seat_number === currentSeatNumber);
@@ -375,14 +375,14 @@ function Students() {
           });
         } else {
           // Mark existing seat as current
-          availableSeats = availableSeats.map(seat => 
-            seat.seat_number === currentSeatNumber 
+          availableSeats = availableSeats.map(seat =>
+            seat.seat_number === currentSeatNumber
               ? { ...seat, is_current: true }
               : seat
           );
         }
       }
-      
+
       setEditAvailableSeats(availableSeats);
     } catch (err) {
       handleApiError(err, 'Failed to load available seats');
@@ -438,8 +438,8 @@ function Students() {
 
   // Handle gender change in edit student form
   const handleEditGenderChange = (gender) => {
-    setEditStudent({ 
-      ...editStudent, 
+    setEditStudent({
+      ...editStudent,
       sex: gender,
       seatNumber: '' // Reset seat selection when gender changes
     });
@@ -452,10 +452,10 @@ function Students() {
     seatNumber: '',
     contact: '',
     sex: '',
-  fatherName: '',
+    fatherName: '',
     membershipDate: '',
     membershipTill: '',
-  membershipType: '',
+    membershipType: '',
     aadhaarNumber: '',
     address: ''
   });
@@ -491,10 +491,10 @@ function Students() {
       if (parts.length < 3) return isoDate;
       const year = Number(parts[0]);
       const monthIndex = Math.max(0, Math.min(11, Number(parts[1]) - 1));
-  const day = Number(parts[2]);
-      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const dayStr = String(day).padStart(2, '0');
-  return `${dayStr} ${months[monthIndex]} ${year}`;
+      const day = Number(parts[2]);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const dayStr = String(day).padStart(2, '0');
+      return `${dayStr} ${months[monthIndex]} ${year}`;
     } catch (e) {
       return isoDate;
     }
@@ -534,10 +534,10 @@ function Students() {
       // Determine previous membership till (ISO YYYY-MM-DD) if present in form state
       const prevTillIso = editStudent.membershipTill || editStudent.membership_till || null;
 
-  // New membership_till will be today (Asia/Kolkata) + estimatedExtraDays only when estimatedExtraDays > 0
-  const todayUtcMs = getTodayUtcMidnightInTZ();
-  const computedNewTillUtcMs = todayUtcMs + (estimatedExtraDays * MS_PER_DAY);
-  const computedNewTillIso = new Date(computedNewTillUtcMs).toLocaleDateString('en-CA', { timeZone: 'UTC' });
+      // New membership_till will be today (Asia/Kolkata) + estimatedExtraDays only when estimatedExtraDays > 0
+      const todayUtcMs = getTodayUtcMidnightInTZ();
+      const computedNewTillUtcMs = todayUtcMs + (estimatedExtraDays * MS_PER_DAY);
+      const computedNewTillIso = new Date(computedNewTillUtcMs).toLocaleDateString('en-CA', { timeZone: 'UTC' });
       const willChange = (estimatedExtraDays || 0) > 0;
       const newTillIso = willChange ? computedNewTillIso : prevTillIso;
 
@@ -609,7 +609,7 @@ function Students() {
   const [viewStudentData, setViewStudentData] = useState(null); // Store student data for view dialog
   const [viewStudentTotalPaid, setViewStudentTotalPaid] = useState(0); // Store total paid amount for view dialog
   const [seatHistoryContext, setSeatHistoryContext] = useState(null); // Store context data for seat history dialog
-  
+
   // Data states
   const [seatHistory, setSeatHistory] = useState([]);
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -627,7 +627,7 @@ function Students() {
     amount: '',
     method: 'cash',
     type: 'monthly_fee',
-  date: todayInIST(),
+    date: todayInIST(),
     notes: ''
   });
 
@@ -636,7 +636,7 @@ function Students() {
     amount: '',
     paymentMode: 'cash',
     remarks: '',
-  paymentDate: todayInIST()
+    paymentDate: todayInIST()
   });
 
   // Fee configuration states
@@ -727,10 +727,10 @@ function Students() {
 
   // Effect to calculate membership extension days when payment amount changes
   useEffect(() => {
-  if (paymentData.amount && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
+    if (paymentData.amount && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
       const amount = parseFloat(paymentData.amount);
       const monthlyFee = feeConfig.monthly_fees;
-      
+
       if (amount > 0 && monthlyFee > 0) {
         const days = Math.floor((amount / monthlyFee) * 30);
         setMembershipExtensionDays(days);
@@ -745,67 +745,67 @@ function Students() {
 
   const fetchData = async () => {
     logger.debug('[fetchData] Starting data fetch');
-     setLoading(true);
-     setError(null);
-     try {
+    setLoading(true);
+    setError(null);
+    try {
       logger.debug('[fetchData] Making API calls');
-       const [studentsResponse, seatChartData] = await Promise.all([
-         fetch(`/api/students/with-unassigned-seats`, {
-           headers: {
-             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-             'Content-Type': 'application/json'
-           }
-         }),
-         getSeatChartData()
-       ]);
-       
-       logger.debug('[fetchData] Students response status', { status: studentsResponse.status });
-       
-       if (!studentsResponse.ok) {
-         throw new Error(`API error! status: ${studentsResponse.status}`);
-       }
-       
-       const studentsData = await studentsResponse.json();
-       logger.debug('[fetchData] Raw students data summary', { studentsCount: (studentsData.students || []).length, unassignedSeats: (studentsData.unassignedSeats || []).length });
-       logger.debug('[fetchData] Seat chart data summary', { seatChartCount: (seatChartData || []).length });
-      
+      const [studentsResponse, seatChartData] = await Promise.all([
+        fetch(`/api/students/with-unassigned-seats`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        getSeatChartData()
+      ]);
+
+      logger.debug('[fetchData] Students response status', { status: studentsResponse.status });
+
+      if (!studentsResponse.ok) {
+        throw new Error(`API error! status: ${studentsResponse.status}`);
+      }
+
+      const studentsData = await studentsResponse.json();
+      logger.debug('[fetchData] Raw students data summary', { studentsCount: (studentsData.students || []).length, unassignedSeats: (studentsData.unassignedSeats || []).length });
+      logger.debug('[fetchData] Seat chart data summary', { seatChartCount: (seatChartData || []).length });
+
       // Validate and clean data
       const cleanStudents = (studentsData.students || []).filter(student => student && typeof student === 'object');
       const cleanUnassignedSeats = studentsData.unassignedSeats || [];
-      
-  logger.debug('✅ [fetchData] Cleaned students:', cleanStudents.length);
-  logger.debug('✅ [fetchData] Cleaned unassigned seats:', cleanUnassignedSeats.length);
-      
+
+      logger.debug('✅ [fetchData] Cleaned students:', cleanStudents.length);
+      logger.debug('✅ [fetchData] Cleaned unassigned seats:', cleanUnassignedSeats.length);
+
       setStudents(cleanStudents);
       setUnassignedSeats(cleanUnassignedSeats);
       setSeatData(seatChartData);
-      
-  logger.info('✅ [fetchData] Data fetch completed successfully');
+
+      logger.info('✅ [fetchData] Data fetch completed successfully');
     } catch (err) {
-  logger.error('❌ [fetchData] Error occurred:', err);
-  logger.error('❌ [fetchData] Error stack:', err.stack);
+      logger.error('❌ [fetchData] Error occurred:', err);
+      logger.error('❌ [fetchData] Error stack:', err.stack);
       handleApiError(err, 'Failed to load data. Please try again.');
     } finally {
       setLoading(false);
-  logger.debug('[fetchData] Loading state set to false');
+      logger.debug('[fetchData] Loading state set to false');
     }
-   };
+  };
 
   // Calculate statistics
   const getStats = () => {
-  logger.debug('📊 [getStats] Calculating statistics...', { studentsCount: students.length, seatDataCount: seatData.length });
-    
+    logger.debug('📊 [getStats] Calculating statistics...', { studentsCount: students.length, seatDataCount: seatData.length });
+
     // Filter out null/undefined students
     const validStudents = students.filter(student => student && typeof student === 'object');
-  logger.debug('Valid students after null check:', validStudents.length);
-    
+    logger.debug('Valid students after null check:', validStudents.length);
+
     // Filter only active students (membership_status !== 'inactive')
     const activeStudents = validStudents.filter(student => student.membership_status !== 'inactive');
-  logger.debug('Active students after status check:', activeStudents.length);
-    
+    logger.debug('Active students after status check:', activeStudents.length);
+
     const totalStudents = activeStudents.length;
     const assignedSeats = activeStudents.filter(s => s.seat_number).length;
-  const availableSeats = unassignedSeats.length;
+    const availableSeats = unassignedSeats.length;
     // Available seats gender breakdown (derive from seatData by checking if seat has no assigned student)
     const availableMaleSeats = (seatData || []).filter(s => {
       if (!s) return false;
@@ -821,7 +821,7 @@ function Students() {
       const sex = (s.occupantSexRestriction || s.occupant_sex || '').toString().toLowerCase();
       return sex === 'female';
     }).length;
-    
+
     // Calculate expiring/expired counts from seatData so values match Seats view filtering
     const now = new Date();
     const sevenDaysFromNow = new Date();
@@ -850,45 +850,45 @@ function Students() {
 
     const expiringSeats = expiringSeatsCount;
     const expiredSeats = expiredSeatsCount;
-    
+
     // Calculate expired students (based on membership_till date regardless of seat assignment)
     // Use the same timezone-aware logic as used for expired/expiring seats
     const todayUtcMs = getTodayUtcMidnightInTZ();
     const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
-    
+
     const expiredStudents = activeStudents.filter(student => {
-      if (!student.membership_till) return false; // No membership end date means active
+      if (!student.membership_till) return true; // No membership end date means expired/needs renewal
       const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
-      return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : false;
+      return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true;
     }).length;
-    
+
     // Calculate expiring students (expiring in next 7 days)
     const expiringStudents = activeStudents.filter(student => {
       if (!student.membership_till) return false;
       const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
       return membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
     }).length;
-    
+
     const unassignedStudents = activeStudents.filter(s => !s.seat_number).length;
     const totalSeats = seatData.length;
-    
+
     // Calculate male and female seat counts
-  logger.debug('Processing seat data for gender counts...');
+    logger.debug('Processing seat data for gender counts...');
     const maleSeats = seatData.filter(s => s && s.occupantSexRestriction === 'male').length;
     const femaleSeats = seatData.filter(s => s && s.occupantSexRestriction === 'female').length;
     const neutralSeats = totalSeats - maleSeats - femaleSeats; // Seats with no gender restriction
 
-  // Student gender counts (based on active students)
-  const maleStudents = activeStudents.filter(s => (s.sex || s.gender || '').toString().toLowerCase() === 'male').length;
-  const femaleStudents = activeStudents.filter(s => (s.sex || s.gender || '').toString().toLowerCase() === 'female').length;
+    // Student gender counts (based on active students)
+    const maleStudents = activeStudents.filter(s => (s.sex || s.gender || '').toString().toLowerCase() === 'male').length;
+    const femaleStudents = activeStudents.filter(s => (s.sex || s.gender || '').toString().toLowerCase() === 'female').length;
 
-  // Note: logging moved outside so we don't spam console on every render
+    // Note: logging moved outside so we don't spam console on every render
 
     return {
       totalStudents,
       assignedSeats,
       availableSeats,
-  expiringSeats,
+      expiringSeats,
       expiredSeats,
       expiredStudents,
       expiringStudents,
@@ -897,12 +897,12 @@ function Students() {
       maleSeats,
       femaleSeats,
       neutralSeats
-  ,
-  maleStudents,
-  femaleStudents
-  ,
-  availableMaleSeats,
-  availableFemaleSeats
+      ,
+      maleStudents,
+      femaleStudents
+      ,
+      availableMaleSeats,
+      availableFemaleSeats
     };
   };
 
@@ -999,14 +999,14 @@ function Students() {
   };
 
   const clearAllFilters = () => {
-  // Clear both per-tab storage and the active UI values
-  setSeatsFilters({ seatNumber: '', status: '', gender: '', membershipType: '' });
-  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '', seatNumber: '', membershipType: '' });
-  setSeatNumberFilter('');
-  setStatusFilter('');
-  setStudentNameFilter('');
-  setContactFilter('');
-  setActiveStatFilter(null);
+    // Clear both per-tab storage and the active UI values
+    setSeatsFilters({ seatNumber: '', status: '', gender: '', membershipType: '' });
+    setStudentsFilters({ studentName: '', status: '', gender: '', contact: '', seatNumber: '', membershipType: '' });
+    setSeatNumberFilter('');
+    setStatusFilter('');
+    setStudentNameFilter('');
+    setContactFilter('');
+    setActiveStatFilter(null);
   };
 
   // Handle tab change - clear filters that may hide records when switching to Inactive tab
@@ -1014,13 +1014,13 @@ function Students() {
     setCurrentTab(newValue);
     // When opening Inactive tab, clear filters which often come from Seats/Active view
     if (newValue === 2) {
-  // Clear both per-tab filter objects and the legacy UI values
-  setSeatsFilters({ seatNumber: '', status: '', gender: '' });
-  setStudentsFilters({ studentName: '', status: '', gender: '', contact: '' });
-  setSeatNumberFilter('');
-  setStatusFilter('');
-  setStudentNameFilter('');
-  setContactFilter('');
+      // Clear both per-tab filter objects and the legacy UI values
+      setSeatsFilters({ seatNumber: '', status: '', gender: '' });
+      setStudentsFilters({ studentName: '', status: '', gender: '', contact: '' });
+      setSeatNumberFilter('');
+      setStatusFilter('');
+      setStudentNameFilter('');
+      setContactFilter('');
       setActiveStatFilter(null);
       // Also clear any selected action item to avoid accidental actions
       setSelectedItemForAction(null);
@@ -1052,7 +1052,7 @@ function Students() {
   // Filter data based on current tab and filters
   const getFilteredData = () => {
     let data = [];
-  // Ensure student arrays used in different tabs are defined
+    // Ensure student arrays used in different tabs are defined
     const validStudents = students.filter(student => student && typeof student === 'object');
     const activeStudents = validStudents.filter(student => {
       const s = (student.membership_status || student.status || '').toString().toLowerCase();
@@ -1062,22 +1062,22 @@ function Students() {
       const s = (student.membership_status || student.status || '').toString().toLowerCase();
       return s === 'inactive' || s === 'deactivated';
     });
-    
+
     if (currentTab === 0) { // Seats View
-      logger.debug('Processing seat data for display', { sampleSeatData: seatData.slice(0,3), sampleStudents: students.slice(0,3) });
+      logger.debug('Processing seat data for display', { sampleSeatData: seatData.slice(0, 3), sampleStudents: students.slice(0, 3) });
       data = seatData.map(seat => {
         const student = students.find(s => s.seat_number === seat.seatNumber);
-        
+
         // Check membership expiry and expiring window (use IST-adjusted calculation like students view)
         const membershipTill = seat.membershipExpiry || student?.membership_till;
         const hasStudent = !!(seat.studentName || student?.name);
-  // Use timezone-aware midnight comparisons for expiry checks (Asia/Kolkata)
-  const membershipUtcMs = getUtcMidnightForDateInTZ(membershipTill);
-  const todayUtcMs = getTodayUtcMidnightInTZ();
-  const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
-  const isExpired = hasStudent && (membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true);
-  const isExpiring = hasStudent && (membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false);
-        
+        // Use timezone-aware midnight comparisons for expiry checks (Asia/Kolkata)
+        const membershipUtcMs = getUtcMidnightForDateInTZ(membershipTill);
+        const todayUtcMs = getTodayUtcMidnightInTZ();
+        const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
+        const isExpired = hasStudent && (membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true);
+        const isExpiring = hasStudent && (membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false);
+
         const processedSeat = {
           ...seat,
           // Preserve backend data when available, fallback to student lookup
@@ -1095,25 +1095,25 @@ function Students() {
           expired: isExpired,
           expiring: isExpiring
         };
-        
-    // Reduced logging: only debug summary per seat rather than one log per seat
-    logger.debug('Seat processed', { seatNumber: seat.seatNumber, occupied: processedSeat.occupied, studentName: processedSeat.studentName ? processedSeat.studentName.slice(0,50) : null });
-        
+
+        // Reduced logging: only debug summary per seat rather than one log per seat
+        logger.debug('Seat processed', { seatNumber: seat.seatNumber, occupied: processedSeat.occupied, studentName: processedSeat.studentName ? processedSeat.studentName.slice(0, 50) : null });
+
         return processedSeat;
       });
-      
-  logger.debug('Processed data sample (occupied, up to 3):', data.filter(d => d.occupied).slice(0, 3).map(d => ({ seatNumber: d.seatNumber, studentName: d.studentName })));
+
+      logger.debug('Processed data sample (occupied, up to 3):', data.filter(d => d.occupied).slice(0, 3).map(d => ({ seatNumber: d.seatNumber, studentName: d.studentName })));
     } else if (currentTab === 1) { // Students tab - include both active and inactive so desktop/table shows all
-      logger.debug('Processing students for view (including inactive)', { sampleStudents: students.slice(0,3) });
+      logger.debug('Processing students for view (including inactive)', { sampleStudents: students.slice(0, 3) });
       // Use the full validStudents list so both active and inactive records are present
       data = validStudents.map(student => {
-  // Compute expiry flags using timezone-aware midnight comparisons (Asia/Kolkata)
-  const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
-  const todayUtcMs = getTodayUtcMidnightInTZ();
-  const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
+        // Compute expiry flags using timezone-aware midnight comparisons (Asia/Kolkata)
+        const membershipUtcMs = getUtcMidnightForDateInTZ(student.membership_till);
+        const todayUtcMs = getTodayUtcMidnightInTZ();
+        const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
 
-  const isExpired = membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true; // no end date => expired
-  const isExpiring = membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
+        const isExpired = membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true; // no end date => expired/needs renewal
+        const isExpiring = membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
 
         // Normalize status: if backend marked inactive/deactivated, keep it; otherwise derive from seat
         const rawStatus = (student.membership_status || student.status || '').toString().toLowerCase();
@@ -1137,43 +1137,43 @@ function Students() {
       // Sort by name (dictionary order) before applying filters
       data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     } else if (currentTab === 2) { // Deactivated Students View
-      logger.debug('Processing deactivated students for view', { sampleStudents: students.slice(0,3) });
+      logger.debug('Processing deactivated students for view', { sampleStudents: students.slice(0, 3) });
       data = deactivatedStudents.map(student => {
         const processedStudent = {
-            ...student,
-            // normalize to 'inactive' so other code and filters treat it consistently
-            status: 'inactive',
-            gender: student.sex,
-            // Add consistent property for easier access
-            seatNumber: student.seat_number
-          };
-        
-  // Reduced logging: debug summary per deactivated student
-  logger.debug('Processing deactivated student', { id: student.id, name: student.name });
-        
+          ...student,
+          // normalize to 'inactive' so other code and filters treat it consistently
+          status: 'inactive',
+          gender: student.sex,
+          // Add consistent property for easier access
+          seatNumber: student.seat_number
+        };
+
+        // Reduced logging: debug summary per deactivated student
+        logger.debug('Processing deactivated student', { id: student.id, name: student.name });
+
         return processedStudent;
       });
-      
-  logger.debug('Processed deactivated students data sample (up to 3)', data.slice(0, 3).map(s => ({ id: s.id, name: s.name })));
-  // Sort deactivated students by name (dictionary order) before applying filters
-  data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+
+      logger.debug('Processed deactivated students data sample (up to 3)', data.slice(0, 3).map(s => ({ id: s.id, name: s.name })));
+      // Sort deactivated students by name (dictionary order) before applying filters
+      data.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     }
 
     // Apply filters (use per-tab filter state so seats and students filters are independent)
-  const seatNumberFilterLocal = currentTab === 0 ? (seatsFilters.seatNumber || '') : (studentsFilters.seatNumber || '');
-  const statusFilterLocal = currentTab === 0 ? (seatsFilters.status || '') : (studentsFilters.status || '');
-  const genderFilterLocal = currentTab === 0 ? (seatsFilters.gender || '') : (studentsFilters.gender || '');
-  const membershipTypeFilterLocal = currentTab === 0 ? (seatsFilters.membershipType || '') : (studentsFilters.membershipType || '');
+    const seatNumberFilterLocal = currentTab === 0 ? (seatsFilters.seatNumber || '') : (studentsFilters.seatNumber || '');
+    const statusFilterLocal = currentTab === 0 ? (seatsFilters.status || '') : (studentsFilters.status || '');
+    const genderFilterLocal = currentTab === 0 ? (seatsFilters.gender || '') : (studentsFilters.gender || '');
+    const membershipTypeFilterLocal = currentTab === 0 ? (seatsFilters.membershipType || '') : (studentsFilters.membershipType || '');
 
-  // Helper to normalize membership type keys for robust comparison (e.g. "Full Time" -> "full_time")
-  const normalizeMembershipKey = (s) => {
-    if (!s && s !== 0) return '';
-    try {
-      return s.toString().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    } catch (e) {
-      return '';
-    }
-  };
+    // Helper to normalize membership type keys for robust comparison (e.g. "Full Time" -> "full_time")
+    const normalizeMembershipKey = (s) => {
+      if (!s && s !== 0) return '';
+      try {
+        return s.toString().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      } catch (e) {
+        return '';
+      }
+    };
 
     if (seatNumberFilterLocal) {
       const filterVal = seatNumberFilterLocal.toString();
@@ -1227,10 +1227,10 @@ function Students() {
             return item.expired;
           }
           // For students view, check if membership is expired using timezone-aware logic
-          if (!item.membership_till) return false; // No membership end date means active, not expired
+          if (!item.membership_till) return true; // No membership end date means expired/needs renewal
           const membershipUtcMs = getUtcMidnightForDateInTZ(item.membership_till);
           const todayUtcMs = getTodayUtcMidnightInTZ();
-          return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : false;
+          return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true;
         });
       } else if (statusFilterLocal === 'expiring') {
         // Students view: filter students whose membership expires in next 7 days
@@ -1271,9 +1271,9 @@ function Students() {
         });
       }
     }
-    
+
     // Apply name filter only when in Students tab (tab index 1).
-  const nameFilterLocal = currentTab === 1 ? (studentsFilters.studentName || '').toString().trim().toLowerCase() : '';
+    const nameFilterLocal = currentTab === 1 ? (studentsFilters.studentName || '').toString().trim().toLowerCase() : '';
     if (nameFilterLocal) {
       const q = nameFilterLocal;
       // Students tab: prefix match against name, id or contact/mobile
@@ -1288,11 +1288,11 @@ function Students() {
         );
       });
     }
-    
+
     // Apply contact filter only for Students tab
-  const contactFilterLocal = currentTab === 1 ? (studentsFilters.contact || '') : '';
+    const contactFilterLocal = currentTab === 1 ? (studentsFilters.contact || '') : '';
     if (contactFilterLocal) {
-      data = data.filter(item => 
+      data = data.filter(item =>
         (item.contact || item.contactNumber || '').toString().startsWith(contactFilterLocal)
       );
     }
@@ -1304,7 +1304,7 @@ function Students() {
 
   // Add student handler
   const handleAddStudent = async () => {
-  setAddAttempted(true);
+    setAddAttempted(true);
     // Basic frontend validation for required fields
     if (!newStudent.name.trim()) {
       setSnackbarMessage('*Student name is required');
@@ -1370,13 +1370,13 @@ function Students() {
       const studentData = {
         name: newStudent.name.trim(),
         sex: newStudent.sex,
-  membership_type: newStudent.membership_type,
+        membership_type: newStudent.membership_type,
         father_name: newStudent.fatherName?.trim() || null,
         contact_number: newStudent.contact?.trim() || null,
-  seat_number: newStudent.seat_number || null,
-  membership_date: newStudent.membership_date || null,
-  aadhaar_number: newStudent.aadhaar_number?.trim() || null,
-  address: newStudent.address?.trim() || null
+        seat_number: newStudent.seat_number || null,
+        membership_date: newStudent.membership_date || null,
+        aadhaar_number: newStudent.aadhaar_number?.trim() || null,
+        address: newStudent.address?.trim() || null
       };
 
       const response = await fetch(`/api/students`, {
@@ -1410,12 +1410,12 @@ function Students() {
         return;
       }
 
-  setSnackbarMessage('Student added successfully');
+      setSnackbarMessage('Student added successfully');
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setAddDialogOpen(false);
-  setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: todayInIST(), aadhaar_number: '', address: '' });
-  setAddAttempted(false);
+      setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: todayInIST(), aadhaar_number: '', address: '' });
+      setAddAttempted(false);
       setAvailableSeats([]);
       fetchData();
     } catch (err) {
@@ -1428,8 +1428,8 @@ function Students() {
 
   // Action menu handlers
   const handleActionClick = (event, item) => {
-  logger.debug('[handleActionClick] item selected', { id: item?.id, name: item?.name, tab: currentTab });
-    
+    logger.debug('[handleActionClick] item selected', { id: item?.id, name: item?.name, tab: currentTab });
+
     event.stopPropagation();
     // If the clicked item is a seat (from Seats view) and contains student info, normalize it
     let contextItem = item;
@@ -1467,8 +1467,8 @@ function Students() {
 
     setActionMenuAnchor(event.currentTarget);
     setSelectedItemForAction(contextItem);
-    
-  logger.debug('[handleActionClick] Set selectedItemForAction', { id: item?.id });
+
+    logger.debug('[handleActionClick] Set selectedItemForAction', { id: item?.id });
   };
 
   const handleActionClose = () => {
@@ -1483,7 +1483,7 @@ function Students() {
     logger.debug('🔍 [History] Starting seat-focused history', { selectedItemForAction });
 
     // Seat contextTab === 0
-    setSeatHistoryContext({ 
+    setSeatHistoryContext({
       ...selectedItemForAction,
       contextTab: 0
     });
@@ -1575,7 +1575,7 @@ function Students() {
     // - a click event (when passed directly as onClick handler)
     // - null (use selectedItemForAction)
     let student = null;
-  logger.debug('[handlePaymentHistory] invoked with', { studentArgType: typeof studentArg, selectedItemForActionId: selectedItemForAction?.id });
+    logger.debug('[handlePaymentHistory] invoked with', { studentArgType: typeof studentArg, selectedItemForActionId: selectedItemForAction?.id });
 
     if (studentArg && typeof studentArg === 'object') {
       // event-like objects usually have target/currentTarget
@@ -1583,7 +1583,7 @@ function Students() {
         student = studentArg;
       } else if (studentArg.currentTarget || studentArg.target) {
         // likely an event from MenuItem onClick
-        try { studentArg.stopPropagation && studentArg.stopPropagation(); } catch (e) {}
+        try { studentArg.stopPropagation && studentArg.stopPropagation(); } catch (e) { }
         student = selectedItemForAction;
       } else {
         // fallback: treat as student-like if it has id property truthy
@@ -1593,7 +1593,7 @@ function Students() {
       student = selectedItemForAction;
     }
 
-  logger.debug('[handlePaymentHistory] Resolved student', { id: student?.id, name: student?.name });
+    logger.debug('[handlePaymentHistory] Resolved student', { id: student?.id, name: student?.name });
 
     if (!student || !student.id) {
       logger.warn('[handlePaymentHistory] No student ID available, aborting payment history fetch');
@@ -1604,7 +1604,7 @@ function Students() {
       return;
     }
 
-  logger.info('[handlePaymentHistory] Fetching payment history', { id: student.id, name: student.name });
+    logger.info('[handlePaymentHistory] Fetching payment history', { id: student.id, name: student.name });
 
     setHistoryLoading(true);
     try {
@@ -1642,69 +1642,69 @@ function Students() {
   // Edit student handler
   const handleEditStudent = () => {
     logger.debug('🖊️ [handleEditStudent] Edit student action initiated', { selectedItemForAction });
-    
+
     if (!selectedItemForAction) {
       logger.warn('⚠️ [handleEditStudent] No selected item for action, aborting edit');
       return;
     }
 
     logger.debug('👤 [handleEditStudent] Editing student', { id: selectedItemForAction.id, name: selectedItemForAction.name, contact: selectedItemForAction.contact_number, sex: selectedItemForAction.sex, seat: selectedItemForAction.seat_number, membership: { from: selectedItemForAction.membership_date, to: selectedItemForAction.membership_till } });
-    
+
     const editData = {
       id: selectedItemForAction.id,
       name: selectedItemForAction.name,
       contactNumber: selectedItemForAction.contact_number,
       sex: selectedItemForAction.sex,
       seatNumber: selectedItemForAction.seat_number || '',
-  fatherName: selectedItemForAction.father_name || selectedItemForAction.fatherName || '',
-  membershipDate: selectedItemForAction.membership_date ? isoToISTDateInput(selectedItemForAction.membership_date) : '',
-  membershipTill: selectedItemForAction.membership_till ? isoToISTDateInput(selectedItemForAction.membership_till) : '',
-  // Ensure frontend form has a normalized membership type (backend may use membership_type)
-  membershipType: selectedItemForAction.membership_type || selectedItemForAction.membershipType 
+      fatherName: selectedItemForAction.father_name || selectedItemForAction.fatherName || '',
+      membershipDate: selectedItemForAction.membership_date ? isoToISTDateInput(selectedItemForAction.membership_date) : '',
+      membershipTill: selectedItemForAction.membership_till ? isoToISTDateInput(selectedItemForAction.membership_till) : '',
+      // Ensure frontend form has a normalized membership type (backend may use membership_type)
+      membershipType: selectedItemForAction.membership_type || selectedItemForAction.membershipType
     };
 
-  // Include Aadhaar and Address so edit dialog can show existing values
-  editData.aadhaarNumber = selectedItemForAction.aadhaar_number || selectedItemForAction.aadhaarNumber || '';
-  editData.address = selectedItemForAction.address || '';
-    
-  logger.debug('📝 [handleEditStudent] Setting edit form data', editData);
-  logger.debug('🆔 [handleEditStudent] Student ID being preserved', { id: editData.id });
-  logger.debug('📅 [handleEditStudent] Membership dates being set', { membershipDate: editData.membershipDate, membershipTill: editData.membershipTill });
+    // Include Aadhaar and Address so edit dialog can show existing values
+    editData.aadhaarNumber = selectedItemForAction.aadhaar_number || selectedItemForAction.aadhaarNumber || '';
+    editData.address = selectedItemForAction.address || '';
+
+    logger.debug('📝 [handleEditStudent] Setting edit form data', editData);
+    logger.debug('🆔 [handleEditStudent] Student ID being preserved', { id: editData.id });
+    logger.debug('📅 [handleEditStudent] Membership dates being set', { membershipDate: editData.membershipDate, membershipTill: editData.membershipTill });
     setEditStudent(editData);
-    
+
     // Fetch available seats if gender is available
     if (editData.sex) {
       fetchEditAvailableSeats(editData.sex, editData.seatNumber);
     }
-    
+
     setEditStudentOpen(true);
-  logger.debug('✅ [handleEditStudent] Edit dialog opened successfully');
+    logger.debug('✅ [handleEditStudent] Edit dialog opened successfully');
     handleActionClose();
   };
 
   // Add payment handler
   const handleAddPayment = async () => {
     logger.debug('💰 [handleAddPayment] Add payment action initiated', { selectedItemForAction });
-    
+
     if (!selectedItemForAction) {
       logger.warn('⚠️ [handleAddPayment] No selected item for action, aborting payment addition');
       return;
     }
 
     logger.debug('👤 [handleAddPayment] Adding payment for student', { id: selectedItemForAction.id, name: selectedItemForAction.name, contact: selectedItemForAction.contact_number, sex: selectedItemForAction.sex, seat: selectedItemForAction.seat_number, membership: { from: selectedItemForAction.membership_date, to: selectedItemForAction.membership_till } });
-    
+
     // Fetch fee configuration for this student's gender
     if (selectedItemForAction.sex) {
       try {
         console.log(`💰 [handleAddPayment] Fetching fee configuration for gender: ${selectedItemForAction.sex}`);
-  const membershipType = selectedItemForAction?.membership_type ;
-  const response = await fetch(`/api/students/fee-config/${membershipType}/${selectedItemForAction.sex}`, {
+        const membershipType = selectedItemForAction?.membership_type;
+        const response = await fetch(`/api/students/fee-config/${membershipType}/${selectedItemForAction.sex}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'
           }
         });
-        
+
         if (response.ok) {
           const feeConfigData = await response.json();
           logger.debug('💰 [handleAddPayment] Fee configuration received', feeConfigData);
@@ -1718,20 +1718,20 @@ function Students() {
         setFeeConfig(null);
       }
     }
-    
+
     const initialPaymentData = {
       amount: '',
       method: 'cash',
       type: 'monthly_fee',
-  date: todayInIST(),
+      date: todayInIST(),
       notes: ''
     };
-    
-  logger.debug('💳 [handleAddPayment] Setting initial payment form data', initialPaymentData);
-  setPaymentData(initialPaymentData);
-  setMembershipExtensionDays(0);
-  setAddPaymentOpen(true);
-  logger.debug('✅ [handleAddPayment] Add payment dialog opened successfully');
+
+    logger.debug('💳 [handleAddPayment] Setting initial payment form data', initialPaymentData);
+    setPaymentData(initialPaymentData);
+    setMembershipExtensionDays(0);
+    setAddPaymentOpen(true);
+    logger.debug('✅ [handleAddPayment] Add payment dialog opened successfully');
     // Note: handleActionClose() will be called after payment is confirmed or cancelled
   };
 
@@ -1739,7 +1739,7 @@ function Students() {
   const handleDeactivateStudent = () => {
     logger.debug('🔴 [handleDeactivateStudent] Called', { selectedItemForAction });
     logger.debug('🔴 [handleDeactivateStudent] Student name', { name: selectedItemForAction?.name });
-    
+
     if (!selectedItemForAction) {
       logger.error('❌ [handleDeactivateStudent] No student selected for deactivation');
       return;
@@ -1778,7 +1778,7 @@ function Students() {
 
         // Fetch monthly fee config for this student's gender
         if (selectedItemForAction?.sex) {
-          const membershipType = selectedItemForAction?.membership_type ;
+          const membershipType = selectedItemForAction?.membership_type;
           const resp = await fetch(`/api/students/fee-config/${membershipType}/${selectedItemForAction.sex}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
@@ -1851,7 +1851,7 @@ function Students() {
           const parsedAmount = parseFloat(rawAmount);
           const safeAmount = isNaN(parsedAmount) ? 0 : parsedAmount;
 
-          logger.debug('💰 [handleViewStudent] Payment item', { index: index+1, raw: rawAmount, safe: safeAmount });
+          logger.debug('💰 [handleViewStudent] Payment item', { index: index + 1, raw: rawAmount, safe: safeAmount });
 
           totalPaid += safeAmount;
         });
@@ -1875,7 +1875,7 @@ function Students() {
   // Edit student from view dialog
   const handleEditFromView = () => {
     logger.debug('🔄 [handleEditFromView] Edit from view action initiated', { viewStudentData });
-    
+
     if (!viewStudentData) {
       logger.warn('⚠️ [handleEditFromView] No view student data available, aborting edit from view');
       return;
@@ -1884,39 +1884,39 @@ function Students() {
     logger.debug('👤 [handleEditFromView] Transitioning to edit mode for student', { id: viewStudentData.id, name: viewStudentData.name });
     logger.debug('🔚 [handleEditFromView] Closing view dialog');
     setViewStudentOpen(false);
-    
+
     const editData = {
       id: viewStudentData.id,
       name: viewStudentData.name,
       contactNumber: viewStudentData.contact_number,
       sex: viewStudentData.sex,
       seatNumber: viewStudentData.seat_number || '',
-  fatherName: viewStudentData.father_name || viewStudentData.fatherName || '',
-  membershipDate: viewStudentData.membership_date ? isoToISTDateInput(viewStudentData.membership_date) : '',
-  membershipTill: viewStudentData.membership_till ? isoToISTDateInput(viewStudentData.membership_till) : '',
-  // Map backend membership_type to frontend membershipType so the edit form is accurate
-  membershipType: viewStudentData.membership_type || viewStudentData.membershipType 
+      fatherName: viewStudentData.father_name || viewStudentData.fatherName || '',
+      membershipDate: viewStudentData.membership_date ? isoToISTDateInput(viewStudentData.membership_date) : '',
+      membershipTill: viewStudentData.membership_till ? isoToISTDateInput(viewStudentData.membership_till) : '',
+      // Map backend membership_type to frontend membershipType so the edit form is accurate
+      membershipType: viewStudentData.membership_type || viewStudentData.membershipType
     };
-  // Preserve Aadhaar and Address when transitioning from view -> edit
-  editData.aadhaarNumber = viewStudentData.aadhaar_number || viewStudentData.aadhaarNumber || '';
-  editData.address = viewStudentData.address || viewStudentData.address || '';
-    
-  logger.debug('📝 [handleEditFromView] Setting edit form data', editData);
-  logger.debug('📞 [handleEditFromView] Contact being set', { contact: viewStudentData.contact_number });
-  logger.debug('👫 [handleEditFromView] Gender being set', { sex: viewStudentData.sex });
-  logger.debug('🪑 [handleEditFromView] Seat being set', { seat: viewStudentData.seat_number });
-    
+    // Preserve Aadhaar and Address when transitioning from view -> edit
+    editData.aadhaarNumber = viewStudentData.aadhaar_number || viewStudentData.aadhaarNumber || '';
+    editData.address = viewStudentData.address || viewStudentData.address || '';
+
+    logger.debug('📝 [handleEditFromView] Setting edit form data', editData);
+    logger.debug('📞 [handleEditFromView] Contact being set', { contact: viewStudentData.contact_number });
+    logger.debug('👫 [handleEditFromView] Gender being set', { sex: viewStudentData.sex });
+    logger.debug('🪑 [handleEditFromView] Seat being set', { seat: viewStudentData.seat_number });
+
     // Set selectedItemForAction for the edit functions to work
     setSelectedItemForAction({ ...viewStudentData });
     setEditStudent(editData);
-    
+
     // Fetch available seats if gender is available
     if (editData.sex) {
       fetchEditAvailableSeats(editData.sex, editData.seatNumber);
     }
-    
+
     setEditStudentOpen(true);
-  logger.debug('✅ [handleEditFromView] Successfully transitioned from view to edit mode');
+    logger.debug('✅ [handleEditFromView] Successfully transitioned from view to edit mode');
   };
 
   // Confirm deactivate student
@@ -2028,7 +2028,7 @@ function Students() {
   const handleReactivateStudent = () => {
     logger.debug('🟢 [handleReactivateStudent] Called', { selectedItemForAction });
     logger.debug('🟢 [handleReactivateStudent] Student name', { name: selectedItemForAction?.name });
-    
+
     if (!selectedItemForAction) {
       logger.error('❌ [handleReactivateStudent] No student selected for reactivation');
       return;
@@ -2037,8 +2037,8 @@ function Students() {
     // Reset seat selection and fetch available seats for this student's gender
     setReactivateSelectedSeat('');
     fetchReactivateAvailableSeats(selectedItemForAction.sex);
-    
-  logger.debug('🟢 [handleReactivateStudent] Opening reactivate confirmation dialog');
+
+    logger.debug('🟢 [handleReactivateStudent] Opening reactivate confirmation dialog');
     setReactivateConfirmOpen(true);
     // Don't call handleActionClose() here - keep selectedItemForAction for the confirmation
   };
@@ -2046,7 +2046,7 @@ function Students() {
   // Confirm reactivate student
   const confirmReactivateStudent = async () => {
     logger.debug('🟢 [confirmReactivateStudent] Called', { selectedItemForAction, selectedSeat: reactivateSelectedSeat });
-    
+
     if (!selectedItemForAction) {
       logger.error('❌ [confirmReactivateStudent] No selected item for action, aborting');
       return;
@@ -2054,20 +2054,20 @@ function Students() {
 
     try {
       logger.debug('🟢 [confirmReactivateStudent] Preparing to reactivate student', { id: selectedItemForAction.id, name: selectedItemForAction.name });
-      
+
       // Update student's membership_status to 'active' and optionally assign seat
       const requestBody = {
         ...selectedItemForAction,
         membership_status: 'active'
       };
-      
+
       // Only include seat_number if a seat was selected
       if (reactivateSelectedSeat) {
         requestBody.seat_number = reactivateSelectedSeat;
       }
-      
-  logger.debug('🟢 [confirmReactivateStudent] Request body', requestBody);
-      
+
+      logger.debug('🟢 [confirmReactivateStudent] Request body', requestBody);
+
       const response = await fetch(`/api/students/${selectedItemForAction.id}`, {
         method: 'PUT',
         headers: {
@@ -2077,7 +2077,7 @@ function Students() {
         body: JSON.stringify(requestBody)
       });
 
-  logger.debug('🟢 [confirmReactivateStudent] Response status', { status: response.status, ok: response.ok });
+      logger.debug('🟢 [confirmReactivateStudent] Response status', { status: response.status, ok: response.ok });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -2086,7 +2086,7 @@ function Students() {
       }
 
       const responseData = await response.json();
-  logger.debug('✅ [confirmReactivateStudent] Response data', responseData);
+      logger.debug('✅ [confirmReactivateStudent] Response data', responseData);
 
       setSnackbarMessage('Student reactivated successfully');
       setSnackbarSeverity('success');
@@ -2120,7 +2120,7 @@ function Students() {
 
     try {
       logger.debug('🟢 [confirmAssignSeatToStudent] Assigning seat', { seat: assignSelectedSeat, studentId: studentForSeatAssignment.id });
-      
+
       const response = await fetch(`/api/students/${studentForSeatAssignment.id}`, {
         method: 'PUT',
         headers: {
@@ -2133,19 +2133,19 @@ function Students() {
         })
       });
 
-  if (!response.ok) throw new Error('Failed to assign seat');
+      if (!response.ok) throw new Error('Failed to assign seat');
 
-  logger.info('Seat assigned successfully', { seat: assignSelectedSeat, studentId: studentForSeatAssignment.id });
-  setSnackbarMessage('Seat assigned successfully');
-  setSnackbarSeverity('success');
-  setSnackbarOpen(true);
-  setAssignSeatDialogOpen(false);
-  setStudentForSeatAssignment(null);
-  setAssignSelectedSeat('');
-  fetchData();
+      logger.info('Seat assigned successfully', { seat: assignSelectedSeat, studentId: studentForSeatAssignment.id });
+      setSnackbarMessage('Seat assigned successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setAssignSeatDialogOpen(false);
+      setStudentForSeatAssignment(null);
+      setAssignSelectedSeat('');
+      fetchData();
     } catch (err) {
-  logger.error('❌ [confirmAssignSeatToStudent] Error', err);
-  handleApiError(err, 'Failed to assign seat');
+      logger.error('❌ [confirmAssignSeatToStudent] Error', err);
+      handleApiError(err, 'Failed to assign seat');
     }
   };
 
@@ -2164,15 +2164,15 @@ function Students() {
         })
       });
 
-  if (!response.ok) throw new Error('Failed to assign seat');
+      if (!response.ok) throw new Error('Failed to assign seat');
 
-  logger.info('Seat assign API succeeded');
-  setSnackbarMessage('Seat assigned successfully');
-  setSnackbarSeverity('success');
-  setSnackbarOpen(true);
-  setAssignSeatOpen(false);
-  setAssignSeatData({ seatNumber: '', studentId: '' });
-  fetchData();
+      logger.info('Seat assign API succeeded');
+      setSnackbarMessage('Seat assigned successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setAssignSeatOpen(false);
+      setAssignSeatData({ seatNumber: '', studentId: '' });
+      fetchData();
     } catch (err) {
       handleApiError(err, 'Failed to assign seat');
     }
@@ -2183,15 +2183,15 @@ function Students() {
   const handleConfirmAddPaymentWithMembership = async () => { await processPayment(true); };
 
   const processPayment = async (extendMembership = false) => {
-  logger.info('[processPayment] starting', { extendMembership, studentId: selectedItemForAction?.id });
-    
+    logger.info('[processPayment] starting', { extendMembership, studentId: selectedItemForAction?.id });
+
     if (!selectedItemForAction) {
       logger.warn('⚠️ [processPayment] No selected item for action, aborting payment creation');
       return;
     }
 
     logger.debug('👤 [processPayment] Creating payment for student', { id: selectedItemForAction.id, name: selectedItemForAction.name });
-    
+
     // Frontend validation
     const validationErrors = [];
     if (!paymentData.amount || isNaN(paymentData.amount) || parseFloat(paymentData.amount) <= 0) {
@@ -2208,10 +2208,10 @@ function Students() {
     }
 
     // Check for free membership students (monthly fee = 0) - only for monthly_fee payments, allow refunds
-  if (paymentData.type === 'monthly_fee' && feeConfig && parseFloat(feeConfig.monthly_fees) <= 0) {
+    if (paymentData.type === 'monthly_fee' && feeConfig && parseFloat(feeConfig.monthly_fees) <= 0) {
       validationErrors.push('Cannot add monthly fee payment for free membership students (monthly fee = ₹0)');
     }
-    
+
     if (validationErrors.length > 0) {
       logger.warn('❌ [processPayment] Frontend validation failed', { validationErrors });
       setSnackbarMessage('Please fill in all required fields: ' + validationErrors.join(', '));
@@ -2219,7 +2219,7 @@ function Students() {
       setSnackbarOpen(true);
       return;
     }
-    
+
     // Map frontend fields to backend fields
     const paymentPayload = {
       student_id: selectedItemForAction.id,
@@ -2231,13 +2231,13 @@ function Students() {
       modified_by: 1, // Will be set by auth middleware but including for completeness
       extend_membership: extendMembership
     };
-    
-  logger.debug('[processPayment] payment payload', { amount: paymentPayload.amount, mode: paymentPayload.payment_mode, type: paymentPayload.payment_type, extendMembership, membershipExtensionDays });
-    
+
+    logger.debug('[processPayment] payment payload', { amount: paymentPayload.amount, mode: paymentPayload.payment_mode, type: paymentPayload.payment_type, extendMembership, membershipExtensionDays });
+
     try {
-  setPaymentLoading(true);
-  logger.debug('🌐 [processPayment] Sending POST request to /api/payments', { payloadSummary: { amount: paymentPayload.amount, extendMembership } });
-      
+      setPaymentLoading(true);
+      logger.debug('🌐 [processPayment] Sending POST request to /api/payments', { payloadSummary: { amount: paymentPayload.amount, extendMembership } });
+
       const response = await fetch('/api/payments', {
         method: 'POST',
         headers: {
@@ -2247,8 +2247,8 @@ function Students() {
         body: JSON.stringify(paymentPayload)
       });
 
-  logger.debug('[processPayment] API response', { status: response.status });
-      
+      logger.debug('[processPayment] API response', { status: response.status });
+
       if (!response.ok) {
         const errorData = await response.json();
         logger.error('❌ [processPayment] API request failed', errorData);
@@ -2256,34 +2256,34 @@ function Students() {
       }
 
       const responseData = await response.json();
-  logger.info('[processPayment] Payment created successfully');
+      logger.info('[processPayment] Payment created successfully');
 
-      const successMessage = extendMembership && membershipExtensionDays > 0 
+      const successMessage = extendMembership && membershipExtensionDays > 0
         ? `Payment added successfully! Membership extended by ${membershipExtensionDays} days.`
         : 'Payment added successfully';
-      
+
       setSnackbarMessage(successMessage);
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setAddPaymentOpen(false);
-      
+
       // Reset form data
-        const resetData = {
+      const resetData = {
         amount: '',
         method: 'cash',
         type: 'monthly_fee',
         date: todayInIST(),
         notes: ''
       };
-  logger.debug('🔄 [processPayment] Resetting payment form data');
+      logger.debug('🔄 [processPayment] Resetting payment form data');
       setPaymentData(resetData);
       setFeeConfig(null);
       setMembershipExtensionDays(0);
-      
+
       // Close action menu after successful payment
       handleActionClose();
-      
-  logger.debug('🔄 [processPayment] Refreshing data');
+
+      logger.debug('🔄 [processPayment] Refreshing data');
       fetchData();
     } catch (err) {
       logger.error('❌ [processPayment] Error occurred during payment creation', err);
@@ -2299,25 +2299,25 @@ function Students() {
   const handleStudentClick = async (event, studentId, studentName) => {
     event.stopPropagation();
     event.preventDefault();
-    
-  logger.debug('🔍 [Seat History] Clicked on student', { id: studentId, name: studentName });
-  logger.debug('🔍 [Seat History] Available students (sample)', students.slice(0,5).map(s => ({ id: s.id, name: s.name })));
-    
+
+    logger.debug('🔍 [Seat History] Clicked on student', { id: studentId, name: studentName });
+    logger.debug('🔍 [Seat History] Available students (sample)', students.slice(0, 5).map(s => ({ id: s.id, name: s.name })));
+
     // Find the student by ID first (most reliable), then by name as fallback
     let student = students.find(s => s.id === studentId);
-      if (!student && studentName) {
+    if (!student && studentName) {
       student = students.find(s => s.name === studentName);
       logger.debug('🔍 [Seat History] Student not found by ID, tried name lookup', { found: !!student, student });
     }
 
     logger.debug('🔍 [Seat History] Found student', { found: !!student, studentSummary: student ? { id: student.id, name: student.name } : null });
-    
+
     if (student) {
-  logger.debug('✅ [Seat History] Opening student details for', { name: student.name });
+      logger.debug('✅ [Seat History] Opening student details for', { name: student.name });
       // Set selected item and trigger view directly
       setSelectedItemForAction(student);
       setViewStudentData({ ...student });
-      
+
       // Calculate total paid amount inline
       try {
         const response = await fetch(`/api/payments/student/${student.id}`, {
@@ -2326,7 +2326,7 @@ function Students() {
             'Content-Type': 'application/json'
           }
         });
-        
+
         if (response.ok) {
           const payments = await response.json();
           const totalPaid = payments.reduce((sum, payment) => {
@@ -2341,11 +2341,11 @@ function Students() {
         logger.error('Error fetching payment data', error);
         setViewStudentTotalPaid(0);
       }
-      
-  setViewStudentOpen(true);
+
+      setViewStudentOpen(true);
     } else {
-  // Student not found in current list, show a message
-  logger.warn('⚠️ [Seat History] Student not found', { id: studentId, name: studentName });
+      // Student not found in current list, show a message
+      logger.warn('⚠️ [Seat History] Student not found', { id: studentId, name: studentName });
       const identifier = studentName || `ID: ${studentId}`;
       setSnackbarMessage(`Student "${identifier}" not found in current student list. They may have been deactivated or removed.`);
       setSnackbarSeverity('warning');
@@ -2355,12 +2355,12 @@ function Students() {
 
   // Confirm edit student
   const handleConfirmEditStudent = async () => {
-  setEditAttempted(true);
-  logger.debug('✅ [handleConfirmEditStudent] Starting student update process', { selectedItemForAction, editStudent });
-    
+    setEditAttempted(true);
+    logger.debug('✅ [handleConfirmEditStudent] Starting student update process', { selectedItemForAction, editStudent });
+
     // Use editStudent.id if selectedItemForAction is null but editStudent has an ID
     const studentId = selectedItemForAction?.id || editStudent?.id;
-    
+
     if (!studentId) {
       logger.warn('⚠️ [handleConfirmEditStudent] No student ID available, aborting update');
       logger.debug('🔍 [handleConfirmEditStudent] Debug info', { selectedItemForAction, editStudent, extractedId: studentId });
@@ -2368,7 +2368,7 @@ function Students() {
     }
 
     logger.debug('👤 [handleConfirmEditStudent] Using student ID', { studentId, source: selectedItemForAction?.id ? 'selectedItemForAction' : 'editStudent' });
-    
+
     // Validate required fields for edit
     if (!editStudent.membershipDate || !editStudent.membershipDate.trim()) {
       setSnackbarMessage('*Membership start date is required');
@@ -2459,7 +2459,7 @@ function Students() {
 
     const updateData = {
       name: editStudent.name,
-  membership_type: editStudent.membershipType || editStudent.membership_type ,
+      membership_type: editStudent.membershipType || editStudent.membership_type,
       contact_number: editStudent.contactNumber,
       father_name: editStudent.fatherName || null,
       sex: editStudent.sex,
@@ -2469,15 +2469,15 @@ function Students() {
       aadhaar_number: editStudent.aadhaarNumber || null,
       address: editStudent.address || null
     };
-    
-  logger.debug('📊 [handleConfirmEditStudent] Update payload', updateData);
-  logger.debug('🪑 [handleConfirmEditStudent] Seat assignment', { seat: editStudent.seatNumber });
-  logger.debug('📅 [handleConfirmEditStudent] Membership period', { from: editStudent.membershipDate, to: editStudent.membershipTill });
-    
-  // Show progress indicator while the update request is in-flight
-  setEditStudentLoading(true);
-  try {
-  logger.debug('🌐 [handleConfirmEditStudent] Sending PUT request to API', { studentId });
+
+    logger.debug('📊 [handleConfirmEditStudent] Update payload', updateData);
+    logger.debug('🪑 [handleConfirmEditStudent] Seat assignment', { seat: editStudent.seatNumber });
+    logger.debug('📅 [handleConfirmEditStudent] Membership period', { from: editStudent.membershipDate, to: editStudent.membershipTill });
+
+    // Show progress indicator while the update request is in-flight
+    setEditStudentLoading(true);
+    try {
+      logger.debug('🌐 [handleConfirmEditStudent] Sending PUT request to API', { studentId });
       const response = await fetch(`/api/students/${studentId}`, {
         method: 'PUT',
         headers: {
@@ -2487,8 +2487,8 @@ function Students() {
         body: JSON.stringify(updateData)
       });
 
-  logger.debug('📡 [handleConfirmEditStudent] API Response status', { status: response.status });
-      
+      logger.debug('📡 [handleConfirmEditStudent] API Response status', { status: response.status });
+
       // Always read response body to surface server-side validation messages
       let responseData = null;
       try {
@@ -2519,22 +2519,22 @@ function Students() {
         throw new Error(responseData?.error || 'Failed to update student');
       }
 
-  logger.debug('✅ [handleConfirmEditStudent] API Response data', responseData);
+      logger.debug('✅ [handleConfirmEditStudent] API Response data', responseData);
       logger.info('🎉 [handleConfirmEditStudent] Student updated successfully', { studentId });
 
       setSnackbarMessage('Student updated successfully');
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
-  setEditStudentOpen(false);
-  setEditAttempted(false);
+      setEditStudentOpen(false);
+      setEditAttempted(false);
       setEditAvailableSeats([]);
 
       logger.debug('🔄 [handleConfirmEditStudent] Refreshing data');
       fetchData();
     } catch (err) {
-  logger.error('❌ [handleConfirmEditStudent] Error occurred during student update', err);
-  logger.debug('🔍 [handleConfirmEditStudent] Error details', { message: err.message, stack: err.stack, studentId: studentId, editData: editStudent });
-  handleApiError(err, 'Failed to update student');
+      logger.error('❌ [handleConfirmEditStudent] Error occurred during student update', err);
+      logger.debug('🔍 [handleConfirmEditStudent] Error details', { message: err.message, stack: err.stack, studentId: studentId, editData: editStudent });
+      handleApiError(err, 'Failed to update student');
     } finally {
       setEditStudentLoading(false);
     }
@@ -3205,30 +3205,30 @@ function Students() {
                   {seat.studentName ? (
                     <>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
-                           onClick={async (event) => {
-                             event.stopPropagation();
-                             const student = students.find(s => s.id === seat.studentId);
-                             if (student) {
-                               setSelectedItemForAction(student);
-                               setViewStudentData({ ...student });
-                               try {
-                                 const resp = await fetch(`/api/payments/student/${student.id}`, {
-                                   headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}`, 'Content-Type': 'application/json' }
-                                 });
-                                 if (resp.ok) {
-                                   const payments = await resp.json();
-                                   const totalPaid = (payments || []).reduce((sum, p) => { const a = parseFloat(p.amount); return sum + (isNaN(a) ? 0 : a); }, 0);
-                                   setViewStudentTotalPaid(totalPaid);
-                                 } else {
-                                   setViewStudentTotalPaid(0);
-                                 }
-                               } catch (err) {
-                                 logger.error('❌ [seat card click] Error fetching payments', err);
-                                 setViewStudentTotalPaid(0);
-                               }
-                               setViewStudentOpen(true);
-                             }
-                           }}>
+                        onClick={async (event) => {
+                          event.stopPropagation();
+                          const student = students.find(s => s.id === seat.studentId);
+                          if (student) {
+                            setSelectedItemForAction(student);
+                            setViewStudentData({ ...student });
+                            try {
+                              const resp = await fetch(`/api/payments/student/${student.id}`, {
+                                headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}`, 'Content-Type': 'application/json' }
+                              });
+                              if (resp.ok) {
+                                const payments = await resp.json();
+                                const totalPaid = (payments || []).reduce((sum, p) => { const a = parseFloat(p.amount); return sum + (isNaN(a) ? 0 : a); }, 0);
+                                setViewStudentTotalPaid(totalPaid);
+                              } else {
+                                setViewStudentTotalPaid(0);
+                              }
+                            } catch (err) {
+                              logger.error('❌ [seat card click] Error fetching payments', err);
+                              setViewStudentTotalPaid(0);
+                            }
+                            setViewStudentOpen(true);
+                          }
+                        }}>
                         {seat.gender === 'female' ? (
                           <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} />
                         ) : (
@@ -3301,10 +3301,10 @@ function Students() {
                         <PersonAddIcon fontSize="small" />
                       </IconButton>
                     ) : null}
-                    <IconButton 
-                      size="small" 
+                    <IconButton
+                      size="small"
                       onClick={(e) => handleActionClick(e, seat)}
-                      sx={{ 
+                      sx={{
                         zIndex: 100,
                         position: 'relative'
                       }}
@@ -3326,14 +3326,14 @@ function Students() {
         <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 600 : 'auto' }}>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ 
+              <TableCell sx={{
                 minWidth: 24,
                 width: 24,
                 maxWidth: 32
               }}>
                 <strong>Seat#</strong>
               </TableCell>
-              <TableCell sx={{ 
+              <TableCell sx={{
                 position: isMobile ? 'sticky' : 'static',
                 left: isMobile ? 40 : 'auto',
                 bgcolor: 'background.paper',
@@ -3343,7 +3343,7 @@ function Students() {
               }}>
                 <strong>Student Details</strong>
               </TableCell>
-              <TableCell sx={{ 
+              <TableCell sx={{
                 minWidth: 80,
                 position: 'sticky',
                 right: 0,
@@ -3361,13 +3361,13 @@ function Students() {
                 <TableCell>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <EventSeatIcon 
-                        sx={{ 
-                          color: seat.occupied 
+                      <EventSeatIcon
+                        sx={{
+                          color: seat.occupied
                             ? (seat.gender === 'female' ? 'secondary.main' : 'primary.main')
                             : 'grey.500',
                           fontSize: 20
-                        }} 
+                        }}
                       />
                       <Typography
                         variant="body2"
@@ -3385,7 +3385,7 @@ function Students() {
                     </Typography>
                   </Box>
                 </TableCell>
-                <TableCell sx={{ 
+                <TableCell sx={{
                   position: isMobile ? 'sticky' : 'static',
                   left: isMobile ? 40 : 'auto',
                   bgcolor: 'background.paper',
@@ -3395,12 +3395,12 @@ function Students() {
                   {seat.studentName ? (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {seat.gender === 'female' ? 
+                        {seat.gender === 'female' ?
                           <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
                           <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
                         }
-                        <Typography 
-                          variant="body2" 
+                        <Typography
+                          variant="body2"
                           sx={{
                             fontWeight: 'medium',
                             cursor: 'pointer',
@@ -3477,7 +3477,7 @@ function Students() {
                     )
                   )}
                 </TableCell>
-                <TableCell sx={{ 
+                <TableCell sx={{
                   position: 'sticky',
                   right: 0,
                   bgcolor: 'background.paper',
@@ -3501,10 +3501,10 @@ function Students() {
                         <PersonAddIcon fontSize="small" />
                       </IconButton>
                     ) : null}
-                    <IconButton 
-                      size="small" 
+                    <IconButton
+                      size="small"
                       onClick={(e) => handleActionClick(e, seat)}
-                      sx={{ 
+                      sx={{
                         zIndex: 100,
                         position: 'relative'
                       }}
@@ -3736,68 +3736,68 @@ function Students() {
 
   return (
     <Box sx={{ p: isMobile ? 1 : 3, boxSizing: 'border-box' }}>
-  {/* Top sticky section: header + stats + tabs + filters */}
-  <Box
-    ref={headerRef}
-    sx={{
-      // No longer sticky — allow header, stats, tabs and filters to scroll normally
-      position: 'static',
-      boxSizing: 'border-box',
-      backgroundColor: 'background.paper',
-      pb: 1
-    }}
-  >
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {currentTab === 0 ? <EventSeatIcon sx={{ color: 'primary.main' }} /> : <PersonIcon sx={{ color: 'primary.main' }} />}
-          <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">
-            {currentTab === 0 ? 'Seats' : 'Students'}
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setAddDialogOpen(true)}
-            size={isMobile ? "small" : "medium"}
-          >
-            Add Student
-          </Button>
-          <IconButton 
-            onClick={fetchData} 
-            color="primary"
-            sx={{ 
-              bgcolor: theme.palette.primary.main + '10',
-              '&:hover': { bgcolor: theme.palette.primary.main + '20' }
-            }}
-          >
-            <RefreshIcon />
-          </IconButton>
-        </Box>
-    </Box>
-
-    {/* Dashboard Stats */}
-    {renderStats()}
-
-    {/* Tabs */}
-    <Paper sx={{ mb: 2 }}>
-      <Tabs
-        value={currentTab}
-        onChange={handleTabChange}
-        variant={isMobile ? "fullWidth" : "standard"}
+      {/* Top sticky section: header + stats + tabs + filters */}
+      <Box
+        ref={headerRef}
+        sx={{
+          // No longer sticky — allow header, stats, tabs and filters to scroll normally
+          position: 'static',
+          boxSizing: 'border-box',
+          backgroundColor: 'background.paper',
+          pb: 1
+        }}
       >
-        <Tab icon={<EventSeatIcon />} label="Seats" />
-        <Tab icon={<PersonIcon />} label="Students" />
-      </Tabs>
-    </Paper>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {currentTab === 0 ? <EventSeatIcon sx={{ color: 'primary.main' }} /> : <PersonIcon sx={{ color: 'primary.main' }} />}
+            <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">
+              {currentTab === 0 ? 'Seats' : 'Students'}
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setAddDialogOpen(true)}
+              size={isMobile ? "small" : "medium"}
+            >
+              Add Student
+            </Button>
+            <IconButton
+              onClick={fetchData}
+              color="primary"
+              sx={{
+                bgcolor: theme.palette.primary.main + '10',
+                '&:hover': { bgcolor: theme.palette.primary.main + '20' }
+              }}
+            >
+              <RefreshIcon />
+            </IconButton>
+          </Box>
+        </Box>
 
-    {/* Filters */}
-    {renderFilters()}
-  </Box>
+        {/* Dashboard Stats */}
+        {renderStats()}
+
+        {/* Tabs */}
+        <Paper sx={{ mb: 2 }}>
+          <Tabs
+            value={currentTab}
+            onChange={handleTabChange}
+            variant={isMobile ? "fullWidth" : "standard"}
+          >
+            <Tab icon={<EventSeatIcon />} label="Seats" />
+            <Tab icon={<PersonIcon />} label="Students" />
+          </Tabs>
+        </Paper>
+
+        {/* Filters */}
+        {renderFilters()}
+      </Box>
 
       {/* Content */}
-  {currentTab === 0 && renderSeatsView()}
-  {currentTab === 1 && renderStudentsView()}
+      {currentTab === 0 && renderSeatsView()}
+      {currentTab === 1 && renderStudentsView()}
 
       {/* Action Menu */}
       <Menu
@@ -3869,7 +3869,7 @@ function Students() {
             <ListItemText>Seat Assignment History</ListItemText>
           </MenuItem>
         ) : null}
-        
+
         {currentTab === 1 && selectedItemForAction && (
           // If selected student is inactive, expose only Reactivate
           (selectedItemForAction.membership_status === 'inactive' || selectedItemForAction.status === 'inactive') ? (
@@ -4070,7 +4070,7 @@ function Students() {
                 )}
               </Select>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                {newStudent.sex ? 
+                {newStudent.sex ?
                   `${availableSeats.length} seats available for ${newStudent.sex} students` :
                   "Select gender to see available seats"
                 }
@@ -4097,7 +4097,7 @@ function Students() {
               error={addAttempted && !/^\d{10}$/.test((newStudent.contact || '').trim())}
               helperText={addAttempted ? (
                 !(newStudent.contact || '').trim() ? 'Contact number is required' :
-                (!/^\d{10}$/.test((newStudent.contact || '').trim()) ? 'Contact number must be exactly 10 digits' : '')
+                  (!/^\d{10}$/.test((newStudent.contact || '').trim()) ? 'Contact number must be exactly 10 digits' : '')
               ) : ''}
               inputProps={{ inputMode: 'numeric', pattern: '[0-9]*' }}
             />
@@ -4135,19 +4135,19 @@ function Students() {
         <DialogActions>
           <Button onClick={() => {
             setAddDialogOpen(false);
-          setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: todayInIST(), aadhaar_number: '', address: '' });
+            setNewStudent({ name: '', seat_number: '', contact: '', sex: '', fatherName: '', membership_date: todayInIST(), aadhaar_number: '', address: '' });
             setAvailableSeats([]);
             setAddAttempted(false);
           }}>
             Cancel
           </Button>
-              <Button 
-                variant="contained" 
-                onClick={handleAddStudent}
-                disabled={addStudentLoading}
-              >
-                {addStudentLoading ? 'Adding...' : 'Add Student'}
-              </Button>
+          <Button
+            variant="contained"
+            onClick={handleAddStudent}
+            disabled={addStudentLoading}
+          >
+            {addStudentLoading ? 'Adding...' : 'Add Student'}
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -4187,30 +4187,30 @@ function Students() {
       {/* Seat History Dialog */}
       <Dialog open={seatHistoryOpen} onClose={() => setSeatHistoryOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>
-          {seatHistoryContext?.contextTab === 0 
+          {seatHistoryContext?.contextTab === 0
             ? `Seat History - ${seatHistoryContext?.seatNumber || seatHistoryContext?.seat_number || 'Unknown'}`
             : (() => {
-                // For student tab, prioritize student info but fallback gracefully
-                const studentName = seatHistoryContext?.name || seatHistoryContext?.student_name;
-                const studentId = seatHistoryContext?.id;
-                const seatNumber = seatHistoryContext?.seatNumber || seatHistoryContext?.seat_number;
-                
-                if (studentName) {
-                  return `Student Seat History - ${studentName}`;
-                } else if (studentId) {
-                  return `Student Seat History - Student ID: ${studentId}`;
-                } else if (seatNumber) {
-                  return `Seat History - Seat #${seatNumber}`;
-                } else {
-                  return 'Seat History - Unknown';
-                }
-              })()
+              // For student tab, prioritize student info but fallback gracefully
+              const studentName = seatHistoryContext?.name || seatHistoryContext?.student_name;
+              const studentId = seatHistoryContext?.id;
+              const seatNumber = seatHistoryContext?.seatNumber || seatHistoryContext?.seat_number;
+
+              if (studentName) {
+                return `Student Seat History - ${studentName}`;
+              } else if (studentId) {
+                return `Student Seat History - Student ID: ${studentId}`;
+              } else if (seatNumber) {
+                return `Seat History - Seat #${seatNumber}`;
+              } else {
+                return 'Seat History - Unknown';
+              }
+            })()
           }
         </DialogTitle>
         <DialogContent>
           {seatHistory.length === 0 ? (
             <Typography>
-              {seatHistoryContext?.contextTab === 0 
+              {seatHistoryContext?.contextTab === 0
                 ? 'No history available for this seat.'
                 : 'No seat assignment history available for this student.'
               }
@@ -4237,10 +4237,46 @@ function Students() {
                   {seatHistory.map((entry, index) => (
                     <TableRow key={index}>
                       <TableCell>
-                        {seatHistoryContext?.contextTab === 0 
+                        {seatHistoryContext?.contextTab === 0
                           ? (entry.student_name ? (
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                {/* Student Name - Clickable */}
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              {/* Student Name - Clickable */}
+                              <ButtonBase
+                                disableRipple
+                                onClick={async (event) => {
+                                  await handleStudentClick(event, entry.student_id, entry.student_name);
+                                }}
+                                onContextMenu={(e) => e.preventDefault()}
+                                sx={{ display: 'inline-flex', alignItems: 'center', px: 0 }}
+                              >
+                                <Typography
+                                  variant="body2"
+                                  component="span"
+                                  sx={{
+                                    fontWeight: 'medium',
+                                    color: 'primary.main',
+                                    display: 'inline-block',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    transition: 'all 0.2s ease',
+                                    '&:hover': {
+                                      textDecoration: 'underline',
+                                      backgroundColor: 'primary.light',
+                                      color: 'primary.contrastText'
+                                    },
+                                    userSelect: 'none',
+                                    WebkitUserSelect: 'none',
+                                    msUserSelect: 'none',
+                                    WebkitTouchCallout: 'none',
+                                    WebkitTapHighlightColor: 'transparent'
+                                  }}
+                                >
+                                  {entry.student_name}
+                                </Typography>
+                              </ButtonBase>
+
+                              {/* Student ID - Clickable */}
+                              {entry.student_id && (
                                 <ButtonBase
                                   disableRipple
                                   onClick={async (event) => {
@@ -4249,20 +4285,20 @@ function Students() {
                                   onContextMenu={(e) => e.preventDefault()}
                                   sx={{ display: 'inline-flex', alignItems: 'center', px: 0 }}
                                 >
-                                  <Typography 
-                                    variant="body2" 
+                                  <Typography
+                                    variant="caption"
                                     component="span"
-                                    sx={{ 
-                                      fontWeight: 'medium',
-                                      color: 'primary.main',
+                                    sx={{
+                                      color: 'text.secondary',
                                       display: 'inline-block',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px',
+                                      fontSize: '0.7rem',
                                       transition: 'all 0.2s ease',
                                       '&:hover': {
                                         textDecoration: 'underline',
-                                        backgroundColor: 'primary.light',
-                                        color: 'primary.contrastText'
+                                        backgroundColor: 'grey.200',
+                                        color: 'primary.main'
                                       },
                                       userSelect: 'none',
                                       WebkitUserSelect: 'none',
@@ -4271,48 +4307,12 @@ function Students() {
                                       WebkitTapHighlightColor: 'transparent'
                                     }}
                                   >
-                                    {entry.student_name}
+                                    ID: {entry.student_id}
                                   </Typography>
                                 </ButtonBase>
-                                
-                                {/* Student ID - Clickable */}
-                                {entry.student_id && (
-                                  <ButtonBase
-                                    disableRipple
-                                    onClick={async (event) => {
-                                      await handleStudentClick(event, entry.student_id, entry.student_name);
-                                    }}
-                                    onContextMenu={(e) => e.preventDefault()}
-                                    sx={{ display: 'inline-flex', alignItems: 'center', px: 0 }}
-                                  >
-                                    <Typography 
-                                      variant="caption" 
-                                      component="span"
-                                      sx={{ 
-                                        color: 'text.secondary',
-                                        display: 'inline-block',
-                                        padding: '1px 4px',
-                                        borderRadius: '3px',
-                                        fontSize: '0.7rem',
-                                        transition: 'all 0.2s ease',
-                                        '&:hover': {
-                                          textDecoration: 'underline',
-                                          backgroundColor: 'grey.200',
-                                          color: 'primary.main'
-                                        },
-                                        userSelect: 'none',
-                                        WebkitUserSelect: 'none',
-                                        msUserSelect: 'none',
-                                        WebkitTouchCallout: 'none',
-                                        WebkitTapHighlightColor: 'transparent'
-                                      }}
-                                    >
-                                      ID: {entry.student_id}
-                                    </Typography>
-                                  </ButtonBase>
-                                )}
-                              </Box>
-                            ) : 'N/A')
+                              )}
+                            </Box>
+                          ) : 'N/A')
                           : (entry.seat_number || 'N/A')
                         }
                       </TableCell>
@@ -4436,8 +4436,8 @@ function Students() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAssignSeatOpen(false)}>Cancel</Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={handleConfirmAssignSeat}
             disabled={!assignSeatData.studentId}
           >
@@ -4518,44 +4518,44 @@ function Students() {
             <TextField
               fullWidth
               label="Contact Number"
-                value={editStudent.contactNumber}
-                onChange={(e) => setEditStudent({ ...editStudent, contactNumber: e.target.value })}
-                required
-                error={editAttempted && !/^\d{10}$/.test((editStudent.contactNumber || '').trim())}
-                helperText={editAttempted ? (
-                  !(editStudent.contactNumber || '').trim() ? 'Contact number is required' :
+              value={editStudent.contactNumber}
+              onChange={(e) => setEditStudent({ ...editStudent, contactNumber: e.target.value })}
+              required
+              error={editAttempted && !/^\d{10}$/.test((editStudent.contactNumber || '').trim())}
+              helperText={editAttempted ? (
+                !(editStudent.contactNumber || '').trim() ? 'Contact number is required' :
                   (!/^\d{10}$/.test((editStudent.contactNumber || '').trim()) ? 'Contact number must be exactly 10 digits' : '')
-                ) : ''}
-                inputProps={{ inputMode: 'numeric', pattern: '[0-9]*' }}
+              ) : ''}
+              inputProps={{ inputMode: 'numeric', pattern: '[0-9]*' }}
             />
             <TextField
               fullWidth
               label="Father's Name"
-                value={editStudent.fatherName}
-                onChange={(e) => setEditStudent({ ...editStudent, fatherName: e.target.value })}
-                required
-                error={editAttempted && (!editStudent.fatherName || !editStudent.fatherName.trim())}
-                helperText={editAttempted && (!editStudent.fatherName || !editStudent.fatherName.trim()) ? "Father's name is required" : ''}
+              value={editStudent.fatherName}
+              onChange={(e) => setEditStudent({ ...editStudent, fatherName: e.target.value })}
+              required
+              error={editAttempted && (!editStudent.fatherName || !editStudent.fatherName.trim())}
+              helperText={editAttempted && (!editStudent.fatherName || !editStudent.fatherName.trim()) ? "Father's name is required" : ''}
             />
             <TextField
               fullWidth
               label="Aadhaar Number"
-                value={editStudent.aadhaarNumber}
-                onChange={(e) => setEditStudent({ ...editStudent, aadhaarNumber: e.target.value })}
-                required
-                error={editAttempted && (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim())}
-                helperText={editAttempted && (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim()) ? 'Aadhaar number is required' : ''}
+              value={editStudent.aadhaarNumber}
+              onChange={(e) => setEditStudent({ ...editStudent, aadhaarNumber: e.target.value })}
+              required
+              error={editAttempted && (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim())}
+              helperText={editAttempted && (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim()) ? 'Aadhaar number is required' : ''}
             />
             <TextField
               fullWidth
               label="Address"
               value={editStudent.address}
-                onChange={(e) => setEditStudent({ ...editStudent, address: e.target.value })}
-                required
-                error={editAttempted && (!editStudent.address || !editStudent.address.trim())}
-                helperText={editAttempted && (!editStudent.address || !editStudent.address.trim()) ? 'Address is required' : ''}
-                multiline
-                rows={2}
+              onChange={(e) => setEditStudent({ ...editStudent, address: e.target.value })}
+              required
+              error={editAttempted && (!editStudent.address || !editStudent.address.trim())}
+              helperText={editAttempted && (!editStudent.address || !editStudent.address.trim()) ? 'Address is required' : ''}
+              multiline
+              rows={2}
             />
             <FormControl fullWidth required error={editAttempted && !editStudent.sex}>
               <InputLabel>Gender</InputLabel>
@@ -4576,7 +4576,7 @@ function Students() {
             <FormControl fullWidth sx={{ mt: 0.5 }}>
               <InputLabel>Membership Type</InputLabel>
               <Select
-                value={editStudent.membershipType || editStudent.membership_type }
+                value={editStudent.membershipType || editStudent.membership_type}
                 onChange={(e) => initiateEditMembershipTypeChange(e.target.value)}
                 label="Membership Type"
               >
@@ -4651,7 +4651,7 @@ function Students() {
                 )}
               </Select>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                {editStudent.sex ? 
+                {editStudent.sex ?
                   `${editAvailableSeats.filter(seat => !seat.is_current).length} additional seats available for ${editStudent.sex} students` :
                   "Select gender to see available seats"
                 }
@@ -4676,8 +4676,8 @@ function Students() {
             setEditStudentOpen(false);
             setEditAvailableSeats([]);
           }}>Cancel</Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={handleConfirmEditStudent}
             disabled={editStudentLoading}
             startIcon={editStudentLoading ? <CircularProgress size={18} color="inherit" /> : null}
@@ -4746,7 +4746,7 @@ function Students() {
                 <Grid item xs={6}>
                   <Typography variant="subtitle2" color="text.secondary">Name</Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                    {viewStudentData.sex === 'female' ? 
+                    {viewStudentData.sex === 'female' ?
                       <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
                       <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
                     }
@@ -4790,8 +4790,8 @@ function Students() {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="subtitle2" color="text.secondary">Status</Typography>
-                  <Chip 
-                    label={viewStudentData.seat_number ? 'Assigned' : 'Unassigned'} 
+                  <Chip
+                    label={viewStudentData.seat_number ? 'Assigned' : 'Unassigned'}
                     color={viewStudentData.seat_number ? 'success' : 'error'}
                     size="small"
                     sx={{ mb: 2 }}
@@ -4849,8 +4849,8 @@ function Students() {
             setViewStudentTotalPaid(0);
           }}>Close</Button>
           {viewStudentData?.membership_status !== 'inactive' && (
-            <Button 
-              variant="contained" 
+            <Button
+              variant="contained"
               onClick={handleEditFromView}
               startIcon={<EditIcon />}
             >
@@ -4868,7 +4868,7 @@ function Students() {
         <DialogTitle>Confirm Deactivation</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to deactivate student "{selectedItemForAction?.name || 'Unknown'}"? 
+            Are you sure you want to deactivate student "{selectedItemForAction?.name || 'Unknown'}"?
             This will remove their seat assignment and move them to the deactivated students list.
             Their data will be preserved and they can be reactivated later.
           </Typography>
@@ -4881,7 +4881,7 @@ function Students() {
             <Box sx={{ mt: 2, p: 2, borderRadius: 1, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
               <Typography variant="subtitle2">Refund Summary</Typography>
               <Typography variant="body2" color="text.secondary">Remaining Membership Days: {deactivateRefundDays} day(s)</Typography>
-              <Typography variant="body2" color="text.secondary">Membership: {deactivateFeeConfig?.membership_type || selectedItemForAction?.membership_type } • Monthly Fee: ₹{deactivateFeeConfig?.monthly_fees ?? 'N/A'}</Typography>
+              <Typography variant="body2" color="text.secondary">Membership: {deactivateFeeConfig?.membership_type || selectedItemForAction?.membership_type} • Monthly Fee: ₹{deactivateFeeConfig?.monthly_fees ?? 'N/A'}</Typography>
               <Typography variant="body2" sx={{ mt: 1, fontWeight: 600 }}>Estimated Refund: ₹{deactivateRefundAmount}</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                 Proceeding will create a refund entry and set membership end date to today.
@@ -4894,8 +4894,8 @@ function Students() {
             setDeleteConfirmOpen(false);
             handleActionClose(); // Close action menu when cancelled
           }} disabled={processingDeactivate}>Cancel</Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             color="error"
             onClick={confirmDeactivateStudent}
             disabled={processingDeactivate}
@@ -4913,13 +4913,13 @@ function Students() {
         <DialogTitle>Confirm Reactivation</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to reactivate student "{selectedItemForAction?.name || 'Unknown'}"? 
+            Are you sure you want to reactivate student "{selectedItemForAction?.name || 'Unknown'}"?
             This will move them back to the active students list.
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
             Student ID: {selectedItemForAction?.id || 'N/A'}, Name: {selectedItemForAction?.name || 'N/A'}
           </Typography>
-          
+
           <FormControl fullWidth sx={{ mt: 3 }}>
             <InputLabel>Select Seat (Optional)</InputLabel>
             <Select
@@ -4948,8 +4948,8 @@ function Students() {
             setReactivateConfirmOpen(false);
             handleActionClose(); // Close action menu when cancelled
           }}>Cancel</Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             color="success"
             onClick={confirmReactivateStudent}
           >
@@ -4972,7 +4972,7 @@ function Students() {
           <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
             Student ID: {studentForSeatAssignment?.id || 'N/A'}, Gender: {studentForSeatAssignment?.sex || 'N/A'}
           </Typography>
-          
+
           <FormControl fullWidth sx={{ mt: 3 }} required>
             <InputLabel>Select Seat</InputLabel>
             <Select
@@ -4999,8 +4999,8 @@ function Students() {
             setStudentForSeatAssignment(null);
             setAssignSelectedSeat('');
           }}>Cancel</Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             color="primary"
             onClick={confirmAssignSeatToStudent}
             disabled={!assignSelectedSeat}
@@ -5060,7 +5060,7 @@ function Students() {
                 membershipDate: aadhaarConflictStudent.membership_date ? isoToISTDateInput(aadhaarConflictStudent.membership_date) : '',
                 membershipTill: aadhaarConflictStudent.membership_till ? isoToISTDateInput(aadhaarConflictStudent.membership_till) : '',
                 // Normalize membership type for the edit form
-                membershipType: aadhaarConflictStudent.membership_type || aadhaarConflictStudent.membershipType ,
+                membershipType: aadhaarConflictStudent.membership_type || aadhaarConflictStudent.membershipType,
                 aadhaarNumber: aadhaarConflictStudent.aadhaar_number || aadhaarConflictStudent.aadhaarNumber || '',
                 address: aadhaarConflictStudent.address || ''
               };
@@ -5088,7 +5088,7 @@ function Students() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
-      
+
       <Footer />
     </Box>
   );
