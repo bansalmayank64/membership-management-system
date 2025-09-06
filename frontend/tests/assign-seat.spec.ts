@@ -1,36 +1,44 @@
 import { test, expect } from './helpers/auth';
+import { setupGlobalMocks, waitForAppReady } from './fixtures/globalMocks';
 
 test.describe('Assign seat flow', () => {
   test('open assign dialog from unassigned chip and assign a seat', async ({ page, login }) => {
     await login(page);
-    // Intercept students API to provide fixture
-    await page.route('**/api/students/with-unassigned-seats', async route => {
-      const json = await (await import('./fixtures/students.json')).default;
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(json) });
-    });
-
+    await setupGlobalMocks(page);
     await page.goto('/');
-    // Ensure Students tab
-    const studentsTab = page.locator('button[role="tab"]', { hasText: 'Students' });
-    if (await studentsTab.count() > 0) await studentsTab.click();
+    await waitForAppReady(page, 'Students');
 
-    // Find first unassigned student chip (Alice)
-    const unassigned = page.locator('text=Unassigned').filter({ hasText: 'Unassigned' }).first();
-    await expect(unassigned).toBeVisible();
-    await unassigned.click();
+    // Find Alice's unassigned chip with aria-label="Assign seat"
+    const unassignedChip = page.locator('[aria-label="Assign seat"]').or(page.locator('.MuiChip-clickable', { hasText: 'Unassigned' }));
+    await unassignedChip.waitFor({ timeout: 5000 });
+    await unassignedChip.click();
 
-    // Assign dialog should appear
-    const assignDialog = page.locator('text=Assign Seat');
+    // Assign dialog should appear - be more specific to avoid multiple matches
+    const assignDialog = page.locator('[role="dialog"]').filter({ hasText: 'Assign Seat' });
     await expect(assignDialog).toBeVisible({ timeout: 3000 });
 
-    // Choose a seat from select if present (attempt to pick first option)
-    const seatSelect = page.locator('label', { hasText: 'Seat' }).locator('..').locator('select').first();
-    if (await seatSelect.count() > 0) {
-      await seatSelect.selectOption({ index: 0 });
+    // Choose a seat from select if present - handle both native select and MUI combobox within the dialog
+    const nativeSelect = assignDialog.locator('select');
+    const muiCombobox = assignDialog.locator('[role="combobox"]');
+    
+    if (await nativeSelect.count() > 0) {
+      await nativeSelect.selectOption({ index: 1 }); // Select first non-empty option
+    } else if (await muiCombobox.count() > 0) {
+      // Handle MUI combobox - click to open dropdown
+      await muiCombobox.click();
+      await page.waitForTimeout(500);
+      // Select first available option
+      const option = page.locator('[role="option"]').first();
+      if (await option.count() > 0) {
+        await option.click();
+      }
     }
 
-    // Click confirm button (label may be "Assign" or similar)
-    const assignBtn = page.locator('button', { hasText: 'Assign' }).first();
+    // Wait a moment for the selection to register and enable the button
+    await page.waitForTimeout(500);
+
+    // Click confirm button - wait for it to be enabled (within the dialog)
+    const assignBtn = assignDialog.locator('button:has-text("Assign Seat"):not([disabled])');
     if (await assignBtn.count() > 0) {
       await assignBtn.click();
     }

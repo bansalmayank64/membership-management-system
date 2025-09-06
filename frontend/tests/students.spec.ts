@@ -1,41 +1,47 @@
-import { test, expect } from '@playwright/test';
-
-// These tests assume the frontend dev server is running at FRONTEND_BASE_URL (default http://localhost:5173)
+import { test, expect } from './helpers/auth';
+import { setupGlobalMocks, waitForAppReady } from './fixtures/globalMocks';
 
 test.describe('Students page interactions', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, login }) => {
+    await login(page);
+    await setupGlobalMocks(page);
     await page.goto('/');
-    // Navigate to Students page via tab if needed
-    const studentsTab = page.locator('button[role="tab"]', { hasText: 'Students' });
-    if (await studentsTab.count() > 0) {
-      await studentsTab.click();
-    }
-    // Wait for students list or seats to load
-    await page.waitForSelector('text=Students', { timeout: 5000 }).catch(() => {});
+    await waitForAppReady(page, 'Students');
   });
 
   test('clicking unassigned chip opens Assign Seat dialog (mobile/list and desktop/table)', async ({ page }) => {
-    // Find a student chip that says 'Unassigned'
-    const unassignedChip = page.locator('text=Unassigned').first();
-    await expect(unassignedChip).toBeVisible();
+    // Look for Alice's unassigned chip specifically - it has aria-label="Assign seat"
+    const unassignedChip = page.locator('[aria-label="Assign seat"]').or(page.locator('.MuiChip-clickable', { hasText: 'Unassigned' }));
+    await unassignedChip.waitFor({ timeout: 5000 });
     await unassignedChip.click();
 
-    // Assign dialog should open - we look for assign dialog title or form
-    const assignDialog = page.locator('text=Assign Seat');
+    // Assign dialog should open - be more specific to avoid multiple matches
+    const assignDialog = page.locator('[role="dialog"]').filter({ hasText: 'Assign Seat' });
     await expect(assignDialog).toBeVisible({ timeout: 5000 });
   });
 
   test('clicking Assigned stat toggles filter highlight', async ({ page }) => {
-    const assignedCard = page.locator('text=Assigned Seats').first();
+    // Find the assigned stat card
+    const assignedCard = page.locator('.MuiCard-root').filter({ hasText: 'Assigned Seats' }).first();
     await expect(assignedCard).toBeVisible();
 
-    // Click once - should activate (filtered by chip appears)
+    // Get initial background color
+    const initialBg = await assignedCard.evaluate((el) => window.getComputedStyle(el).backgroundColor);
+    
+    // Click the assigned card to activate filter
     await assignedCard.click();
-    const filteredChip = page.locator('text=Filtered by:');
-    await expect(filteredChip).toBeVisible();
 
-    // Click again to clear
+    // Should switch to Seats tab
+    const seatsTab = page.locator('button[role="tab"]').filter({ hasText: 'Seats' });
+    await expect(seatsTab).toHaveAttribute('aria-selected', 'true');
+    
+    // Card should be highlighted (background color changes)
+    await expect(assignedCard).not.toHaveCSS('background-color', initialBg);
+    
+    // Click again to clear filter
     await assignedCard.click();
-    await expect(filteredChip).toHaveCount(0);
+    
+    // Background should return to normal
+    await expect(assignedCard).toHaveCSS('background-color', initialBg);
   });
 });

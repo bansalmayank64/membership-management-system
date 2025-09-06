@@ -331,7 +331,7 @@ const AddPaymentDialog = ({
         )}
 
         {/* Extend / Reduce button - only show when fee config is available and there are extension days */}
-        {user && user.role === 'admin' && feeConfig && membershipExtensionDays > 0 && (
+        {user && feeConfig && membershipExtensionDays > 0 && (
           <Button 
             variant="contained" 
             onClick={() => handleSubmit(true)}
