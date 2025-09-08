@@ -3,6 +3,25 @@ const { pool } = require('../config/database');
 const logger = require('../utils/logger');
 const { toISTDateString } = require('../utils/dateUtils');
 
+// Helper: prefer membership_till if present, otherwise use canonical membership_date, otherwise today
+const getMembershipBaseDate = (student) => {
+  try {
+    if (student && student.membership_till) {
+      const d = new Date(student.membership_till);
+      if (!isNaN(d.getTime())) return d;
+    }
+
+    if (student && student.membership_date) {
+      const sd = new Date(student.membership_date);
+      if (!isNaN(sd.getTime())) return sd;
+    }
+
+    return new Date();
+  } catch (err) {
+    return new Date();
+  }
+};
+
 const router = express.Router();
 
 // GET /api/payments - Get all payments
@@ -217,7 +236,7 @@ router.post('/', async (req, res) => {
 
       const normalizedPaymentMode = payment_mode.toLowerCase();
       rl.businessLogic('Verifying student exists and getting details');
-      const studentCheckQuery = 'SELECT id, name, sex, membership_till, membership_type FROM students WHERE id = $1';
+  const studentCheckQuery = 'SELECT id, name, sex, membership_till, membership_type, membership_date FROM students WHERE id = $1';
       const studentCheck = await client.query(studentCheckQuery, [student_id]);
       if (studentCheck.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -302,12 +321,12 @@ router.post('/', async (req, res) => {
             membershipExtensionDays = 0; // Guard against division by zero
           }
           rl.info('Membership extension calculated', { monthlyFees, paymentAmount, membershipExtensionDays });
-          if (membershipExtensionDays > 0) {
-            const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+            if (membershipExtensionDays > 0) {
+            const currentMembershipTill = getMembershipBaseDate(student);
             const newMembershipTill = new Date(currentMembershipTill);
             newMembershipTill.setDate(newMembershipTill.getDate() + membershipExtensionDays);
             const updateMembershipQuery = 'UPDATE students SET membership_till = $1 WHERE id = $2';
-            await client.query(updateMembershipQuery, [newMembershipTill, student_id]);
+            await client.query(updateMembershipQuery, [toISTDateString(newMembershipTill), student_id]);
             rl.info('Extended membership', { studentId: student_id, newMembershipTill: newMembershipTill.toISOString(), membershipExtensionDays });
           }
         } else {
@@ -328,11 +347,11 @@ router.post('/', async (req, res) => {
           const membershipReductionDays = monthlyFees > 0 ? Math.floor((paymentAmount / monthlyFees) * 30) : 0; // Guard division by zero
           rl.info('Membership reduction calculated', { monthlyFees, paymentAmount, membershipReductionDays });
           if (membershipReductionDays > 0) {
-            const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+            const currentMembershipTill = getMembershipBaseDate(student);
             const newMembershipTill = new Date(currentMembershipTill);
             newMembershipTill.setDate(newMembershipTill.getDate() - membershipReductionDays);
             const updateMembershipQuery = 'UPDATE students SET membership_till = $1 WHERE id = $2';
-            await client.query(updateMembershipQuery, [newMembershipTill, student_id]);
+            await client.query(updateMembershipQuery, [toISTDateString(newMembershipTill), student_id]);
             rl.info('Reduced membership', { studentId: student_id, newMembershipTill: newMembershipTill.toISOString(), membershipReductionDays });
             // Store the reduction value in membershipExtensionDays for description reuse
             membershipExtensionDays = -membershipReductionDays;
@@ -529,7 +548,7 @@ router.put('/:id', async (req, res) => {
     }
     
     // Verify new student exists
-    const newStudentQuery = 'SELECT id, name FROM students WHERE id = $1';
+  const newStudentQuery = 'SELECT id, name, membership_date FROM students WHERE id = $1';
     const newStudentResult = await pool.query(newStudentQuery, [student_id]);
     if (newStudentResult.rows.length === 0) {
       rl.validationError('student_id', [`Student with ID ${student_id} not found`]);
@@ -609,7 +628,7 @@ router.delete('/:id', async (req, res) => {
       // If payment is tied to a student and can affect membership, attempt to adjust membership_till
       try {
         if (payment.student_id && payment.payment_type) {
-          const studentFetch = await client.query('SELECT id, sex, membership_till, membership_type FROM students WHERE id = $1 FOR UPDATE', [payment.student_id]);
+                const studentFetch = await client.query('SELECT id, sex, membership_till, membership_type, membership_date FROM students WHERE id = $1 FOR UPDATE', [payment.student_id]);
           if (studentFetch.rows.length > 0) {
             const student = studentFetch.rows[0];
             
@@ -633,7 +652,7 @@ router.delete('/:id', async (req, res) => {
                   const adjustDays = Math.floor((amountAbs / monthlyFees) * 30);
                   
                   if (adjustDays > 0) {
-                    const currentMembershipTill = student.membership_till ? new Date(student.membership_till) : new Date();
+                    const currentMembershipTill = getMembershipBaseDate(student);
                     const newMembershipTill = new Date(currentMembershipTill);
 
                     // Reverse the original operation when deleting
@@ -785,7 +804,7 @@ router.post('/validate', async (req, res) => {
       validationResults.valid = false;
     } else {
       // Check if student exists
-      const studentQuery = 'SELECT id, name, membership_type, sex FROM students WHERE id = $1';
+  const studentQuery = 'SELECT id, name, membership_type, sex, membership_date FROM students WHERE id = $1';
       const studentResult = await pool.query(studentQuery, [student_id]);
       if (studentResult.rows.length === 0) {
         validationResults.errors.push(`Student with ID ${student_id} not found`);
