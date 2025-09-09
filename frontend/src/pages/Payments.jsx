@@ -32,32 +32,15 @@ import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, FormC
 import { useAuth } from '../contexts/AuthContext';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
 import api from '../services/api';
-import { todayInIST, getUtcMidnightForDateInTZ } from '../utils/dateUtils';
+import { todayInIST, getUtcMidnightForDateInTZ, formatDateTimeForDisplay } from '../utils/dateUtils';
 
 // use shared utils for timezone-aware formatting
+
+// use formatDateTimeForDisplay from shared utils
 
 // PaymentCard component for mobile view
 const PaymentCard = ({ payment, onDelete }) => {
   const { user } = useAuth();
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      // Convert GMT to IST first
-      const gmtDate = new Date(dateString);
-      const istDate = new Date(gmtDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
-      
-      const formatter = new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      });
-      return formatter.format(istDate);
-    } catch (error) {
-      return 'N/A';
-    }
-  };
 
   const formatCurrency = (amount) => {
     const numAmount = Number(amount) || 0;
@@ -107,7 +90,7 @@ const PaymentCard = ({ payment, onDelete }) => {
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              📅 {formatDate(payment.payment_date)}
+              📅 {formatDateTimeForDisplay(payment.payment_date)}
             </Typography>
             {user && user.role === 'admin' && (
               <IconButton size="small" color="error" onClick={() => onDelete && onDelete(payment.id)}>
@@ -237,15 +220,7 @@ function Payments() {
   // With server-side pagination, payments already contains the current page
   const displayedPayments = payments || [];
 
-  const formatDate = (dateString) => {
-    try {
-      const d = new Date(dateString);
-      if (isNaN(d.getTime())) return dateString;
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
-    } catch (error) {
-      return dateString;
-    }
-  };
+  // (removed local formatDate — use module-level formatDateTimeIST)
 
   const formatCurrency = (amount) => {
     const numAmount = Number(amount) || 0;
@@ -780,7 +755,7 @@ function Payments() {
                             <TableCell sx={getAmountStyle(payment.amount)}>
                               {formatCurrency(payment.amount)}
                             </TableCell>
-                            <TableCell>{formatDate(payment.payment_date)}</TableCell>
+                            <TableCell>{formatDateTimeForDisplay(payment.payment_date)}</TableCell>
                             <TableCell>{payment.payment_mode || 'N/A'}</TableCell>
                             <TableCell>{payment.payment_type || 'N/A'}</TableCell>
                             <TableCell align="center">

@@ -96,6 +96,26 @@ const formatPeriod = (startIso, endIso) => {
   return e || 'N/A';
 };
 
+// Format ISO/date-like strings to a date+time string in Asia/Kolkata (e.g. '23 Aug 2025, 10:15 AM')
+const formatDateTimeForDisplay = (dateString) => {
+  if (!dateString) return 'N/A';
+  try {
+    const d = dateString instanceof Date ? dateString : new Date(dateString);
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata'
+    });
+  } catch (e) {
+    return 'N/A';
+  }
+};
+
 export {
   isoToISTDateInput,
   todayInIST,
@@ -105,4 +125,5 @@ export {
   formatDateForDisplay,
   formatIsoToDMonYYYY,
   formatPeriod
+  ,formatDateTimeForDisplay
 };
