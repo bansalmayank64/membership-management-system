@@ -36,8 +36,9 @@ router.get('/', async (req, res) => {
     const seatNumber = req.query.seatNumber || null;
     const studentName = req.query.studentName || null;
     const studentId = req.query.studentId || null;
-    const startDate = req.query.startDate || null; // expected YYYY-MM-DD
-    const endDate = req.query.endDate || null; // expected YYYY-MM-DD
+  const startDate = req.query.startDate || null; // expected YYYY-MM-DD
+  const endDate = req.query.endDate || null; // expected YYYY-MM-DD
+  const paymentMode = req.query.paymentMode || null; // 'cash' or 'online'
 
     // Build WHERE clauses
     const whereClauses = [];
@@ -63,6 +64,11 @@ router.get('/', async (req, res) => {
     if (endDate) {
       whereClauses.push(`p.payment_date <= $${idx++}`);
       params.push(endDate + ' 23:59:59');
+    }
+    if (paymentMode) {
+      // Case-insensitive match on payment_mode
+      whereClauses.push(`LOWER(p.payment_mode) = LOWER($${idx++})`);
+      params.push(paymentMode);
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';

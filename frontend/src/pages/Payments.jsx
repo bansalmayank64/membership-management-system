@@ -148,8 +148,9 @@ function Payments() {
     seatNumber: '',
     studentName: '',
     studentId: '',
-    startDate: '',
-    endDate: ''
+  startDate: '',
+  endDate: '',
+  paymentMode: ''
   });
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -207,6 +208,7 @@ function Payments() {
       if (filtersToUse.studentId) params.set('studentId', filtersToUse.studentId);
       if (filtersToUse.startDate) params.set('startDate', filtersToUse.startDate);
       if (filtersToUse.endDate) params.set('endDate', filtersToUse.endDate);
+  if (filtersToUse.paymentMode) params.set('paymentMode', filtersToUse.paymentMode);
 
       const response = await fetch(`/api/payments?${params.toString()}`, {
         headers: {
@@ -615,6 +617,22 @@ function Payments() {
           💰 Payments (Only last 30 Days)
         </Typography>
         <Box sx={pageStyles.actions}>
+          {!isMobile && (
+            <FormControl size={isMobile ? 'small' : 'small'} sx={{ minWidth: 160, mr: 1 }}>
+              <InputLabel id="desktop-payment-mode-label">Payment Mode</InputLabel>
+              <Select
+                labelId="desktop-payment-mode-label"
+                label="Payment Mode"
+                value={filters.paymentMode}
+                onChange={(e) => setFilters({ ...filters, paymentMode: e.target.value })}
+                size={isMobile ? 'small' : 'small'}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="cash">Cash</MenuItem>
+                <MenuItem value="online">Online</MenuItem>
+              </Select>
+            </FormControl>
+          )}
           <Tooltip title="Refresh data">
             <IconButton onClick={fetchPayments} color="primary" size={isMobile ? "small" : "medium"}>
               <RefreshIcon />
@@ -638,13 +656,14 @@ function Payments() {
         <MobileFilters
           title="Payment Filters"
           filterCount={Object.values(filters).filter(v => v && v !== '').length}
-          onClearAll={() => setFilters({ seatNumber: '', startDate: '', endDate: '' })}
+          onClearAll={() => setFilters({ seatNumber: '', studentName: '', studentId: '', startDate: '', endDate: '', paymentMode: '' })}
           activeFilters={{
             seat: filters.seatNumber,
             name: filters.studentName,
             id: filters.studentId,
             start: filters.startDate,
-            end: filters.endDate
+            end: filters.endDate,
+            mode: filters.paymentMode
           }}
           onFilterRemove={(key) => {
             const newFilters = { ...filters };
@@ -654,6 +673,7 @@ function Payments() {
               case 'id': newFilters.studentId = ''; break;
               case 'start': newFilters.startDate = ''; break;
               case 'end': newFilters.endDate = ''; break;
+              case 'mode': newFilters.paymentMode = ''; break;
             }
             setFilters(newFilters);
           }}
@@ -697,6 +717,19 @@ function Payments() {
             value={filters.endDate}
             onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
           />
+          <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+            <InputLabel id="payment-mode-label">Payment Mode</InputLabel>
+            <Select
+              labelId="payment-mode-label"
+              label="Payment Mode"
+              value={filters.paymentMode}
+              onChange={(e) => setFilters({ ...filters, paymentMode: e.target.value })}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="cash">Cash</MenuItem>
+              <MenuItem value="online">Online</MenuItem>
+            </Select>
+          </FormControl>
         </MobileFilters>
 
         {loading ? (
