@@ -7,6 +7,7 @@ backend/node_modules/
 frontend/dist/
 frontend/.vite/
 public/assets/*
+backend/public/assets/
 
 # Capacitor
 frontend/android/app/build/
@@ -54,6 +55,7 @@ Thumbs.db
 .cache/
 
 # Environment variables
+.env
 .env.local
 .env.development.local
 .env.test.local
