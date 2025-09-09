@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="450" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#fffaf0"/>
+  <rect x="20" y="20" width="760" height="410" rx="8" fill="#ffffff" stroke="#f59e0b"/>
+  <text x="40" y="60" font-family="sans-serif" font-size="20" fill="#92400e">Students - Placeholder</text>
+  <text x="40" y="90" font-family="sans-serif" font-size="14" fill="#92400e">Replace this with a screenshot of the Students page (frontend/src/pages/Students.jsx)</text>
+
+  <!-- mock list -->
+  <g transform="translate(40,120)">
+    <rect x="0" y="0" width="680" height="280" fill="#fff7ed" rx="6"/>
+    <g fill="#fff1e6" stroke="#fed7aa" stroke-width="1">
+      <!-- rows -->
+      <rect x="12" y="12" width="656" height="40" rx="6"/>
+      <rect x="12" y="64" width="656" height="40" rx="6"/>
+      <rect x="12" y="116" width="656" height="40" rx="6"/>
+      <rect x="12" y="168" width="656" height="40" rx="6"/>
+      <rect x="12" y="220" width="656" height="40" rx="6"/>
+    </g>
+  </g>
+</svg>

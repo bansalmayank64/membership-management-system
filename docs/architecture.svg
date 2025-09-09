@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="420" viewBox="0 0 900 420" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill:#ffffff; stroke:#2c3e50; stroke-width:2; rx:8; }
+    .title { font: bold 16px sans-serif; fill:#2c3e50 }
+    .label { font: 13px sans-serif; fill:#34495e }
+    .arrow { stroke:#34495e; stroke-width:2; marker-end:url(#arrowhead); }
+    .cloud { fill:#f0f6ff; stroke:#3b82f6; stroke-width:2; rx:10 }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#34495e" />
+    </marker>
+  </defs>
+
+  <!-- Frontend -->
+  <rect x="40" y="40" width="220" height="110" class="box"/>
+  <text x="60" y="68" class="title">Frontend</text>
+  <text x="60" y="92" class="label">React + Vite (UI)</text>
+  <text x="60" y="112" class="label">Playwright E2E</text>
+
+  <!-- API Gateway / Public -->
+  <rect x="320" y="30" width="260" height="130" class="cloud"/>
+  <text x="350" y="68" class="title">API / Hosting</text>
+  <text x="350" y="92" class="label">Nginx / Render / Netlify</text>
+  <text x="350" y="112" class="label">Public API: /api/*</text>
+
+  <!-- Backend -->
+  <rect x="640" y="40" width="220" height="110" class="box"/>
+  <text x="660" y="68" class="title">Backend</text>
+  <text x="660" y="92" class="label">Node.js + Express</text>
+  <text x="660" y="112" class="label">JWT auth, REST endpoints</text>
+
+  <!-- Database -->
+  <rect x="320" y="210" width="260" height="110" class="box"/>
+  <text x="350" y="238" class="title">Database</text>
+  <text x="350" y="262" class="label">PostgreSQL (Neon / managed)</text>
+  <text x="350" y="282" class="label">Schema in db_schema_postgres.sql</text>
+
+  <!-- Arrows -->
+  <line x1="260" y1="95" x2="320" y2="95" class="arrow" />
+  <line x1="580" y1="95" x2="640" y2="95" class="arrow" />
+  <line x1="500" y1="160" x2="500" y2="210" class="arrow" />
+  <line x1="460" y1="260" x2="640" y2="260" class="arrow" />
+
+  <!-- Notes -->
+  <text x="40" y="350" class="label">Notes: Frontend calls the backend API at /api/..; backend chooses DB based on DB_MODE/DEV_DATABASE_URL and enables SSL for managed hosts.</text>
+</svg>

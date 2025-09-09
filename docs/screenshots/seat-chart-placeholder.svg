@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="450" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#f7fbff"/>
+  <rect x="20" y="20" width="760" height="410" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="40" y="60" font-family="sans-serif" font-size="20" fill="#1f2937">Seat Chart - Placeholder</text>
+  <text x="40" y="90" font-family="sans-serif" font-size="14" fill="#4b5563">Replace this with a screenshot of the Seat Chart UI (frontend/src/pages/SeatChartReport.jsx)</text>
+
+  <!-- mock grid -->
+  <g transform="translate(40,120)">
+    <rect x="0" y="0" width="680" height="280" fill="#eef2ff" rx="6"/>
+    <!-- small seat boxes -->
+    <g fill="#e2e8f0" stroke="#c7d2fe" stroke-width="1">
+      <!-- draw a grid of boxes -->
+      <!-- 8 columns x 6 rows -->
+      <!-- box size 72x36 with gap -->
+      <g>
+        <!-- loop simulated with manual boxes -->
+        <rect x="12" y="12" width="80" height="48" rx="6"/>
+        <rect x="104" y="12" width="80" height="48" rx="6"/>
+        <rect x="196" y="12" width="80" height="48" rx="6"/>
+        <rect x="288" y="12" width="80" height="48" rx="6"/>
+        <rect x="380" y="12" width="80" height="48" rx="6"/>
+        <rect x="472" y="12" width="80" height="48" rx="6"/>
+        <rect x="564" y="12" width="80" height="48" rx="6"/>
+      </g>
+      <g transform="translate(0,72)">
+        <rect x="12" y="12" width="80" height="48" rx="6"/>
+        <rect x="104" y="12" width="80" height="48" rx="6"/>
+        <rect x="196" y="12" width="80" height="48" rx="6"/>
+        <rect x="288" y="12" width="80" height="48" rx="6"/>
+        <rect x="380" y="12" width="80" height="48" rx="6"/>
+        <rect x="472" y="12" width="80" height="48" rx="6"/>
+        <rect x="564" y="12" width="80" height="48" rx="6"/>
+      </g>
+      <g transform="translate(0,144)">
+        <rect x="12" y="12" width="80" height="48" rx="6"/>
+        <rect x="104" y="12" width="80" height="48" rx="6"/>
+        <rect x="196" y="12" width="80" height="48" rx="6"/>
+        <rect x="288" y="12" width="80" height="48" rx="6"/>
+        <rect x="380" y="12" width="80" height="48" rx="6"/>
+        <rect x="472" y="12" width="80" height="48" rx="6"/>
+        <rect x="564" y="12" width="80" height="48" rx="6"/>
+      </g>
+    </g>
+  </g>
+</svg>
