@@ -28,6 +28,8 @@ import { Refresh as RefreshIcon, Delete as DeleteIcon } from '@mui/icons-materia
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
 import AddPaymentDialog from '../components/AddPaymentDialog';
+import StudentDetailsDialog from '../components/StudentDetailsDialog';
+import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { tableStyles, loadingStyles, errorStyles, pageStyles } from '../styles/commonStyles';
@@ -39,7 +41,7 @@ import { todayInIST, getUtcMidnightForDateInTZ, formatDateTimeForDisplay } from 
 // use formatDateTimeForDisplay from shared utils
 
 // PaymentCard component for mobile view
-const PaymentCard = ({ payment, onDelete }) => {
+const PaymentCard = ({ payment, onDelete, onViewStudent }) => {
   const { user } = useAuth();
 
   const formatCurrency = (amount) => {
@@ -62,7 +64,14 @@ const PaymentCard = ({ payment, onDelete }) => {
         {/* Header Row */}
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Box flex={1}>
-            <Typography variant="subtitle2" component="div" fontWeight="600" noWrap>
+            <Typography
+              variant="subtitle2"
+              component="div"
+              fontWeight="600"
+              noWrap
+              sx={{ cursor: payment.student_id ? 'pointer' : 'default', textDecoration: payment.student_id ? 'underline' : 'none' }}
+              onClick={() => { if (onViewStudent && payment.student_id) onViewStudent(payment.student_id); }}
+            >
               {payment.student_name || 'N/A'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
@@ -115,6 +124,12 @@ function Payments() {
   const [totalPayments, setTotalPayments] = useState(0);
   // Students list for Add Payment dropdown
   const [students, setStudents] = useState([]);
+    // Student details dialog state
+    const [studentDialogOpen, setStudentDialogOpen] = useState(false);
+    const [studentDialogData, setStudentDialogData] = useState(null);
+    const [studentDialogLoading, setStudentDialogLoading] = useState(false);
+    const [studentDialogError, setStudentDialogError] = useState(null);
+    const [studentDialogTotalPaid, setStudentDialogTotalPaid] = useState(0);
   const [addPaymentOpen, setAddPaymentOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   // Default date should be today's date in Asia/Kolkata (YYYY-MM-DD)
@@ -216,6 +231,56 @@ function Payments() {
       setLoading(false);
     }
   };
+
+  // Open student details dialog - fetch student and payment summary
+  const openStudentDialog = async (studentId) => {
+    if (!studentId) return;
+    setStudentDialogLoading(true);
+    setStudentDialogError(null);
+    setStudentDialogData(null);
+    setStudentDialogTotalPaid(0);
+    try {
+      const resp = await fetch(`/api/students/${studentId}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      });
+      if (!resp.ok) throw new Error(`Failed to load student (${resp.status})`);
+      const data = await resp.json();
+      setStudentDialogData(data);
+
+      // fetch payments for total
+      try {
+        const payResp = await fetch(`/api/payments/student/${studentId}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+        });
+        if (payResp.ok) {
+          const p = await payResp.json();
+          let total = 0;
+          (p || []).forEach(item => { total += Number(item.amount) || 0; });
+          setStudentDialogTotalPaid(total);
+        } else {
+          setStudentDialogTotalPaid(0);
+        }
+      } catch (err) {
+        setStudentDialogTotalPaid(0);
+      }
+
+      setStudentDialogOpen(true);
+    } catch (err) {
+      setStudentDialogError(err.message || 'Failed to load student');
+      setStudentDialogOpen(true);
+    } finally {
+      setStudentDialogLoading(false);
+    }
+  };
+
+  const closeStudentDialog = () => {
+    setStudentDialogOpen(false);
+    setStudentDialogData(null);
+    setStudentDialogError(null);
+    setStudentDialogTotalPaid(0);
+    setStudentDialogLoading(false);
+  };
+  const navigate = useNavigate();
 
   // With server-side pagination, payments already contains the current page
   const displayedPayments = payments || [];
@@ -749,7 +814,14 @@ function Payments() {
                         displayedPayments.map((payment) => (
                           <TableRow key={payment.id} sx={tableStyles.tableRow}>
                             <TableCell>{payment.student_id || 'N/A'}</TableCell>
-                            <TableCell>{payment.student_name || 'N/A'}</TableCell>
+                            <TableCell>
+                              <Box
+                                sx={{ cursor: payment.student_id ? 'pointer' : 'default', textDecoration: payment.student_id ? 'underline' : 'none', display: 'inline-block' }}
+                                onClick={() => { if (payment.student_id) openStudentDialog(payment.student_id); }}
+                              >
+                                {payment.student_name || 'N/A'}
+                              </Box>
+                            </TableCell>
                             <TableCell>{payment.contact_number || 'N/A'}</TableCell>
                             <TableCell>{payment.seat_number || 'N/A'}</TableCell>
                             <TableCell sx={getAmountStyle(payment.amount)}>
@@ -797,9 +869,9 @@ function Payments() {
                     </Typography>
                   </Paper>
                 ) : (
-                  displayedPayments.map((payment) => (
-                    <PaymentCard key={payment.id} payment={payment} onDelete={openDeleteDialog} />
-                  ))
+                          displayedPayments.map((payment) => (
+                            <PaymentCard key={payment.id} payment={payment} onDelete={openDeleteDialog} onViewStudent={openStudentDialog} />
+                          ))
                 )}
 
                 {/* Mobile Pagination */}
@@ -888,6 +960,26 @@ function Payments() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <StudentDetailsDialog
+        open={studentDialogOpen}
+        onClose={closeStudentDialog}
+        student={studentDialogData}
+        loading={studentDialogLoading}
+        error={studentDialogError}
+        totalPaid={studentDialogTotalPaid}
+        onEdit={(s) => {
+          // navigate to Students page and open edit for this student
+          closeStudentDialog();
+          navigate('/', { state: { editStudentId: s?.id } });
+        }}
+        onViewPayments={(s) => {
+          if (!s) return;
+          closeStudentDialog();
+          setFilters(prev => ({ ...prev, studentId: s.id }));
+          fetchPayments({ page: 0, filters: { ...filters, studentId: s.id } });
+        }}
+      />
 
       <Footer />
     </Container>

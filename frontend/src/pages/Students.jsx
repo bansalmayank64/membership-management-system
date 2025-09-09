@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -45,6 +46,7 @@ import {
 import { Autocomplete } from '@mui/material';
 import Footer from '../components/Footer';
 import AddPaymentDialog from '../components/AddPaymentDialog';
+import StudentDetailsDialog from '../components/StudentDetailsDialog';
 import logger from '../utils/clientLogger';
 import {
   isoToISTDateInput,
@@ -644,7 +646,7 @@ function Students() {
   const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
 
   useEffect(() => {
-    fetchData();
+  fetchData();
     // Fetch membership fee options for dropdown previews
     (async () => {
       try {
@@ -657,6 +659,51 @@ function Students() {
       }
     })();
   }, []);
+
+  // Handle navigation requests to edit a student (e.g., from Payments page)
+  const location = useLocation();
+  useEffect(() => {
+    const editId = location?.state?.editStudentId;
+    if (!editId) return;
+    (async () => {
+      try {
+        setLoading(true);
+        const resp = await fetch(`/api/students/${editId}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+        if (!resp.ok) {
+          setSnackbarMessage('Failed to load student for edit');
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+          return;
+        }
+        const s = await resp.json();
+        setSelectedItemForAction({ ...s });
+        const editData = {
+          id: s.id,
+          name: s.name || '',
+          contactNumber: s.contact_number || '',
+          sex: s.sex || '',
+          seatNumber: s.seat_number || '',
+          fatherName: s.father_name || '',
+          membershipDate: s.membership_date ? isoToISTDateInput(s.membership_date) : '',
+          membershipTill: s.membership_till ? isoToISTDateInput(s.membership_till) : '',
+          membershipType: s.membership_type || s.membershipType,
+          aadhaarNumber: s.aadhaar_number || s.aadhaarNumber || '',
+          address: s.address || ''
+        };
+        setEditStudent(editData);
+        if (editData.sex) fetchEditAvailableSeats(editData.sex, editData.seatNumber);
+        setEditStudentOpen(true);
+      } catch (err) {
+        setSnackbarMessage('Unexpected error loading student');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // Clear location.state to avoid repeated open when navigating back
+    try { window.history.replaceState({}, document.title); } catch (e) {}
+  }, [location?.state]);
 
   // Measure header height (including margin-bottom) and update sticky top offset
   useEffect(() => {
@@ -4723,142 +4770,28 @@ function Students() {
         </DialogActions>
       </Dialog>
 
-      {/* View Student Details Dialog */}
-      <Dialog open={viewStudentOpen} onClose={() => {
-        setViewStudentOpen(false);
-        setViewStudentTotalPaid(0);
-      }} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Student Details - {viewStudentData?.name || 'Unknown'}
-        </DialogTitle>
-        <DialogContent>
-          {!viewStudentData ? (
-            <Box sx={{ mt: 1, p: 2, textAlign: 'center' }}>
-              <Typography color="error">No student data available</Typography>
-            </Box>
-          ) : (
-            <Box sx={{ mt: 1 }}>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Student ID</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.id || 'N/A'}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Name</Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                    {viewStudentData.sex === 'female' ?
-                      <WomanIcon sx={{ color: 'secondary.main', fontSize: 18 }} /> :
-                      <ManIcon sx={{ color: 'primary.main', fontSize: 18 }} />
-                    }
-                    <Typography variant="body1">{viewStudentData.name || 'N/A'}</Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Gender</Typography>
-                  <Typography variant="body1" sx={{ mb: 2, textTransform: 'capitalize' }}>
-                    {viewStudentData.sex || 'N/A'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Contact Number</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.contact_number || 'N/A'}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Aadhaar Number</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.aadhaar_number || viewStudentData.aadhaarNumber || 'N/A'}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Father's Name</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.father_name || 'N/A'}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Address</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>{viewStudentData.address || 'N/A'}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Current Seat</Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                    {viewStudentData.seat_number ? (
-                      <>
-                        <EventSeatIcon sx={{ color: 'success.main', fontSize: 18 }} />
-                        <Typography variant="body1">#{viewStudentData.seat_number}</Typography>
-                      </>
-                    ) : (
-                      <Typography variant="body1" color="text.secondary">Unassigned</Typography>
-                    )}
-                  </Box>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Status</Typography>
-                  <Chip
-                    label={viewStudentData.seat_number ? 'Assigned' : 'Unassigned'}
-                    color={viewStudentData.seat_number ? 'success' : 'error'}
-                    size="small"
-                    sx={{ mb: 2 }}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Date Joined</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    {formatDateForDisplay(viewStudentData.membership_date)}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Membership Till</Typography>
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    {formatDateForDisplay(viewStudentData.membership_till)}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Membership Type</Typography>
-                  <Typography variant="body1" sx={{ mb: 2, textTransform: 'capitalize' }}>
-                    {((viewStudentData.membership_type || viewStudentData.membershipType) || 'N/A').toString().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Total Paid</Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                    <Typography
-                      variant="body1"
-                      sx={{
-                        fontWeight: 600,
-                        color: 'success.main',
-                        cursor: viewStudentData?.id ? 'pointer' : 'default',
-                        textDecoration: viewStudentData?.id ? 'underline' : 'none'
-                      }}
-                      onClick={() => {
-                        if (!viewStudentData?.id) return;
-                        // Set selectedItemForAction for consistency
-                        setSelectedItemForAction({ ...viewStudentData });
-                        // Pass the student directly to avoid relying on state being updated
-                        handlePaymentHistory(viewStudentData);
-                        // Keep the view dialog open; payment history opens on top
-                      }}
-                    >
-                      ₹{viewStudentTotalPaid.toLocaleString()}
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => {
-            setViewStudentOpen(false);
-            setViewStudentTotalPaid(0);
-          }}>Close</Button>
-          {viewStudentData?.membership_status !== 'inactive' && (
-            <Button
-              variant="contained"
-              onClick={handleEditFromView}
-              startIcon={<EditIcon />}
-            >
-              Edit Student
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      <StudentDetailsDialog
+        open={viewStudentOpen}
+        onClose={() => { setViewStudentOpen(false); setViewStudentTotalPaid(0); }}
+        student={viewStudentData}
+        loading={historyLoading}
+        error={error}
+        totalPaid={viewStudentTotalPaid}
+        onEdit={(s) => { setViewStudentOpen(false); setSelectedItemForAction({ ...s }); setEditStudent({
+          id: s.id,
+          name: s.name,
+          contactNumber: s.contact_number,
+          sex: s.sex,
+          seatNumber: s.seat_number || '',
+          fatherName: s.father_name || '',
+          membershipDate: s.membership_date ? isoToISTDateInput(s.membership_date) : '',
+          membershipTill: s.membership_till ? isoToISTDateInput(s.membership_till) : '',
+          membershipType: s.membership_type || s.membershipType,
+          aadhaarNumber: s.aadhaar_number || s.aadhaarNumber || '',
+          address: s.address || ''
+        }); setEditStudentOpen(true); }}
+        onViewPayments={(s) => { setSelectedItemForAction({ ...s }); handlePaymentHistory(s); }}
+      />
 
       {/* Deactivate Confirmation Dialog */}
       <Dialog open={deleteConfirmOpen} onClose={() => {
