@@ -110,7 +110,7 @@ npm run dev
 ```env
 PORT=3001
 NODE_ENV=production
-DATABASE_URL=postgresql://username:password@host/database?sslmode=require
+DATABASE_URL=
 JWT_SECRET=your-super-secret-key
 CORS_ORIGIN=https://your-frontend.netlify.app
 ```

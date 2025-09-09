@@ -54,7 +54,7 @@ A Node.js Express API server with PostgreSQL database for managing study room se
 ```env
 PORT=3001
 NODE_ENV=development
-DATABASE_URL=postgresql://username:password@host:port/database?sslmode=require
+DATABASE_URL=
 JWT_SECRET=your-super-secret-jwt-key
 CORS_ORIGIN=http://localhost:5173
 ```
