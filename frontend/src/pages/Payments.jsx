@@ -930,8 +930,8 @@ function Payments() {
           <DialogContent>
             <Typography>Are you sure you want to delete this payment? This action cannot be undone.</Typography>
 
-            {/* Show computed membership impact if available */}
-            {deleteInfo && (deleteInfo.reductionDays > 0 || deleteInfo.currentMembershipTill) && (
+            {/* Show computed membership impact when available (including zero or negative reductions) */}
+            {deleteInfo && (
               <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>Membership impact</Typography>
                 {deleteInfo.currentMembershipTill ? (
@@ -939,10 +939,8 @@ function Payments() {
                 ) : (
                   <Typography variant="body2">Current membership till: N/A</Typography>
                 )}
-                <Typography variant="body2">Reduction days: {deleteInfo.reductionDays || 0} day(s)</Typography>
-                {deleteInfo.newMembershipTill ? (
-                  <Typography variant="body2">New membership till: {formatShortDate(deleteInfo.newMembershipTill)}</Typography>
-                ) : null}
+                <Typography variant="body2">Reduction days: {typeof deleteInfo.reductionDays === 'number' ? deleteInfo.reductionDays : 0} day(s)</Typography>
+                <Typography variant="body2">New membership till: {deleteInfo.newMembershipTill ? formatShortDate(deleteInfo.newMembershipTill) : 'No change'}</Typography>
               </Box>
             )}
 
@@ -950,14 +948,17 @@ function Payments() {
           </DialogContent>
         <DialogActions>
           <Button onClick={closeDeleteDialog} disabled={deleting}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => handleDeletePayment(paymentToDelete)}
-            disabled={deleting || !(deleteInfo && (deleteInfo.reductionDays > 0 || deleteInfo.currentMembershipTill))}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
+          {/* Show Delete button only when membership impact info is available (deleteInfo) */}
+          {deleteInfo ? (
+            <Button
+              variant="contained"
+              color="error"
+              onClick={() => handleDeletePayment(paymentToDelete)}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          ) : null}
         </DialogActions>
       </Dialog>
 
