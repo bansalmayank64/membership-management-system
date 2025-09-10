@@ -162,20 +162,24 @@ const AddPaymentDialog = ({
 
           {/* Free membership warning - show prominently at the top if student has free membership */}
           {isFreeMembershipStudent && (
-            <Box sx={{ 
-              p: 3, 
-              bgcolor: 'error.light', 
-              borderRadius: 2,
-              border: '2px solid',
+            <Box sx={{
+              p: 1,
+              bgcolor: 'error.light',
+              borderRadius: 1,
+              border: '1px solid',
               borderColor: 'error.main',
               display: 'flex',
-              alignItems: 'flex-start',
-              gap: 2
+              alignItems: 'center',
+              gap: 1,
+              maxWidth: 420
             }}>
-              <Typography variant="body1" sx={{ fontSize: '2em', lineHeight: 1 }}>🚫</Typography>
+              <Typography variant="body2" sx={{ fontSize: '1.25rem', lineHeight: 1 }}>🚫</Typography>
               <Box>
-                <Typography variant="h6" color="error.dark" sx={{ fontWeight: 'bold', mb: 1 }}>
-                  Payments Not Available
+                <Typography variant="subtitle2" sx={{ color: 'error.contrastText', fontWeight: 700 }}>
+                  Payments not available
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', color: (theme) => theme.palette.error.contrastText, opacity: 0.9 }}>
+                  Free membership — payments are disabled
                 </Typography>
               </Box>
             </Box>
