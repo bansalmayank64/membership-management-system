@@ -34,7 +34,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const snippets = [];
   snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, id as subject_id, 'student' as subject_type, to_jsonb(json_build_object('name', name, 'aadhaar', aadhaar_number, 'contact', contact_number, 'seat', seat_number)) as details FROM students_history`);
   snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, student_id as subject_id, 'seat' as subject_type, to_jsonb(json_build_object('seat_number', seat_number, 'student_name', student_name, 'occupant_sex', occupant_sex)) as details FROM seats_history`);
-  snippets.push(`SELECT p.created_at as ts, p.payment_type as action_type, p.modified_by, p.student_id as subject_id, 'payment' as subject_type, to_jsonb(json_build_object('amount', p.amount, 'payment_date', p.payment_date, 'remarks', p.remarks)) as details FROM payments p`);
+  snippets.push(`SELECT p.created_at as ts, p.payment_type as action_type, p.modified_by, p.student_id as subject_id, 'payment' as subject_type, to_jsonb(json_build_object('amount', p.amount, 'payment_date', p.payment_date, 'remarks', p.remarks, 'student_name', s.name)) as details FROM payments p LEFT JOIN students s ON p.student_id = s.id`);
   snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, id as subject_id, 'expense' as subject_type, to_jsonb(json_build_object('category', category, 'description', description, 'amount', amount)) as details FROM expenses_history`);
   snippets.push(`SELECT created_at as ts, action_type as action_type, actor_user_id as modified_by, subject_id as subject_id, subject_type as subject_type, metadata as details FROM activity_logs`);
 

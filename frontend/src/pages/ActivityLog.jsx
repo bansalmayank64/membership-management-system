@@ -13,11 +13,17 @@ export default function ActivityLog() {
   const [pageSize, setPageSize] = useState(50);
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState('');
+  const [selectedType, setSelectedType] = useState('all');
   // responsive layout handled via MUI Grid/Stack props
   useEffect(() => {
-    // Initial load
-    fetchActivities(0);
+    // Initial load (respect current filters)
+    fetchActivities(0, selectedUser, selectedType);
   }, [pageSize]);
+
+  // Refetch when page changes so filters persist across pagination
+  useEffect(() => {
+    fetchActivities(page, selectedUser, selectedType);
+  }, [page]);
 
   useEffect(() => {
     // load users for the filter dropdown
@@ -36,7 +42,7 @@ export default function ActivityLog() {
     }
   };
 
-  const fetchActivities = async (page = 0, userIdParam) => {
+  const fetchActivities = async (page = 0, userIdParam, typeParam) => {
     setLoading(true);
     setError(null);
     try {
@@ -46,6 +52,9 @@ export default function ActivityLog() {
       qs.set('pageSize', pageSize);
       const userIdToSend = typeof userIdParam !== 'undefined' ? userIdParam : selectedUser;
       if (userIdToSend) qs.set('userId', userIdToSend);
+      // include selected activity type for server-side filtering (use explicit param if provided)
+      const typeToSend = typeof typeParam !== 'undefined' ? typeParam : selectedType || 'all';
+      if (typeToSend && typeToSend !== 'all') qs.set('type', typeToSend);
 
       const resp = await fetch('/api/admin/activity?' + qs.toString(), { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` } });
       if (!resp.ok) {
@@ -76,10 +85,18 @@ export default function ActivityLog() {
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={6}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center" justifyContent="flex-end">
-              <FormControl size="small" sx={{ minWidth: 160 }}>
-                <Select label="Actor" value={selectedUser} onChange={(e) => { const v = e.target.value; setSelectedUser(v); setPage(0); fetchActivities(0, v); }} displayEmpty>
+          <Grid item xs={12} md={12}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center" justifyContent={{ xs: 'center', md: 'flex-start' }}>
+              <FormControl size="small" sx={{ minWidth: 200, mr: { md: 2 } }}>
+                <Select displayEmpty value={selectedType} onChange={(e) => { const v = e.target.value; setSelectedType(v); setPage(0); fetchActivities(0, selectedUser, v); }}>
+                  <MenuItem value="all">(All types)</MenuItem>
+                  <MenuItem value="student">Student</MenuItem>
+                  <MenuItem value="seat">Seat</MenuItem>
+                  <MenuItem value="payment">Payment</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <Select label="Actor" value={selectedUser} onChange={(e) => { const v = e.target.value; setSelectedUser(v); setPage(0); fetchActivities(0, v, selectedType); }} displayEmpty>
                   <MenuItem value="">(All users)</MenuItem>
                   {users.map(u => (
                     <MenuItem key={u.id} value={String(u.id)}>{u.username}</MenuItem>

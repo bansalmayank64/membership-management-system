@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Paper, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, IconButton, Card, CardContent, Chip, useMediaQuery, Stack, TablePagination, Avatar } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import dayjs from 'dayjs';
+import { formatDateTimeForDisplay } from '../utils/dateUtils';
 import { useTheme } from '@mui/material/styles';
 
 // simple debounce helper
@@ -266,12 +267,18 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
               <CardContent sx={{ pb: 1 }}>
                 <Stack direction="row" spacing={2} alignItems="flex-start">
                   <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography variant="caption" color="text.secondary">{formatToIST(a.timestamp)}</Typography>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 0.5 }}>{a.type || a.action_type} {a.details && a.details.amount ? <Typography component="span" sx={{ fontWeight: 600, color: 'text.secondary' }}>• ₹{a.details.amount}</Typography> : null}</Typography>
-                    {studentName ? (
-                      <Typography variant="body1" sx={{ mt: 0.5 }}>{studentName}</Typography>
-                    ) : null}
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{a.subjectType || a.subject_type} {a.subjectId || a.subject_id ? `• id:${a.subjectId || a.subject_id}` : ''}</Typography>
+                        <Typography variant="caption" color="text.secondary">{formatDateTimeForDisplay(a.timestamp)}</Typography>
+                        {/* Show amount prominently for payments; avoid repeating the action type (chip shows it) */}
+                        {a.details && a.details.amount ? (
+                          <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 0.5 }}>₹{a.details.amount}</Typography>
+                        ) : null}
+                        {studentName ? (
+                          <Typography variant="body1" sx={{ mt: 0.5, fontWeight: 700 }}>{studentName}</Typography>
+                        ) : null}
+                        {/* show subject type and id in light grey (only if available) */}
+                        {((a.subjectType || a.subject_type) || (a.subjectId || a.subject_id)) ? (
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>{(a.subjectType || a.subject_type) || ''}{(a.subjectId || a.subject_id) ? ` • id:${a.subjectId || a.subject_id}` : ''}</Typography>
+                        ) : null}
                   </Box>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
                     <Avatar sx={{ bgcolor: borderColor, width: 36, height: 36, fontSize: 14 }}>{initials}</Avatar>
@@ -280,12 +287,42 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                   </Box>
                 </Stack>
                 <Box sx={{ mt: 1 }}>
-                  <Paper variant="outlined" sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1, maxHeight: 140, overflow: 'auto' }}>
+                    <Paper variant="outlined" sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1, maxHeight: 140, overflow: 'auto' }}>
                     {/* For UPDATE actions show a concise diff: only changed fields */}
                     {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
                       <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
                     ) : (
-                      <PrettyDetails details={a.details} />
+                      // For payments, format any payment_date and show student_name clearly
+                      (() => {
+                        if ((a.type || a.action_type || '').toString().toLowerCase() === 'monthly_fee' || (a.subjectType || a.subject_type || '').toString().toLowerCase() === 'payment') {
+                          const d = a.details || {};
+                          return (
+                            <Box>
+                              <Box sx={{ display: 'grid', gap: 0.5 }}>
+                                <Box sx={{ display: 'flex', gap: 1 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Amount</Typography>
+                                  <Typography variant="body2">₹{d.amount ?? '—'}</Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 1 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Remarks</Typography>
+                                  <Typography variant="body2">{d.remarks ?? '—'}</Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 1 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Payment date</Typography>
+                                  <Typography variant="body2">{formatDateTimeForDisplay(d.payment_date || a.timestamp)}</Typography>
+                                </Box>
+                                {d.student_name ? (
+                                  <Box sx={{ display: 'flex', gap: 1 }}>
+                                    <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Student</Typography>
+                                    <Typography variant="body2">{d.student_name}</Typography>
+                                  </Box>
+                                ) : null}
+                              </Box>
+                            </Box>
+                          );
+                        }
+                        return <PrettyDetails details={a.details} />;
+                      })()
                     )}
                   </Paper>
                 </Box>
