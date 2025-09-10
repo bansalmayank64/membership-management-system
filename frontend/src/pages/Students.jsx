@@ -296,6 +296,10 @@ function Students() {
   const [seatHistoryOpen, setSeatHistoryOpen] = useState(false);
   // Delete confirmation dialog state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // Permanent delete (admin-only) dialog state
+  const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
+  const [permanentDeleteConfirmText, setPermanentDeleteConfirmText] = useState('');
+  const [processingPermanentDelete, setProcessingPermanentDelete] = useState(false);
 
   // Deactivate / refund states
   const [deactivateRefundAmount, setDeactivateRefundAmount] = useState(0);
@@ -1522,6 +1526,14 @@ function Students() {
     logger.debug('🔒 [handleActionClose] Closing action menu and clearing selectedItemForAction', { selectedItemForAction });
     setActionMenuAnchor(null);
     setSelectedItemForAction(null);
+  };
+
+  // Close the action menu but preserve the selected item for flows that open dialogs
+  // directly from the menu (e.g. Permanently Delete) so the dialog can access the
+  // selected student even after the menu has closed.
+  const closeMenuOnly = () => {
+    logger.debug('🔒 [closeMenuOnly] Closing action menu but preserving selectedItemForAction', { selectedItemForAction });
+    setActionMenuAnchor(null);
   };
 
   // Seat history handler
@@ -3850,7 +3862,7 @@ function Students() {
       <Menu
         anchorEl={actionMenuAnchor}
         open={Boolean(actionMenuAnchor)}
-        onClose={handleActionClose}
+        onClose={closeMenuOnly}
         anchorOrigin={{
           vertical: 'bottom',
           horizontal: 'right',
@@ -3946,6 +3958,14 @@ function Students() {
                 <ListItemText>Student Seat History</ListItemText>
               </MenuItem>,
               <Divider key="divider" />,
+              user && user.role === 'admin' && (
+                <MenuItem key="permanentDelete" onClick={() => { setPermanentDeleteDialogOpen(true); }} sx={{ color: 'error.main' }}>
+                  <ListItemIcon>
+                    <DeleteIcon fontSize="small" color="error" />
+                  </ListItemIcon>
+                  <ListItemText>Delete Permanently</ListItemText>
+                </MenuItem>
+              ),
               <MenuItem key="reactivate" onClick={handleReactivateStudent} sx={{ color: 'success.main' }}>
                 <ListItemIcon>
                   <CheckCircleIcon fontSize="small" color="success" />
@@ -4022,6 +4042,19 @@ function Students() {
             <ListItemText>Student Seat History</ListItemText>
           </MenuItem>,
           <Divider key="divider" />,
+          // Admin-only permanent delete option (only for inactive/deactivated students)
+          user && user.role === 'admin' && (
+            selectedItemForAction && (
+              ['inactive', 'deactivated'].includes(((selectedItemForAction.membership_status || selectedItemForAction.status || '') + '').toString().toLowerCase())
+            ) && (
+              <MenuItem key="permanentDelete" onClick={() => { setPermanentDeleteDialogOpen(true); }} sx={{ color: 'error.main' }}>
+                <ListItemIcon>
+                  <DeleteIcon fontSize="small" color="error" />
+                </ListItemIcon>
+                <ListItemText>Delete Permanently</ListItemText>
+              </MenuItem>
+            )
+          ),
           <MenuItem key="reactivate" onClick={handleReactivateStudent} sx={{ color: 'success.main' }}>
             <ListItemIcon>
               <CheckCircleIcon fontSize="small" color="success" />
@@ -4887,6 +4920,73 @@ function Students() {
             onClick={confirmReactivateStudent}
           >
             Reactivate Student
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Permanent Delete Confirmation Dialog (admin only) */}
+      <Dialog open={permanentDeleteDialogOpen} onClose={() => { setPermanentDeleteDialogOpen(false); }} maxWidth="sm" fullWidth>
+        <DialogTitle>Permanently Delete Student</DialogTitle>
+        <DialogContent>
+          <Typography color="error">
+            This action will permanently delete ALL data related to this student (payments, history, seat history, activity logs, and the student record).
+            This operation is irreversible.
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 2 }}>
+            Student: <strong>{selectedItemForAction?.name || 'Unknown'}</strong>
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            To confirm, type <strong>DELETE</strong> in the box below and click Confirm.
+          </Typography>
+          <TextField
+            fullWidth
+            value={permanentDeleteConfirmText}
+            onChange={(e) => setPermanentDeleteConfirmText(e.target.value)}
+            placeholder="Type DELETE to confirm"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPermanentDeleteDialogOpen(false)} disabled={processingPermanentDelete}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            disabled={processingPermanentDelete || permanentDeleteConfirmText.trim() !== 'DELETE' || !selectedItemForAction?.id}
+            onClick={async () => {
+              if (!selectedItemForAction || !selectedItemForAction.id) return;
+              setProcessingPermanentDelete(true);
+              try {
+                const resp = await fetch(`/api/students/${selectedItemForAction.id}`, {
+                  method: 'DELETE',
+                  headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                  }
+                });
+
+                if (!resp.ok) {
+                  const text = await resp.text().catch(() => '');
+                  throw new Error(`Failed to delete student: ${resp.status} ${text}`);
+                }
+
+                setSnackbarMessage('Student deleted permanently');
+                setSnackbarSeverity('success');
+                setSnackbarOpen(true);
+                setPermanentDeleteDialogOpen(false);
+                setPermanentDeleteConfirmText('');
+                // Refresh data
+                await fetchData();
+              } catch (err) {
+                logger.error('❌ [PermanentDelete] Error deleting student', err);
+                setSnackbarMessage(err.message || 'Failed to delete student');
+                setSnackbarSeverity('error');
+                setSnackbarOpen(true);
+              } finally {
+                setProcessingPermanentDelete(false);
+                handleActionClose();
+              }
+            }}
+          >
+            {processingPermanentDelete ? 'Deleting...' : 'Confirm Delete'}
           </Button>
         </DialogActions>
       </Dialog>

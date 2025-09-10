@@ -745,73 +745,95 @@ router.delete('/:id', async (req, res) => {
   
   try {
     const { id } = req.params;
-    
-    logger.info('Starting transaction for delete', { requestId });
+
+    // Authorization: Only admins may permanently delete student data
+    if (!req.user || req.user.role !== 'admin') {
+      logger.warn('Unauthorized student delete attempt', { requestId, user: req.user && req.user.userId, requiredRole: 'admin' });
+      return res.status(403).json({ error: 'Admin privileges required to delete student', timestamp: new Date().toISOString() });
+    }
+
+    logger.info('Starting transaction for permanent delete', { requestId });
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      logger.info('Transaction started for delete', { requestId });
+      logger.info('Transaction started for permanent delete', { requestId });
 
-      // Get student's current seat
+      // Ensure student exists and fetch seat
       logger.info('Fetching student and seat information', { requestId, studentId: id });
-      const studentQuery = `
-        SELECT s.seat_number 
-        FROM students s 
-        WHERE s.id = $1
-      `;
+      const studentQuery = `SELECT s.seat_number FROM students s WHERE s.id = $1`;
       const studentResult = await client.query(studentQuery, [id]);
-      
       if (studentResult.rows.length === 0) {
-  logger.info('Student not found for delete', { requestId, studentId: id });
-  return res.status(404).json({ error: 'Student not found', studentId: id, timestamp: new Date().toISOString() });
+        logger.info('Student not found for delete', { requestId, studentId: id });
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Student not found', studentId: id, timestamp: new Date().toISOString() });
       }
 
       const seatNumber = studentResult.rows[0].seat_number;
-  logger.info('Student found for delete', { requestId, studentId: id, seatNumber: seatNumber || null });
+      logger.info('Student found for permanent delete', { requestId, studentId: id, seatNumber: seatNumber || null });
 
       // Free up the seat if assigned
       if (seatNumber) {
-  logger.info('Freeing up assigned seat', { requestId, seatNumber });
-  await client.query(`
+        logger.info('Freeing up assigned seat', { requestId, seatNumber });
+        await client.query(`
           UPDATE seats 
           SET occupant_sex = NULL, 
               updated_at = CURRENT_TIMESTAMP,
               modified_by = $2
           WHERE seat_number = $1
         `, [seatNumber, req.user?.userId || req.user?.id || 1]);
-  logger.info('Seat freed up successfully', { requestId, seatNumber });
+        logger.info('Seat freed up successfully', { requestId, seatNumber });
       } else {
-  logger.info('No seat to free up for delete', { requestId, studentId: id });
+        logger.info('No seat to free up for delete', { requestId, studentId: id });
       }
 
-      // Delete student
-  logger.info('Deleting student record', { requestId, studentId: id });
-  const deleteResult = await client.query('DELETE FROM students WHERE id = $1', [id]);
-  logger.info('Student deleted', { requestId, studentId: id, rowsAffected: deleteResult.rowCount });
+      // Delete related records explicitly to ensure full removal
+      logger.info('Deleting related payments, seat history, student history and activity logs', { requestId, studentId: id });
+      const delPayments = await client.query('DELETE FROM payments WHERE student_id = $1 RETURNING id', [id]);
+      const delSeatsHistory = await client.query('DELETE FROM seats_history WHERE student_id = $1 RETURNING history_id', [id]);
+      const delStudentsHistory = await client.query('DELETE FROM students_history WHERE id = $1 RETURNING history_id', [id]);
+      const delActivityLogs = await client.query("DELETE FROM activity_logs WHERE subject_type = 'student' AND subject_id = $1 RETURNING id", [id]);
 
-  logger.info('Committing delete transaction', { requestId });
-  await client.query('COMMIT');
-  logger.info('Delete transaction committed', { requestId });
-      
+      logger.info('Related records deleted', { requestId, payments: delPayments.rowCount, seats_history: delSeatsHistory.rowCount, students_history: delStudentsHistory.rowCount, activity_logs: delActivityLogs.rowCount });
+
+      // Finally delete the student record
+      logger.info('Deleting student record', { requestId, studentId: id });
+      const deleteResult = await client.query('DELETE FROM students WHERE id = $1 RETURNING *', [id]);
+      if (deleteResult.rows.length === 0) {
+        // Unexpected: student disappeared between checks
+        logger.warn('Student deletion affected no rows', { requestId, studentId: id });
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Student not found during delete', studentId: id, timestamp: new Date().toISOString() });
+      }
+
+      logger.info('Committing permanent delete transaction', { requestId });
+      await client.query('COMMIT');
+      logger.info('Permanent delete transaction committed', { requestId });
+
       const executionTime = Date.now() - startTime;
-  logger.info('DELETE STUDENT SUCCESS', { requestId, studentId: id, executionTime });
-      
+      logger.info('DELETE STUDENT SUCCESS (permanent)', { requestId, studentId: id, executionTime });
+
       res.json({ 
-        message: 'Student deleted successfully',
+        message: 'Student permanently deleted successfully',
         studentId: id,
         freedSeat: seatNumber,
+        deleted: {
+          payments: delPayments.rowCount,
+          seats_history: delSeatsHistory.rowCount,
+          students_history: delStudentsHistory.rowCount,
+          activity_logs: delActivityLogs.rowCount
+        },
         timestamp: new Date().toISOString()
       });
-      
+
     } catch (error) {
-  logger.warn('Rolling back delete transaction due to error', { requestId, error: error.message });
-  await client.query('ROLLBACK');
-  logger.info('Delete transaction rolled back', { requestId });
-  throw error;
+      logger.warn('Rolling back permanent delete transaction due to error', { requestId, error: error.message });
+      await client.query('ROLLBACK');
+      logger.info('Permanent delete transaction rolled back', { requestId });
+      throw error;
     } finally {
-  logger.info('Releasing database connection after delete', { requestId });
-  client.release();
-  logger.info('Database connection released after delete', { requestId });
+      logger.info('Releasing database connection after delete', { requestId });
+      client.release();
+      logger.info('Database connection released after delete', { requestId });
     }
 
   } catch (error) {

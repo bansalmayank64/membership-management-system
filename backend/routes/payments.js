@@ -401,12 +401,13 @@ router.post('/', async (req, res) => {
           student_id, amount, payment_date, payment_mode, payment_type, description, modified_by,
           created_at, updated_at
         )
-        VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `;
       const paymentValues = [
         student_id,
         finalAmount,
+        payment_date, // use provided payment_date so UI selection is preserved
         normalizedPaymentMode,
         payment_type,
         remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : membershipExtensionDays < 0 ? ` (Reduced membership by ${Math.abs(membershipExtensionDays)} days)` : ''}`,
