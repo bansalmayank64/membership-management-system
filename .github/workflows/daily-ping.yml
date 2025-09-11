@@ -1,12 +1,49 @@
-name: Ping Render Server Every 10 Minutes
+name: Ping Render Server Every 5 Minutes
 
 on:
+  # Manual trigger so you can run and debug immediately from the Actions UI
+  workflow_dispatch:
+
+  # Scheduled trigger (UTC). GitHub scheduler runs on the default branch only
   schedule:
-    - cron: '*/5 * * * *' # Runs every 5 minutes
+    - cron: '*/5 * * * *' # Runs every 5 minutes (UTC)
+
+# Prevent queued runs from stacking. Cancel any in-progress/queued run in the same group
+concurrency:
+  group: ping-render-server
+  cancel-in-progress: true
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
-      - name: Ping Render Service
-        run: curl https://membership-management-system.onrender.com/
+      - name: Show current UTC time
+        run: date -u
+
+      - name: Ping Render Service (with retries)
+        run: |
+          set -eu
+          url="https://membership-management-system.onrender.com/"
+          max_attempts=3
+          attempt=1
+          backoff=2
+          echo "Pinging $url with up to $max_attempts attempts"
+          while [ $attempt -le $max_attempts ]; do
+            echo "Attempt $attempt of $max_attempts..."
+            if curl -fsS -o /dev/null "$url"; then
+              echo "Ping successful on attempt $attempt"
+              exit 0
+            else
+              rc=$?
+              echo "Attempt $attempt failed (exit $rc)"
+              if [ $attempt -lt $max_attempts ]; then
+                sleep_seconds=$(( backoff ** (attempt - 1) ))
+                echo "Sleeping $sleep_seconds seconds before next attempt"
+                sleep $sleep_seconds
+              fi
+            fi
+            attempt=$(( attempt + 1 ))
+          done
+          echo "All $max_attempts attempts failed" >&2
+          exit 1
