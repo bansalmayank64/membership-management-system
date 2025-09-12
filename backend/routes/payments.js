@@ -202,12 +202,31 @@ router.post('/', async (req, res) => {
     }
 
     // Payment date validation - TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    // Normalize: if client sent only a date (YYYY-MM-DD), preserve that date but use the current server time for hours/minutes/seconds
+    let normalizedPaymentDate = null;
     if (!payment_date) {
       validationErrors.push('Payment date is required');
     } else {
-      const paymentDate = new Date(payment_date);
-      if (isNaN(paymentDate.getTime())) {
-        validationErrors.push('Payment date must be a valid date');
+      const asString = String(payment_date).trim();
+      // Detect date-only strings like '2025-09-12'
+      const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(asString);
+      if (isDateOnly) {
+        const now = new Date();
+        const parts = asString.split('-').map(Number);
+        // Construct a Date in server local timezone using provided date and current time
+        const dt = new Date(parts[0], parts[1] - 1, parts[2], now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+        if (isNaN(dt.getTime())) {
+          validationErrors.push('Payment date must be a valid date');
+        } else {
+          normalizedPaymentDate = dt;
+        }
+      } else {
+        const tentative = new Date(asString);
+        if (isNaN(tentative.getTime())) {
+          validationErrors.push('Payment date must be a valid date');
+        } else {
+          normalizedPaymentDate = tentative;
+        }
       }
     }
 
@@ -407,7 +426,7 @@ router.post('/', async (req, res) => {
       const paymentValues = [
         student_id,
         finalAmount,
-        payment_date, // use provided payment_date so UI selection is preserved
+        normalizedPaymentDate || payment_date, // prefer normalized Date (with time) when available
         normalizedPaymentMode,
         payment_type,
         remarks || `${payment_type === 'monthly_fee' ? 'Monthly fee' : 'Refund'} payment for ${student.name}${membershipExtensionDays > 0 ? ` (Extended membership by ${membershipExtensionDays} days)` : membershipExtensionDays < 0 ? ` (Reduced membership by ${Math.abs(membershipExtensionDays)} days)` : ''}`,

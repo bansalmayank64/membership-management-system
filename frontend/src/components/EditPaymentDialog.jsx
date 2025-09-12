@@ -18,7 +18,7 @@ import {
 import { Autocomplete } from '@mui/material';
 import { CalendarToday as CalendarTodayIcon } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
-import { todayInIST } from '../utils/dateUtils';
+import { todayInIST, isoToISTDateInput } from '../utils/dateUtils';
 
 const EditPaymentDialog = ({
   open,
@@ -59,7 +59,7 @@ const EditPaymentDialog = ({
         amount: payment.amount != null ? String(Math.abs(Number(payment.amount))) : '',
         method: payment.payment_mode || payment.method || 'cash',
         type: payment.payment_type || payment.type || 'monthly_fee',
-        date: payment.payment_date ? payment.payment_date.split('T')[0] : (payment.date || todayInIST()),
+  date: payment.payment_date ? isoToISTDateInput(payment.payment_date) : (payment.date || todayInIST()),
         notes: payment.remarks || payment.notes || ''
       });
       // store original snapshot for change detection
@@ -67,7 +67,7 @@ const EditPaymentDialog = ({
         amount: payment.amount != null ? String(Math.abs(Number(payment.amount))) : '',
         method: payment.payment_mode || payment.method || 'cash',
         type: payment.payment_type || payment.type || 'monthly_fee',
-        date: payment.payment_date ? payment.payment_date.split('T')[0] : (payment.date || todayInIST()),
+  date: payment.payment_date ? isoToISTDateInput(payment.payment_date) : (payment.date || todayInIST()),
         notes: payment.remarks || payment.notes || ''
       });
     } else {
