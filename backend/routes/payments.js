@@ -459,7 +459,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/payments/:id - Update payment
+// PUT /api/payments/:id - Update payment (partial updates supported)
 router.put('/:id', async (req, res) => {
   const rl = logger.createRequestLogger('PUT', '/api/payments/:id', req);
   try {
@@ -472,65 +472,18 @@ router.put('/:id', async (req, res) => {
       description,
       modified_by
     } = req.body;
-    rl.validationStart('Validating input parameters for payment update');
-    
-    // Enhanced validation with database constraints
+
+    rl.validationStart('Validating input parameters for payment update (partial)');
     const validationErrors = [];
 
     // ID validation
     if (!id || isNaN(id)) {
       validationErrors.push('Valid payment ID is required');
-    }
-
-    // Student ID validation - REFERENCES students(id)
-    if (!student_id || isNaN(student_id)) {
-      validationErrors.push('Valid student ID is required (must be a number)');
-    }
-
-    // Amount validation - NUMERIC(10,2) NOT NULL
-    if (!amount) {
-      validationErrors.push('Payment amount is required');
-    } else if (isNaN(amount)) {
-      validationErrors.push('Amount must be a valid number');
-    } else {
-      const numAmount = parseFloat(amount);
-      if (numAmount <= 0) {
-        validationErrors.push('Amount must be a positive number');
-      } else if (numAmount > 99999999.99) {
-        validationErrors.push('Amount exceeds maximum allowed value (99,999,999.99)');
-      }
-      // Check decimal places (NUMERIC(10,2) allows 2 decimal places)
-      const decimalParts = amount.toString().split('.');
-      if (decimalParts[1] && decimalParts[1].length > 2) {
-        validationErrors.push('Amount can have maximum 2 decimal places');
-      }
-    }
-
-    // Payment date validation
-    if (!payment_date) {
-      validationErrors.push('Payment date is required');
-    } else {
-      const paymentDate = new Date(payment_date);
-      if (isNaN(paymentDate.getTime())) {
-        validationErrors.push('Payment date must be a valid date');
-      }
-    }
-
-    // Payment mode validation - CHECK (payment_mode IN ('cash','online'))
-    if (!payment_mode) {
-      validationErrors.push('Payment mode is required');
-    } else if (!['cash', 'online', 'CASH', 'ONLINE'].includes(payment_mode)) {
-      validationErrors.push('Payment mode must be either "cash" or "online"');
-    }
-
-    if (validationErrors.length > 0) {
-      rl.validationError('update', validationErrors);
+      rl.validationError('id', validationErrors);
       return res.status(400).json({ error: 'Validation failed', details: validationErrors, requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
 
-    rl.businessLogic('Preparing payment update query with referential integrity checks');
-    
-    // First, verify the payment exists and check student relationship
+    // Fetch existing payment first
     const existingPaymentQuery = `
       SELECT p.*, s.name as student_name 
       FROM payments p 
@@ -542,7 +495,7 @@ router.put('/:id', async (req, res) => {
       rl.warn('Payment not found for update', { paymentId: id });
       return res.status(404).json({ error: 'Payment not found', requestId: rl.requestId, timestamp: new Date().toISOString() });
     }
-    
+
     const existingPayment = existingPaymentResult.rows[0];
     if (!existingPayment.student_name) {
       rl.error('Payment-student relationship integrity violation', { paymentId: id, studentId: existingPayment.student_id });
@@ -553,35 +506,127 @@ router.put('/:id', async (req, res) => {
         timestamp: new Date().toISOString() 
       });
     }
-    
-    // Verify new student exists
-  const newStudentQuery = 'SELECT id, name, membership_date FROM students WHERE id = $1';
-    const newStudentResult = await pool.query(newStudentQuery, [student_id]);
-    if (newStudentResult.rows.length === 0) {
-      rl.validationError('student_id', [`Student with ID ${student_id} not found`]);
-      return res.status(400).json({ 
-        error: `Student with ID ${student_id} not found`, 
-        requestId: rl.requestId, 
-        timestamp: new Date().toISOString() 
-      });
+
+    // If student_id is provided, verify student exists
+    if (student_id !== undefined && student_id !== null) {
+      if (isNaN(student_id)) {
+        validationErrors.push('student_id must be a number when provided');
+      } else {
+        const newStudentQuery = 'SELECT id, name, membership_date FROM students WHERE id = $1';
+        const newStudentResult = await pool.query(newStudentQuery, [student_id]);
+        if (newStudentResult.rows.length === 0) {
+          validationErrors.push(`Student with ID ${student_id} not found`);
+        }
+      }
     }
-    
-    const query = `
-      UPDATE payments 
-      SET 
-        student_id = $2,
-        amount = $3,
-        payment_date = $4,
-        payment_mode = $5,
-        description = $6,
-        modified_by = $7,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING *
-    `;
-    const queryStart = rl.queryStart('Execute payment update', query, [id, student_id, parseFloat(amount), payment_date, payment_mode.toLowerCase(), description, req.user?.userId || req.user?.id || 1]);
-    const result = await pool.query(query, [id, student_id, parseFloat(amount), payment_date, payment_mode.toLowerCase(), description, req.user?.userId || req.user?.id || 1]);
-    rl.querySuccess('Execute payment update', queryStart, result, true);
+
+    // Validate provided amount (only when present)
+    let parsedAmount = undefined;
+    if (amount !== undefined && amount !== null) {
+      if (isNaN(amount)) {
+        validationErrors.push('Amount must be a valid number when provided');
+      } else {
+        parsedAmount = parseFloat(amount);
+        if (parsedAmount <= 0) validationErrors.push('Amount must be a positive number');
+        if (Math.abs(parsedAmount) > 99999999.99) validationErrors.push('Amount exceeds maximum allowed value (99,999,999.99)');
+        const decimalParts = amount.toString().split('.');
+        if (decimalParts[1] && decimalParts[1].length > 2) validationErrors.push('Amount can have maximum 2 decimal places');
+      }
+    }
+
+    // Validate payment_mode when provided
+    let normalizedMode = undefined;
+    if (payment_mode !== undefined && payment_mode !== null) {
+      if (!['cash', 'online', 'CASH', 'ONLINE'].includes(payment_mode)) {
+        validationErrors.push('Payment mode must be either "cash" or "online" when provided');
+      } else {
+        normalizedMode = payment_mode.toLowerCase();
+      }
+    }
+
+    // Validate payment_date when provided (and parse)
+    let parsedPaymentDate = undefined;
+    if (payment_date !== undefined && payment_date !== null) {
+      const asString = String(payment_date).trim();
+      const tentative = new Date(asString);
+      if (isNaN(tentative.getTime())) {
+        validationErrors.push('Payment date must be a valid date when provided');
+      } else {
+        // If client provided a date-only string (YYYY-MM-DD), preserve the original time component
+        const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(asString);
+        if (isDateOnly && existingPayment.payment_date) {
+          const existingDt = new Date(existingPayment.payment_date);
+          const newDt = new Date(asString + 'T00:00:00');
+          newDt.setHours(existingDt.getHours(), existingDt.getMinutes(), existingDt.getSeconds(), existingDt.getMilliseconds());
+          parsedPaymentDate = newDt;
+        } else {
+          parsedPaymentDate = tentative;
+        }
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      rl.validationError('update', validationErrors);
+      return res.status(400).json({ error: 'Validation failed', details: validationErrors, requestId: rl.requestId, timestamp: new Date().toISOString() });
+    }
+
+    // Build dynamic update only for changed fields
+    const setClauses = [];
+    const values = [];
+    let idx = 1;
+
+    // student_id
+    if (student_id !== undefined && student_id !== null && Number(student_id) !== Number(existingPayment.student_id)) {
+      setClauses.push(`student_id = $${idx++}`);
+      values.push(Number(student_id));
+    }
+
+    // amount
+    if (parsedAmount !== undefined && Number(parsedAmount) !== Number(existingPayment.amount)) {
+      setClauses.push(`amount = $${idx++}`);
+      values.push(parsedAmount);
+    }
+
+    // payment_date
+    if (parsedPaymentDate !== undefined) {
+      const existingTs = existingPayment.payment_date ? new Date(existingPayment.payment_date).getTime() : null;
+      if (existingTs === null || parsedPaymentDate.getTime() !== existingTs) {
+        setClauses.push(`payment_date = $${idx++}`);
+        values.push(parsedPaymentDate);
+      }
+    }
+
+    // payment_mode
+    if (normalizedMode !== undefined && existingPayment.payment_mode && normalizedMode !== String(existingPayment.payment_mode).toLowerCase()) {
+      setClauses.push(`payment_mode = $${idx++}`);
+      values.push(normalizedMode);
+    } else if (normalizedMode !== undefined && !existingPayment.payment_mode) {
+      setClauses.push(`payment_mode = $${idx++}`);
+      values.push(normalizedMode);
+    }
+
+    // description
+    if (description !== undefined && description !== null && String(description) !== String(existingPayment.description)) {
+      setClauses.push(`description = $${idx++}`);
+      values.push(description);
+    }
+
+    // If nothing to update, return existing row
+    if (setClauses.length === 0) {
+      rl.info('No fields changed - skipping update', { paymentId: id });
+      return res.json(existingPayment);
+    }
+
+    // Always set modified_by when performing an update
+    setClauses.push(`modified_by = $${idx++}`);
+    values.push(req.user?.userId || req.user?.id || 1);
+
+    const updateQuery = `UPDATE payments SET ${setClauses.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${idx++} RETURNING *`;
+    values.push(id);
+
+    const queryStart = rl.queryStart('Execute payment partial update', updateQuery, values);
+    const result = await pool.query(updateQuery, values);
+    rl.querySuccess('Execute payment partial update', queryStart, result, true);
 
     if (result.rows.length === 0) {
       rl.warn('Payment not found for update after verification', { paymentId: id });

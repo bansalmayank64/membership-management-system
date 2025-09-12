@@ -337,13 +337,24 @@ router.post('/', async (req, res) => {
     const normalizedSeatNumber = seat_number ? seat_number.trim().toUpperCase() : null;
   const normalizedAadhaar = aadhaar_number ? aadhaar_number.replace(/\D/g, '') : null;
   const normalizedAddress = address ? address.trim() : null;
-  // Normalize membership_date if provided (expect YYYY-MM-DD or ISO string). If invalid, set null so DB can default.
+  // Normalize membership_date if provided (expect YYYY-MM-DD or ISO string). Convert to date-only (YYYY-MM-DD)
+  // to avoid timezone shifts when storing in the DB.
   let normalizedMembershipDate = null;
   if (membership_date && typeof membership_date === 'string') {
-    const parsed = new Date(membership_date);
-    if (!isNaN(parsed.getTime())) {
-      // Keep the original YYYY-MM-DD/ISO string as provided by client
-      normalizedMembershipDate = membership_date.trim();
+    const raw = membership_date.trim();
+    // If client sent a date-only string, keep it as-is
+    const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})$/);
+    if (dateOnlyMatch) {
+      normalizedMembershipDate = dateOnlyMatch[1];
+    } else {
+      // Try to parse and convert to local date components (YYYY-MM-DD)
+      const parsed = new Date(raw);
+      if (!isNaN(parsed.getTime())) {
+        const y = parsed.getFullYear();
+        const m = String(parsed.getMonth() + 1).padStart(2, '0');
+        const d = String(parsed.getDate()).padStart(2, '0');
+        normalizedMembershipDate = `${y}-${m}-${d}`;
+      }
     }
   }
 
@@ -401,7 +412,7 @@ router.post('/', async (req, res) => {
       $7,                             -- membership_type (user input)
       $8,                             -- seat_number (user input)
           $9,                             -- membership_date (from client or null)
-          null,                           -- membership_till
+          CURRENT_DATE,                   -- membership_till (default to today's date when created)
           'active',                       -- membership_status
           CURRENT_TIMESTAMP,              -- created_at
           CURRENT_TIMESTAMP,              -- updated_at
@@ -602,7 +613,8 @@ router.put('/:id', async (req, res) => {
       // Cross-validation: if both dates provided, start should be before end
       if (membership_date && membership_till) {
         const startDate = new Date(membership_date);
-        if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && startDate >= endDate) {
+        if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && startDate > endDate) {
+          // allow same-day start and end; only error when start is after end
           validationErrors.push('Membership start date must be before end date');
         }
       }
@@ -640,6 +652,9 @@ router.put('/:id', async (req, res) => {
   // Default to existing values when field not provided in update
   const normalizedAadhaar = (aadhaar_number && aadhaar_number.trim().length > 0) ? aadhaar_number.replace(/\D/g, '') : (currentStudentRow ? currentStudentRow.aadhaar_number : null);
   const normalizedAddress = (address && address.trim().length > 0) ? address.trim() : (currentStudentRow ? currentStudentRow.address : null);
+  // Normalize membership_date and membership_till to date-only strings to avoid timezone shifts
+  let normalizedMembershipDateForUpdate = membership_date && typeof membership_date === 'string' ? (membership_date.match(/^(\d{4}-\d{2}-\d{2})$/) ? membership_date : (() => { const d = new Date(membership_date); return isNaN(d.getTime()) ? null : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()) : (currentStudentRow ? currentStudentRow.membership_date : null);
+  let normalizedMembershipTillForUpdate = membership_till && typeof membership_till === 'string' ? (membership_till.match(/^(\d{4}-\d{2}-\d{2})$/) ? membership_till : (() => { const d = new Date(membership_till); return isNaN(d.getTime()) ? null : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()) : (currentStudentRow ? currentStudentRow.membership_till : null);
 
   logger.info('Validation passed for update', { requestId, id, normalized: { name: normalizedName, sex: normalizedSex, contact_number: normalizedContact, father_name: normalizedFatherName, seat_number: normalizedSeatNumber, membership_date: membership_date || null, membership_till: membership_till || null, membership_status: effectiveMembershipStatus } });
   logger.info('Updating student information', { requestId, id });
@@ -677,8 +692,8 @@ router.put('/:id', async (req, res) => {
       normalizedSex, 
       (membership_type && membership_type.trim()) ? membership_type.trim() : (currentStudentRow ? currentStudentRow.membership_type : 'full_time'),
       normalizedSeatNumber,
-      membership_date, 
-      membership_till, 
+  normalizedMembershipDateForUpdate, 
+  normalizedMembershipTillForUpdate, 
       effectiveMembershipStatus, 
       req.user?.userId || req.user?.id || 1, 
       id

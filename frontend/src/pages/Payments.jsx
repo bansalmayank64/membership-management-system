@@ -25,9 +25,11 @@ import {
 } from '@mui/material';
 import { Autocomplete } from '@mui/material';
 import { Refresh as RefreshIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import EditIcon from '@mui/icons-material/Edit';
 import MobileFilters from '../components/MobileFilters';
 import Footer from '../components/Footer';
 import AddPaymentDialog from '../components/AddPaymentDialog';
+import EditPaymentDialog from '../components/EditPaymentDialog';
 import StudentDetailsDialog from '../components/StudentDetailsDialog';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
@@ -41,7 +43,7 @@ import { todayInIST, getUtcMidnightForDateInTZ, formatDateTimeForDisplay } from 
 // use formatDateTimeForDisplay from shared utils
 
 // PaymentCard component for mobile view
-const PaymentCard = ({ payment, onDelete, onViewStudent }) => {
+const PaymentCard = ({ payment, onDelete, onViewStudent, onEdit }) => {
   const { user } = useAuth();
 
   const formatCurrency = (amount) => {
@@ -101,6 +103,11 @@ const PaymentCard = ({ payment, onDelete, onViewStudent }) => {
             <Typography variant="caption" color="text.secondary">
               📅 {formatDateTimeForDisplay(payment.payment_date)}
             </Typography>
+            {/* Edit button visible to all users */}
+            <IconButton size="small" color="primary" onClick={() => onEdit && onEdit(payment)} sx={{ ml: 0 }} aria-label={`edit-payment-card-${payment.id}`}>
+              {/* visually show edit icon; parent will replace onClick by passing different handler when rendering PaymentCard */}
+              <EditIcon fontSize="small" />
+            </IconButton>
             {user && user.role === 'admin' && (
               <IconButton size="small" color="error" onClick={() => onDelete && onDelete(payment.id)}>
                 <DeleteIcon fontSize="small" />
@@ -155,6 +162,10 @@ function Payments() {
   const [paymentToDelete, setPaymentToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteInfo, setDeleteInfo] = useState(null);
+  // Edit payment dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [paymentBeingEdited, setPaymentBeingEdited] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   // Global error handler for API calls
   const handleApiError = (error, fallbackMessage = 'An error occurred') => {
@@ -831,6 +842,13 @@ function Payments() {
                             <TableCell>{payment.payment_mode || 'N/A'}</TableCell>
                             <TableCell>{payment.payment_type || 'N/A'}</TableCell>
                             <TableCell align="center">
+                              {/* Edit button accessible to all users */}
+                              <IconButton size="small" color="primary" onClick={() => {
+                                setPaymentBeingEdited(payment);
+                                setEditDialogOpen(true);
+                              }} aria-label={`edit-payment-${payment.id}`}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
                               {user && user.role === 'admin' && (
                                 <IconButton size="small" color="error" onClick={() => openDeleteDialog(payment.id)}>
                                   <DeleteIcon fontSize="small" />
@@ -870,7 +888,14 @@ function Payments() {
                   </Paper>
                 ) : (
                           displayedPayments.map((payment) => (
-                            <PaymentCard key={payment.id} payment={payment} onDelete={openDeleteDialog} onViewStudent={openStudentDialog} />
+                            <div key={payment.id}>
+                              <PaymentCard
+                                payment={payment}
+                                onDelete={openDeleteDialog}
+                                onViewStudent={openStudentDialog}
+                                onEdit={(p) => { setPaymentBeingEdited(p); setEditDialogOpen(true); }}
+                              />
+                            </div>
                           ))
                 )}
 
@@ -922,6 +947,56 @@ function Payments() {
         membershipExtensionDays={membershipExtensionDays}
         loading={paymentLoadingLocal}
         isMobile={isMobile}
+      />
+
+      {/* Edit Payment Dialog */}
+      <EditPaymentDialog
+        open={editDialogOpen}
+        onClose={() => { setEditDialogOpen(false); setPaymentBeingEdited(null); }}
+        payment={paymentBeingEdited}
+        students={students}
+        onStudentSelect={(id) => setSelectedStudentId(id)}
+        selectedStudentId={selectedStudentId}
+        feeConfig={feeConfig}
+        membershipExtensionDays={membershipExtensionDays}
+        loading={editSaving}
+        isMobile={isMobile}
+        onSubmit={async (edited) => {
+          if (!paymentBeingEdited) return;
+          setEditSaving(true);
+          setError(null);
+          try {
+            const payload = {
+              amount: parseFloat(edited.amount),
+              payment_date: edited.date,
+              payment_mode: edited.method,
+              payment_type: edited.type,
+              remarks: edited.notes || '',
+              student_id: edited.student_id || paymentBeingEdited.student_id
+            };
+            const resp = await fetch(`/api/payments/${paymentBeingEdited.id}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+              },
+              body: JSON.stringify(payload)
+            });
+            if (!resp.ok) {
+              const err = await resp.json().catch(() => ({}));
+              throw new Error(err.error || 'Failed to update payment');
+            }
+            // refresh list
+            await fetchPayments();
+            setEditDialogOpen(false);
+            setPaymentBeingEdited(null);
+          } catch (err) {
+            console.error('Failed to save edited payment', err);
+            setError(err.message || 'Failed to update payment');
+          } finally {
+            setEditSaving(false);
+          }
+        }}
       />
 
       {/* Delete Confirmation Dialog */}
