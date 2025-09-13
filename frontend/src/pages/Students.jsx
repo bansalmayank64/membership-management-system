@@ -1401,12 +1401,7 @@ function Students() {
       return;
     }
 
-    if (!newStudent.aadhaar_number || !newStudent.aadhaar_number.trim()) {
-      setSnackbarMessage('*Aadhaar number is required');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-      return;
-    }
+  // Aadhaar is optional for create; backend will validate format/uniqueness only if provided
 
     if (!newStudent.address || !newStudent.address.trim()) {
       setSnackbarMessage('*Address is required');
@@ -2483,12 +2478,7 @@ function Students() {
         return;
       }
     }
-    if (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim()) {
-      setSnackbarMessage('*Aadhaar number is required');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-      return;
-    }
+  // Aadhaar is optional for edit; backend will validate format/uniqueness only if provided
     // Check if aadhaar is used by another student
     try {
       const cleanAadhaar = (editStudent.aadhaarNumber || '').replace(/\D/g, '');
@@ -3647,7 +3637,19 @@ function Students() {
                       const canAssign = !isAssigned && !isInactive;
                       const chip = (
                         <Chip
-                          sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', cursor: canAssign ? 'pointer' : 'default', px: isAssigned ? 1 : 0.75 }}
+                          sx={{
+                            // Keep the original absolute centering on md+ but allow
+                            // the chip to be part of normal flow on small screens
+                            // so it doesn't get clipped or hidden.
+                            position: { xs: 'static', md: 'absolute' },
+                            left: { md: '50%' },
+                            transform: { xs: 'none', md: 'translateX(-50%)' },
+                            cursor: canAssign ? 'pointer' : 'default',
+                            px: isAssigned ? 1 : 0.75,
+                            zIndex: 2,
+                            display: 'inline-flex',
+                            justifyContent: 'center'
+                          }}
                           icon={isAssigned ? <EventSeatIcon sx={{ fontSize: 14 }} /> : <LinkOffIcon sx={{ fontSize: 15, color: 'text.disabled' }} />}
                           label={isAssigned ? (student.seatNumber || student.seat_number) : ''}
                           color={isAssigned ? seatChipColor : 'default'}
@@ -4195,9 +4197,8 @@ function Students() {
               label="Aadhaar Number"
               value={newStudent.aadhaar_number}
               onChange={(e) => setNewStudent({ ...newStudent, aadhaar_number: e.target.value })}
-              required
-              error={addAttempted && (!newStudent.aadhaar_number || !newStudent.aadhaar_number.trim())}
-              helperText={addAttempted && (!newStudent.aadhaar_number || !newStudent.aadhaar_number.trim()) ? 'Aadhaar number is required' : ''}
+              error={addAttempted && newStudent.aadhaar_number && !newStudent.aadhaar_number.trim()}
+              helperText={addAttempted && newStudent.aadhaar_number && !newStudent.aadhaar_number.trim() ? 'Aadhaar number is required' : ''}
             />
             <TextField
               fullWidth
@@ -4622,9 +4623,8 @@ function Students() {
               label="Aadhaar Number"
               value={editStudent.aadhaarNumber}
               onChange={(e) => setEditStudent({ ...editStudent, aadhaarNumber: e.target.value })}
-              required
-              error={editAttempted && (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim())}
-              helperText={editAttempted && (!editStudent.aadhaarNumber || !editStudent.aadhaarNumber.trim()) ? 'Aadhaar number is required' : ''}
+              error={editAttempted && editStudent.aadhaarNumber && !editStudent.aadhaarNumber.trim()}
+              helperText={editAttempted && editStudent.aadhaarNumber && !editStudent.aadhaarNumber.trim() ? 'Aadhaar number is required' : ''}
             />
             <TextField
               fullWidth

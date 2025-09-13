@@ -286,10 +286,8 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Aadhaar number validation (*REQUIRED) - VARCHAR(20)
-    if (!aadhaar_number || typeof aadhaar_number !== 'string' || aadhaar_number.trim().length === 0) {
-      validationErrors.push('*Aadhaar number is required');
-    } else {
+    // Aadhaar number validation (optional) - VARCHAR(20)
+    if (aadhaar_number && typeof aadhaar_number === 'string' && aadhaar_number.trim().length > 0) {
       // Normalize by removing non-digits and validate length (common Aadhaar length = 12)
       const cleanAadhaar = aadhaar_number.replace(/\D/g, '');
       if (cleanAadhaar.length !== 12) {

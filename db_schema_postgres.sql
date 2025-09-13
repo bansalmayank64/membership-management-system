@@ -69,7 +69,7 @@ CREATE TABLE students (
     father_name VARCHAR(100) NOT NULL,
     -- Enforce exactly 10 digits for contact numbers at the DB level
     contact_number VARCHAR(10) NOT NULL CHECK (contact_number ~ '^[0-9]{10}$'),
-    aadhaar_number VARCHAR(20) NOT NULL UNIQUE,
+    aadhaar_number VARCHAR(20) UNIQUE,
     address TEXT NOT NULL,
     sex VARCHAR(10) CHECK (sex IN ('male','female')) NOT NULL,
     membership_type VARCHAR(50) NOT NULL DEFAULT 'full_time',
@@ -131,7 +131,7 @@ CREATE TABLE students_history (
     father_name VARCHAR(100) NOT NULL,
     -- Store contact number snapshot in history and enforce 10 digits for consistency
     contact_number VARCHAR(10) NOT NULL CHECK (contact_number ~ '^[0-9]{10}$'),
-    aadhaar_number VARCHAR(20)  NOT NULL,
+    aadhaar_number VARCHAR(20),
     address TEXT NOT NULL,
     membership_date TIMESTAMP NOT NULL,
     membership_till TIMESTAMP,
