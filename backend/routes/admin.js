@@ -172,7 +172,8 @@ router.put('/users/:id', auth, requireAdmin, async (req, res) => {
 
     if (password && password.trim() !== '') {
       const hashedPassword = await bcrypt.hash(password, 10);
-      query += `, password = $${params.length + 1}`;
+  // store hashed password in the password_hash column
+  query += `, password_hash = $${params.length + 1}`;
       params.push(hashedPassword);
     }
 
