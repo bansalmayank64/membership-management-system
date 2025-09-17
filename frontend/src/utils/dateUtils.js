@@ -116,6 +116,35 @@ const formatDateTimeForDisplay = (dateString) => {
   }
 };
 
+// Return a datetime-local compatible string (YYYY-MM-DDTHH:MM) for a given date in the specified timezone
+const toDateTimeLocalInTZ = (input, tz = 'Asia/Kolkata') => {
+  if (!input) return '';
+  try {
+    const d = input instanceof Date ? input : new Date(input);
+    if (isNaN(d.getTime())) return '';
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(d);
+    const map = {};
+    parts.forEach(p => { if (p.type && p.type !== 'literal') map[p.type] = p.value; });
+    if (!map.year || !map.month || !map.day || !map.hour || !map.minute) return '';
+    return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}`;
+  } catch (e) {
+    return '';
+  }
+};
+
+const nowInISTDateTimeLocal = (tz = 'Asia/Kolkata') => toDateTimeLocalInTZ(new Date(), tz);
+
+const isoToISTDateTimeInput = (input) => toDateTimeLocalInTZ(input, 'Asia/Kolkata');
+
 export {
   isoToISTDateInput,
   todayInIST,
@@ -126,4 +155,7 @@ export {
   formatIsoToDMonYYYY,
   formatPeriod
   ,formatDateTimeForDisplay
+  ,toDateTimeLocalInTZ
+  ,nowInISTDateTimeLocal
+  ,isoToISTDateTimeInput
 };

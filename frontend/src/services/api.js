@@ -238,6 +238,39 @@ export async function addExpense(expenseData) {
   }
 }
 
+// Update an expense
+export async function updateExpense(expenseId, expenseData) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/expenses/${expenseId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(expenseData),
+    });
+
+    await handleResponse(response);
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating expense:', error);
+    throw error;
+  }
+}
+
+// Delete an expense
+export async function deleteExpense(expenseId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/expenses/${expenseId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    await handleResponse(response);
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting expense:', error);
+    throw error;
+  }
+}
+
 // Mark expired seat as vacant
 export async function markSeatAsVacant(seatNumber) {
   try {
@@ -270,6 +303,8 @@ const apiDefault = {
   addPayment,
   getExpenses,
   addExpense,
+  updateExpense,
+  deleteExpense,
   markSeatAsVacant
 };
 

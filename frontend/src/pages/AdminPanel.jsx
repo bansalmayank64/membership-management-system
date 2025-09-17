@@ -94,6 +94,7 @@ function AdminPanel() {
   const IDX_USERS = __tabIdx++;
   const IDX_SEATS = __tabIdx++;
   const IDX_FEES = __tabIdx++;
+  const IDX_EXPENSE_CATEGORIES = __tabIdx++;
   const IDX_SYSTEM = __tabIdx++;
 
   // Global error handler for API calls
@@ -720,6 +721,134 @@ function AdminPanel() {
     }
   };
 
+  // Expense categories state and handlers
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [newCategoryForm, setNewCategoryForm] = useState({ name: '', description: '' });
+  const [editCategoryDialogOpen, setEditCategoryDialogOpen] = useState(false);
+  const [editCategoryForm, setEditCategoryForm] = useState({ id: null, name: '', description: '' });
+
+  const fetchExpenseCategories = async () => {
+    setCategoriesLoading(true);
+    try {
+      const resp = await fetch('/api/admin/expense-categories', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!resp.ok) throw new Error('Failed to load categories');
+      const data = await resp.json();
+      setExpenseCategories(data.categories || []);
+    } catch (err) {
+      console.error('Failed to load categories', err);
+      setExpenseCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Fetch categories when admin panel mounts
+    fetchExpenseCategories();
+  }, []);
+
+  const handleAddCategory = async () => {
+    if (!newCategoryForm.name.trim()) {
+      setMessage({ type: 'error', text: 'Category name is required' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const resp = await fetch('/api/admin/expense-categories', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(newCategoryForm)
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to add category');
+      }
+      setMessage({ type: 'success', text: 'Category added' });
+      setNewCategoryForm({ name: '', description: '' });
+      fetchExpenseCategories();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditCategory = (cat) => {
+    setEditCategoryForm({ id: cat.id, name: cat.name, description: cat.description || '' });
+    setEditCategoryDialogOpen(true);
+  };
+
+  const handleSaveEditCategory = async () => {
+    if (!editCategoryForm.name.trim()) {
+      setMessage({ type: 'error', text: 'Category name is required' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const resp = await fetch(`/api/admin/expense-categories/${editCategoryForm.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: editCategoryForm.name, description: editCategoryForm.description })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update category');
+      }
+      setMessage({ type: 'success', text: 'Category updated' });
+      setEditCategoryDialogOpen(false);
+      fetchExpenseCategories();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRequestDeleteCategory = (cat) => {
+    setConfirmDialog({
+      open: true,
+      action: 'deleteExpenseCategory',
+      data: cat.id,
+      title: 'Delete Expense Category',
+      content: `Are you sure you want to delete category "${cat.name}"? This cannot be undone and will fail if any expenses reference this category.`
+    });
+  };
+
+  const handleDeleteCategory = async (id) => {
+    setLoading(true);
+    try {
+      const resp = await fetch(`/api/admin/expense-categories/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to delete category');
+      }
+      setMessage({ type: 'success', text: 'Category deleted' });
+      fetchExpenseCategories();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+      setConfirmDialog({ open: false, action: '', data: null });
+    }
+  };
+
   const handleUpdateFees = async () => {
     setLoading(true);
     try {
@@ -1072,6 +1201,16 @@ function AdminPanel() {
               key="fees"
               label="Fees" 
               icon={<MoneyIcon />}
+              sx={{ 
+                '& .MuiTab-wrapper': { 
+                  fontSize: { xs: '0.7rem', sm: '0.875rem' } 
+                } 
+              }}
+            />
+            <Tab 
+              key="expense-categories"
+              label="Expenses"
+              icon={<WarningIcon />}
               sx={{ 
                 '& .MuiTab-wrapper': { 
                   fontSize: { xs: '0.7rem', sm: '0.875rem' } 
@@ -1605,6 +1744,90 @@ function AdminPanel() {
           </Box>
         )}
 
+        {/* Expense Categories Management Tab */}
+  {tabValue === IDX_EXPENSE_CATEGORIES && (
+          <Box>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+              <WarningIcon color="primary" />
+              Expense Categories
+            </Typography>
+
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle1" gutterBottom>Add New Category</Typography>
+                    <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                      <TextField
+                        label="Name"
+                        value={newCategoryForm.name}
+                        onChange={(e) => setNewCategoryForm(prev => ({ ...prev, name: e.target.value }))}
+                        fullWidth
+                      />
+                      <Button variant="contained" onClick={handleAddCategory} startIcon={<AddIcon />} disabled={loading}>Add</Button>
+                    </Box>
+                    <TextField
+                      label="Description (optional)"
+                      value={newCategoryForm.description}
+                      onChange={(e) => setNewCategoryForm(prev => ({ ...prev, description: e.target.value }))}
+                      fullWidth
+                      multiline
+                      rows={2}
+                      sx={{ mt: 2 }}
+                    />
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle1" gutterBottom>Existing Categories</Typography>
+                    <TableContainer component={Paper} sx={{ mt: 1 }}>
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Name</TableCell>
+                            <TableCell>Description</TableCell>
+                            <TableCell>Actions</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {expenseCategories.map(cat => (
+                            <TableRow key={cat.id}>
+                              <TableCell>{cat.name}</TableCell>
+                              <TableCell>{cat.description}</TableCell>
+                              <TableCell>
+                                <IconButton size="small" onClick={() => handleEditCategory(cat)}><EditIcon /></IconButton>
+                                <IconButton size="small" color="error" onClick={() => handleRequestDeleteCategory(cat)}><DeleteIcon /></IconButton>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+
+            {/* Edit Category Dialog */}
+            <Dialog open={editCategoryDialogOpen} onClose={() => setEditCategoryDialogOpen(false)} maxWidth="sm" fullWidth>
+              <DialogTitle>Edit Expense Category</DialogTitle>
+              <DialogContent>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+                  <TextField label="Name" value={editCategoryForm.name} onChange={(e) => setEditCategoryForm(prev => ({ ...prev, name: e.target.value }))} fullWidth />
+                  <TextField label="Description" value={editCategoryForm.description} onChange={(e) => setEditCategoryForm(prev => ({ ...prev, description: e.target.value }))} fullWidth multiline rows={3} />
+                </Box>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setEditCategoryDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleSaveEditCategory} variant="contained" disabled={loading}>{loading ? 'Saving...' : 'Save'}</Button>
+              </DialogActions>
+            </Dialog>
+          </Box>
+        )}
+
         {/* System Management Tab */}
   {tabValue === IDX_SYSTEM && (
           <Grid container spacing={3}>
@@ -1839,6 +2062,9 @@ function AdminPanel() {
               handleCleanDatabase();
             } else if (action === 'deleteSeat') {
               handleDeleteSeat(data);
+            } else if (action === 'deleteExpenseCategory') {
+              // data contains the category id
+              handleDeleteCategory(data);
             }
           }}
           onCancel={() => setConfirmDialog({ open: false, action: '', data: null })}

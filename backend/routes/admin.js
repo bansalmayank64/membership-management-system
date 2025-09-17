@@ -494,6 +494,139 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
+// Expense categories management (admin only)
+router.get('/expense-categories', auth, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, description, created_at, updated_at
+      FROM expense_categories
+      ORDER BY name
+    `);
+    res.json({ categories: result.rows });
+  } catch (error) {
+    logger.error('Error fetching expense categories', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch expense categories' });
+  }
+});
+
+router.post('/expense-categories', auth, requireAdmin, async (req, res) => {
+  const { name, description } = req.body;
+  try {
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Category name is required' });
+
+    // Prevent duplicates
+    const exists = await pool.query('SELECT id FROM expense_categories WHERE LOWER(name) = LOWER($1)', [name.trim()]);
+    if (exists.rows.length > 0) return res.status(409).json({ error: 'Category already exists' });
+
+    const result = await pool.query(`
+      INSERT INTO expense_categories (name, description, created_at, updated_at)
+      VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING *
+    `, [name.trim(), description || null]);
+    // Log category creation
+    try {
+      await pool.query(`
+        INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, subject_type, subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        req.user.userId || req.user.id,
+        req.user.username,
+        'expense_category_create',
+        `Created expense category ${result.rows[0].id}`,
+        'expense_category',
+        result.rows[0].id,
+        JSON.stringify(result.rows[0])
+      ]);
+    } catch (logErr) {
+      logger.error('Failed to write activity log for category create', { error: logErr.message });
+    }
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    logger.error('Error creating expense category', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to create expense category' });
+  }
+});
+
+router.put('/expense-categories/:id', auth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, description } = req.body;
+  try {
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Category name is required' });
+
+    // Prevent renaming to an existing name
+    const exists = await pool.query('SELECT id FROM expense_categories WHERE LOWER(name) = LOWER($1) AND id <> $2', [name.trim(), id]);
+    if (exists.rows.length > 0) return res.status(409).json({ error: 'Another category with this name already exists' });
+
+    const result = await pool.query(`
+      UPDATE expense_categories
+      SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `, [name.trim(), description || null, id]);
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Category not found' });
+    // Log category update
+    try {
+      await pool.query(`
+        INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, subject_type, subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        req.user.userId || req.user.id,
+        req.user.username,
+        'expense_category_update',
+        `Updated expense category ${result.rows[0].id}`,
+        'expense_category',
+        result.rows[0].id,
+        JSON.stringify(result.rows[0])
+      ]);
+    } catch (logErr) {
+      logger.error('Failed to write activity log for category update', { error: logErr.message });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    logger.error('Error updating expense category', { error: error.message, stack: error.stack, id });
+    res.status(500).json({ error: 'Failed to update expense category' });
+  }
+});
+
+router.delete('/expense-categories/:id', auth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Prevent deletion if used in expenses
+    const usage = await pool.query('SELECT COUNT(*)::int as cnt FROM expenses WHERE expense_category_id = $1', [id]);
+    if (usage.rows[0].cnt > 0) {
+      return res.status(400).json({ error: 'Cannot delete category - it is referenced by existing expenses' });
+    }
+
+    const result = await pool.query('DELETE FROM expense_categories WHERE id = $1 RETURNING *', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Category not found' });
+    // Log category deletion
+    try {
+      await pool.query(`
+        INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, subject_type, subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        req.user.userId || req.user.id,
+        req.user.username,
+        'expense_category_delete',
+        `Deleted expense category ${result.rows[0].id}`,
+        'expense_category',
+        result.rows[0].id,
+        JSON.stringify(result.rows[0])
+      ]);
+    } catch (logErr) {
+      logger.error('Failed to write activity log for category delete', { error: logErr.message });
+    }
+
+    res.json({ message: 'Category deleted', deleted: result.rows[0] });
+  } catch (error) {
+    logger.error('Error deleting expense category', { error: error.message, stack: error.stack, id });
+    res.status(500).json({ error: 'Failed to delete expense category' });
+  }
+});
+
 // Add new seat
 router.post('/seats', auth, requireAdmin, async (req, res) => {
   const { seatNumber, occupantSex } = req.body;

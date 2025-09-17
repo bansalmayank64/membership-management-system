@@ -29,11 +29,11 @@ DROP INDEX IF EXISTS idx_expenses_category;
 -- No longer needed as we're removing student_id from seats table
 
 -- Drop tables in reverse dependency order
-DROP TABLE IF EXISTS expenses_history CASCADE;
 DROP TABLE IF EXISTS payments_history CASCADE;
 DROP TABLE IF EXISTS seats_history CASCADE;
 DROP TABLE IF EXISTS students_history CASCADE;
 DROP TABLE IF EXISTS expenses CASCADE;
+DROP TABLE IF EXISTS expense_categories CASCADE;
 DROP TABLE IF EXISTS payments CASCADE;
 DROP TABLE IF EXISTS students CASCADE;
 DROP TABLE IF EXISTS seats CASCADE;
@@ -99,9 +99,18 @@ CREATE TABLE payments (
     modified_by INTEGER NOT NULL REFERENCES users(id)
 );
 
+-- Normalized expense categories table
+CREATE TABLE expense_categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE expenses (
     id SERIAL PRIMARY KEY,
-    category VARCHAR(50) NOT NULL,
+    expense_category_id INTEGER NOT NULL REFERENCES expense_categories(id),
     description TEXT NOT NULL,
     amount NUMERIC(10,2) NOT NULL,
     expense_date TIMESTAMP NOT NULL,
@@ -109,6 +118,13 @@ CREATE TABLE expenses (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     modified_by INTEGER NOT NULL REFERENCES users(id)
 );
+
+-- Insert default expense categories (idempotent)
+INSERT INTO expense_categories (name, description, created_at, updated_at) VALUES
+('salary of caretaker', 'Monthly salary payments for caretaker(s)', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('electricity', 'Electricity and power charges', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('cleaning', 'Cleaning and housekeeping expenses', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (name) DO NOTHING;
 
 -- Student fees configuration table for membership types (flexible - any membership type allowed)
 CREATE TABLE student_fees_config (
@@ -156,20 +172,6 @@ CREATE TABLE seats_history (
     modified_by INTEGER NOT NULL,
     action VARCHAR(10) NOT NULL CHECK (action IN ('INSERT','UPDATE','DELETE','ASSIGN','UNASSIGN')),
     action_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE expenses_history (
-    history_id SERIAL PRIMARY KEY NOT NULL,
-    id INTEGER NOT NULL,
-    category VARCHAR(50) NOT NULL,
-    description TEXT,
-    amount NUMERIC(10,2),
-    expense_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_by INTEGER NOT NULL,
-    action VARCHAR(10) CHECK (action IN ('INSERT','UPDATE','DELETE')),
-    action_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Function to log changes to history tables
@@ -298,7 +300,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS students_aadhaar_number_key ON students(aadhaa
 CREATE INDEX idx_payments_student ON payments(student_id);
 CREATE INDEX idx_payments_date ON payments(payment_date);
 CREATE INDEX idx_expenses_date ON expenses(expense_date);
-CREATE INDEX idx_expenses_category ON expenses(category);
+-- Index by category id for faster category-based queries
+CREATE INDEX idx_expenses_category_id ON expenses(expense_category_id);
 
 -- Create a view to demonstrate how to check seat status by joining with students table
 -- Status is determined as follows:

@@ -35,8 +35,16 @@ router.get('/', authenticateToken, async (req, res) => {
   snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, id as subject_id, 'student' as subject_type, to_jsonb(json_build_object('name', name, 'aadhaar', aadhaar_number, 'contact', contact_number, 'seat', seat_number)) as details FROM students_history`);
   snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, student_id as subject_id, 'seat' as subject_type, to_jsonb(json_build_object('seat_number', seat_number, 'student_name', student_name, 'occupant_sex', occupant_sex)) as details FROM seats_history`);
   snippets.push(`SELECT p.created_at as ts, p.payment_type as action_type, p.modified_by, p.student_id as subject_id, 'payment' as subject_type, to_jsonb(json_build_object('amount', p.amount, 'payment_date', p.payment_date, 'remarks', p.remarks, 'student_name', s.name)) as details FROM payments p LEFT JOIN students s ON p.student_id = s.id`);
-  snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, id as subject_id, 'expense' as subject_type, to_jsonb(json_build_object('category', category, 'description', description, 'amount', amount)) as details FROM expenses_history`);
-  snippets.push(`SELECT created_at as ts, action_type as action_type, actor_user_id as modified_by, subject_id as subject_id, subject_type as subject_type, metadata as details FROM activity_logs`);
+  // Expense history table was removed; rely on activity_logs and the main expenses table for expense events
+  // For activity_logs, attempt to enrich expense metadata with category_name when possible
+  snippets.push(`SELECT al.created_at as ts, al.action_type as action_type, al.actor_user_id as modified_by, al.subject_id as subject_id, al.subject_type as subject_type, (
+    CASE WHEN al.subject_type = 'expense' THEN (
+      -- try to parse metadata and, if it has expense_category_id, include category_name from expense_categories
+      (to_jsonb(al.metadata) || COALESCE(to_jsonb(json_build_object('category_name', c.name)), '{}'::jsonb))
+    ) ELSE al.metadata END
+  ) as details FROM activity_logs al LEFT JOIN LATERAL (
+    SELECT name FROM expense_categories c WHERE c.id = (CASE WHEN (al.metadata->>'expense_category_id') IS NOT NULL THEN (al.metadata->>'expense_category_id')::int WHEN (al.metadata->>'category_id') IS NOT NULL THEN (al.metadata->>'category_id')::int WHEN (al.metadata->>'expenseCategory') IS NOT NULL THEN (al.metadata->>'expenseCategory')::int ELSE NULL END)
+  ) c ON true`);
 
     if (snippets.length === 0) return res.json({ activities: [], total: 0 });
 
@@ -125,7 +133,8 @@ router.get('/previous', authenticateToken, async (req, res) => {
       case 'seat':
         table = 'seats_history'; idCol = 'student_id'; timestampCol = 'action_timestamp'; break;
       case 'expense':
-        table = 'expenses_history'; idCol = 'id'; timestampCol = 'action_timestamp'; break;
+        // use the main expenses table for previous state lookups (expenses has updated_at)
+        table = 'expenses'; idCol = 'id'; timestampCol = 'updated_at'; break;
       case 'payment':
         // payments table contains full payment history; subjectId is student_id in activity union
         table = 'payments'; idCol = 'student_id'; timestampCol = 'updated_at'; break;

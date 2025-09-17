@@ -52,6 +52,27 @@ export default function UserActivity({ activities = [], loading }) {
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 15 : 25);
+  const [expenseCategoriesMap, setExpenseCategoriesMap] = useState({});
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const resp = await fetch('/api/expense-categories', { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+        if (!resp.ok) return;
+        const json = await resp.json();
+        if (!mounted) return;
+        // server returns { categories: [...] }
+        const list = Array.isArray(json) ? json : (json && Array.isArray(json.categories) ? json.categories : []);
+        const m = {};
+        list.forEach(c => { if (c && c.id !== undefined) m[String(c.id)] = c.name; });
+        setExpenseCategoriesMap(m);
+      } catch (err) {
+        // ignore
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -79,6 +100,7 @@ export default function UserActivity({ activities = [], loading }) {
         onPageChange={handleChangePage}
         onRowsPerPageChange={handleChangeRowsPerPage}
         isMobile={isMobile}
+  expenseCategoriesMap={expenseCategoriesMap}
       />
     </Box>
   );
@@ -194,7 +216,7 @@ function UpdateDiff({ details, subjectType, subjectId, timestamp }) {
   );
 }
 
-function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerPage = 25, onPageChange, onRowsPerPageChange, isMobile }) {
+function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerPage = 25, onPageChange, onRowsPerPageChange, isMobile, expenseCategoriesMap = {} }) {
   const theme = useTheme();
   const small = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -240,6 +262,42 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
             <Box sx={{ flex: 1 }}>{renderValue(v)}</Box>
           </Box>
         ))}
+      </Box>
+    );
+  }
+
+  // Render a compact expense summary: Amount, Category, Description
+  function ExpenseSummary({ details, expenseCategoriesMap: localExpenseCategoriesMap = {} }) {
+    // support details stored as JSON string inside metadata
+    let det = details;
+    if (!det) return <Typography variant="body2" color="text.secondary">No details</Typography>;
+    if (typeof det === 'string') {
+      try { det = JSON.parse(det); } catch (e) { /* leave as string */ }
+    }
+    if (typeof det !== 'object') return <Typography variant="body2" color="text.secondary">No details</Typography>;
+    // try common keys used in expense payloads
+    const amount = det.amount ?? det.expense_amount ?? det.total ?? det.value ?? null;
+    let category = det.category ?? det.expense_category ?? det.category_name ?? det.expenseCategory ?? det.categoryName ?? det.expense_category_id ?? null;
+    const description = det.description ?? det.desc ?? det.remarks ?? det.note ?? null;
+
+    // if category is an id, resolve via fetched map
+    if (category !== null && (typeof category === 'number' || (/^\d+$/.test(String(category))))) {
+      const name = (localExpenseCategoriesMap || {})[String(category)];
+      if (name) category = name;
+    }
+
+    const Row = ({ label, value }) => (
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>{label}</Typography>
+        <Typography variant="body2">{value === null || value === undefined || value === '' ? '—' : String(value)}</Typography>
+      </Box>
+    );
+
+  return (
+      <Box sx={{ display: 'grid', gap: 0.5 }}>
+    <Row label="Amount" value={amount !== null ? `₹${amount}` : '—'} />
+    <Row label="Category" value={category || '—'} />
+    <Row label="Description" value={description || '—'} />
       </Box>
     );
   }
@@ -290,11 +348,21 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                     <Paper variant="outlined" sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1, maxHeight: 140, overflow: 'auto' }}>
                     {/* For UPDATE actions show a concise diff: only changed fields */}
                     {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
-                      <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
+                      // For UPDATE actions show a diff for most subjects; but for expense subjects show a compact summary of key fields
+                      ((a.subjectType || a.subject_type || '').toString().toLowerCase() === 'expense') ? (
+                        <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} />
+                      ) : (
+                        <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
+                      )
                     ) : (
-                      // For payments, format any payment_date and show student_name clearly
+                      // For expense/create or expense-type actions show only amount/category/description; otherwise fallback to existing payment handling or generic pretty details
                       (() => {
-                        if ((a.type || a.action_type || '').toString().toLowerCase() === 'monthly_fee' || (a.subjectType || a.subject_type || '').toString().toLowerCase() === 'payment') {
+                        const atype = (a.type || a.action_type || '').toString().toLowerCase();
+                        const subj = (a.subjectType || a.subject_type || '').toString().toLowerCase();
+                        if (atype.includes('expense') || subj === 'expense') {
+                          return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} />;
+                        }
+                        if (atype === 'monthly_fee' || subj === 'payment' || atype.includes('payment')) {
                           const d = a.details || {};
                           return (
                             <Box>
@@ -321,7 +389,12 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                             </Box>
                           );
                         }
-                        return <PrettyDetails details={a.details} />;
+                        // parse details if JSON string
+                        let parsed = a.details;
+                        if (typeof parsed === 'string') {
+                          try { parsed = JSON.parse(parsed); } catch (e) { /* leave string */ }
+                        }
+                        return <PrettyDetails details={parsed} />;
                       })()
                     )}
                   </Paper>
@@ -386,15 +459,23 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                 <TableCell>
                   {(() => {
                     const isUpdate = (a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE';
-                    const subjectType = a.subjectType || a.subject_type;
+                    const subjectType = (a.subjectType || a.subject_type || '').toString().toLowerCase();
                     const subjectId = a.subjectId || a.subject_id;
+                    // If this is an expense-related activity, show compact expense summary
+                    if (subjectType === 'expense' || (a.type || a.action_type || '').toString().toLowerCase().includes('expense')) {
+                      return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} />;
+                    }
                     if (isUpdate && subjectType && subjectId) {
                       return (
                         <UpdateDiff details={a.details} subjectType={subjectType} subjectId={subjectId} timestamp={a.timestamp} />
                       );
                     }
                     // Show structured details in desktop description column
-                    return <PrettyDetails details={a.details} />;
+                    let parsed = a.details;
+                    if (typeof parsed === 'string') {
+                      try { parsed = JSON.parse(parsed); } catch (e) { /* leave string */ }
+                    }
+                    return <PrettyDetails details={parsed} />;
                   })()}
                 </TableCell>
                 <TableCell>

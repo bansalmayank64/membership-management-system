@@ -1,138 +1,174 @@
 const express = require('express');
 const { pool } = require('../config/database');
+const logger = require('../utils/logger');
+const { toISTDateString } = require('../utils/dateUtils');
 
 const router = express.Router();
-const logger = require('../utils/logger');
 
-// GET /api/expenses - Get all expenses
+// GET /api/expenses - paginated list, supports filters and CSV export
 router.get('/', async (req, res) => {
   const rl = logger.createRequestLogger('GET', '/api/expenses', req);
   try {
-    rl.requestStart(req);
-    rl.businessLogic('Preparing expenses query');
-    const query = `
-      SELECT *
-      FROM expenses
-      ORDER BY expense_date DESC
+    rl.businessLogic('Preparing database query for paginated/filtered expenses');
+
+    const page = parseInt(req.query.page, 10) || 0; // zero-based
+    const pageSize = parseInt(req.query.pageSize, 10) || 25;
+    const category = req.query.category || null;
+    const startDate = req.query.startDate || null; // expected YYYY-MM-DD or 'YYYY-MM-DD HH:MM:SS'
+    const endDate = req.query.endDate || null; // expected YYYY-MM-DD or 'YYYY-MM-DD HH:MM:SS'
+    const exportCsv = req.query.export === 'csv';
+
+    const whereClauses = [];
+    const params = [];
+    let idx = 1;
+
+    if (category) {
+      whereClauses.push(`e.expense_category_id = $${idx++}`);
+      params.push(category);
+    }
+    // Accept start/end date as either epoch-ms (number) or ISO/date strings.
+    const isNumeric = (v) => v !== null && v !== undefined && !isNaN(Number(v));
+    if (startDate) {
+      if (isNumeric(startDate)) {
+        // frontend may send Date.UTC(...) (ms since epoch). Use to_timestamp(ms/1000)
+        whereClauses.push(`e.expense_date >= to_timestamp($${idx}::double precision / 1000)`);
+        params.push(Number(startDate));
+        idx++;
+      } else {
+        // treat as timestamp or date string
+        whereClauses.push(`e.expense_date >= $${idx}::timestamp`);
+        params.push(startDate);
+        idx++;
+      }
+    }
+    if (endDate) {
+      if (isNumeric(endDate)) {
+        whereClauses.push(`e.expense_date <= to_timestamp($${idx}::double precision / 1000)`);
+        params.push(Number(endDate));
+        idx++;
+      } else {
+        // If user passed plain YYYY-MM-DD, treat endDate as end-of-day by using exclusive upper bound < (date + 1 day)
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(endDate))) {
+          whereClauses.push(`e.expense_date < ($${idx}::timestamp + INTERVAL '1 day')`);
+          params.push(endDate);
+          idx++;
+        } else {
+          whereClauses.push(`e.expense_date <= $${idx}::timestamp`);
+          params.push(endDate);
+          idx++;
+        }
+      }
+    }
+
+    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // If CSV export requested, stream full result as CSV
+    if (exportCsv) {
+      const csvQuery = `
+        SELECT e.*, c.name as category_name
+        FROM expenses e
+        LEFT JOIN expense_categories c ON e.expense_category_id = c.id
+        ${whereSQL}
+        ORDER BY e.expense_date DESC
+      `;
+      rl.queryStart('Export expenses CSV', csvQuery, params);
+      const result = await pool.query(csvQuery, params);
+      rl.querySuccess('Export expenses CSV', null, result, true);
+
+      // Build CSV
+      const header = ['id', 'expense_category_id', 'category_name', 'description', 'amount', 'expense_date', 'created_at', 'updated_at'];
+      const rows = result.rows.map(r => header.map(h => (r[h] !== undefined && r[h] !== null) ? String(r[h]).replace(/"/g, '""') : '').join(','));
+      const csv = `${header.join(',')}\n${rows.join('\n')}`;
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="expenses_${new Date().toISOString().split('T')[0]}.csv"`);
+      return res.send(csv);
+    }
+
+    // Count total rows
+  const countQuery = `SELECT COUNT(*) AS total, COALESCE(SUM(amount),0) as total_amount FROM expenses e ${whereSQL}`;
+    rl.queryStart('Count expenses', countQuery, params);
+    const countStart = Date.now();
+    const countResult = await pool.query(countQuery, params);
+    rl.querySuccess('Count expenses', countStart, countResult, true);
+    const total = parseInt(countResult.rows[0].total, 10) || 0;
+    const totalAmount = parseFloat(countResult.rows[0].total_amount) || 0;
+
+    // Fetch page
+    const offset = page * pageSize;
+    const dataQuery = `
+      SELECT e.*, c.name as category_name
+      FROM expenses e
+      LEFT JOIN expense_categories c ON e.expense_category_id = c.id
+      ${whereSQL}
+      ORDER BY e.expense_date DESC
+      LIMIT $${idx++} OFFSET $${idx++}
     `;
-    const queryStart = rl.queryStart('expenses list', query);
-    const result = await pool.query(query);
-    rl.querySuccess('expenses list', queryStart, result, true);
-    rl.success({ count: result.rows.length });
-    res.json(result.rows);
+    params.push(pageSize, offset);
+    rl.queryStart('Fetch expenses page', dataQuery, params);
+    const dataStart = Date.now();
+    const dataResult = await pool.query(dataQuery, params);
+    rl.querySuccess('Fetch expenses page', dataStart, dataResult, true);
+
+    rl.success({ expenses: dataResult.rows, total, total_amount: totalAmount });
+    res.json({ expenses: dataResult.rows, total, total_amount: totalAmount });
   } catch (error) {
     rl.error(error);
-    res.status(500).json({ error: 'Failed to fetch expenses', timestamp: new Date().toISOString() });
+    res.status(500).json({ error: 'Failed to fetch expenses', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
-// GET /api/expenses/:id - Get expense by ID
-router.get('/:id', async (req, res) => {
-  const rl = logger.createRequestLogger('GET', '/api/expenses/:id', req);
-  try {
-    rl.requestStart(req);
-    const { id } = req.params;
-    rl.validationStart('Validating expense id');
-    if (!id || isNaN(id)) {
-      rl.validationError('id', ['Valid expense ID is required']);
-      return res.status(400).json({ error: 'Valid expense ID is required', timestamp: new Date().toISOString() });
-    }
-
-    const query = 'SELECT * FROM expenses WHERE id = $1';
-    const queryStart = rl.queryStart('expense lookup', query, [id]);
-    const result = await pool.query(query, [id]);
-    rl.querySuccess('expense lookup', queryStart, result, true);
-
-    if (result.rows.length === 0) {
-      rl.warn('Expense not found', { id });
-      return res.status(404).json({ error: 'Expense not found', timestamp: new Date().toISOString() });
-    }
-
-    rl.success({ id });
-    res.json(result.rows[0]);
-  } catch (error) {
-    rl.error(error, { expenseId: req.params.id });
-    res.status(500).json({ error: 'Failed to fetch expense', timestamp: new Date().toISOString() });
-  }
-});
-
-// POST /api/expenses - Create a new expense
+// POST /api/expenses - Create expense
 router.post('/', async (req, res) => {
   const rl = logger.createRequestLogger('POST', '/api/expenses', req);
   try {
-    rl.requestStart(req);
-    const { description, amount, expense_date, modified_by } = req.body;
-    rl.validationStart('Validating expense payload');
-    rl.info('Expense details', { description: description?.toString().slice(0, 100), amount, expense_date });
-    
-    // Enhanced validation with database schema constraints
+    const { expense_category_id, description = '', amount, expense_date } = req.body;
+
     const validationErrors = [];
-
-    // Description validation - TEXT NOT NULL
-    if (!description || typeof description !== 'string' || description.trim() === '') {
-      validationErrors.push('Expense description is required and must be a non-empty string');
-    } else if (description.trim().length < 3) {
-      validationErrors.push('Description must be at least 3 characters long');
-    } else if (description.trim().length > 1000) {
-      validationErrors.push('Description cannot exceed 1000 characters');
-    }
-
-    // Amount validation - NUMERIC(10,2) NOT NULL
-    if (!amount) {
-      validationErrors.push('Expense amount is required');
-    } else if (isNaN(amount)) {
-      validationErrors.push('Amount must be a valid number');
-    } else {
-      const numAmount = parseFloat(amount);
-      if (numAmount <= 0) {
-        validationErrors.push('Amount must be a positive number');
-      } else if (numAmount > 99999999.99) {
-        validationErrors.push('Amount exceeds maximum allowed value (99,999,999.99)');
-      }
-      // Check decimal places (NUMERIC(10,2) allows 2 decimal places)
-      const decimalParts = amount.toString().split('.');
-      if (decimalParts[1] && decimalParts[1].length > 2) {
-        validationErrors.push('Amount can have maximum 2 decimal places');
-      }
-    }
-
-    // Expense date validation - TIMESTAMP NOT NULL
-    if (!expense_date) {
-      validationErrors.push('Expense date is required');
-    } else {
-      const expenseDate = new Date(expense_date);
-      if (isNaN(expenseDate.getTime())) {
-        validationErrors.push('Expense date must be a valid date');
-      }
-    }
-
-    // Modified by validation - REFERENCES users(id)
-    if (modified_by && isNaN(modified_by)) {
-      validationErrors.push('Modified by must be a valid user ID');
-    }
+    if (!expense_category_id || isNaN(expense_category_id)) validationErrors.push('Valid expense_category_id is required');
+    if (amount === undefined || isNaN(amount)) validationErrors.push('Valid amount is required');
+    if (!expense_date) validationErrors.push('expense_date is required');
 
     if (validationErrors.length > 0) {
       rl.validationError('expense', validationErrors);
-      return res.status(400).json({ error: 'Validation failed', details: validationErrors, timestamp: new Date().toISOString() });
+      return res.status(400).json({ error: 'Validation failed', details: validationErrors });
     }
-    rl.businessLogic('Preparing expense creation query');
-    const query = `
-      INSERT INTO expenses (description, amount, expense_date, modified_by, category, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+
+    const insertQuery = `
+      INSERT INTO expenses (expense_category_id, description, amount, expense_date, created_at, updated_at, modified_by)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $5)
       RETURNING *
     `;
-    
-    // Default category if not provided (database requires category field)
-    const category = req.body.category || 'General';
-    
-  const queryStart = rl.queryStart('create expense', query, [description, parseFloat(amount), expense_date, req.user?.userId || req.user?.id || 1, category]);
-  const result = await pool.query(query, [description.trim(), parseFloat(amount), expense_date, req.user?.userId || req.user?.id || 1, category.trim()]);
-  rl.querySuccess('create expense', queryStart, result, true);
-  rl.success({ id: result.rows[0].id });
-  res.status(201).json(result.rows[0]);
+    const actorId = req.user && req.user.userId ? req.user.userId : null;
+    const values = [expense_category_id, description, amount, expense_date, actorId];
+    rl.queryStart('Insert expense', insertQuery, values);
+    const result = await pool.query(insertQuery, values);
+    rl.querySuccess('Insert expense', null, result, true);
+    // Log activity for admin panel (include category_name in metadata)
+    try {
+      const eid = result.rows[0].id;
+      const enrichedQ = `SELECT e.*, c.name as category_name FROM expenses e LEFT JOIN expense_categories c ON e.expense_category_id = c.id WHERE e.id = $1`;
+      const enrichedRes = await pool.query(enrichedQ, [eid]);
+      const metadataRow = enrichedRes.rows[0] || result.rows[0];
+      await pool.query(`
+        INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, subject_type, subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        actorId,
+        req.user && req.user.username ? req.user.username : null,
+        'expense_create',
+        `Created expense ${eid}`,
+        'expense',
+        eid,
+        JSON.stringify(metadataRow)
+      ]);
+    } catch (logErr) {
+      rl.error(logErr, 'Failed to write activity log for expense create');
+    }
+
+    res.status(201).json(result.rows[0]);
   } catch (error) {
-  rl.error(error, { requestBody: req.body });
-  res.status(500).json({ error: 'Failed to create expense', timestamp: new Date().toISOString() });
+    rl.error(error);
+    res.status(500).json({ error: 'Failed to create expense', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
@@ -140,91 +176,59 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const rl = logger.createRequestLogger('PUT', '/api/expenses/:id', req);
   try {
-    rl.requestStart(req);
     const { id } = req.params;
-    const { description, amount, expense_date, category, modified_by } = req.body;
-    rl.validationStart('Validating expense update payload');
-    
-    // Enhanced validation with database constraints
-    const validationErrors = [];
+    const { expense_category_id, description, amount, expense_date } = req.body;
 
-    // ID validation
-    if (!id || isNaN(id)) {
-      validationErrors.push('Valid expense ID is required');
+    if (!id || isNaN(id)) return res.status(400).json({ error: 'Valid id is required' });
+
+    // Fetch existing
+    const existing = await pool.query('SELECT * FROM expenses WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Expense not found' });
+
+    const setClauses = [];
+    const params = [];
+    let idx = 1;
+    if (expense_category_id !== undefined) { setClauses.push(`expense_category_id = $${idx++}`); params.push(expense_category_id); }
+    if (description !== undefined) { setClauses.push(`description = $${idx++}`); params.push(description); }
+    if (amount !== undefined) { setClauses.push(`amount = $${idx++}`); params.push(amount); }
+    if (expense_date !== undefined) { setClauses.push(`expense_date = $${idx++}`); params.push(expense_date); }
+
+    if (setClauses.length === 0) return res.json(existing.rows[0]);
+
+  // Ensure we record who modified the expense
+  const actorId = req.user && req.user.userId ? req.user.userId : null;
+  const updateQuery = `UPDATE expenses SET ${setClauses.join(', ')}, updated_at = CURRENT_TIMESTAMP, modified_by = $${idx++} WHERE id = $${idx++} RETURNING *`;
+  params.push(actorId);
+  params.push(id);
+    rl.queryStart('Update expense', updateQuery, params);
+    const result = await pool.query(updateQuery, params);
+    rl.querySuccess('Update expense', null, result, true);
+    // Log activity for admin panel (include category_name in metadata)
+    try {
+      const eid = result.rows[0].id;
+      const enrichedQ = `SELECT e.*, c.name as category_name FROM expenses e LEFT JOIN expense_categories c ON e.expense_category_id = c.id WHERE e.id = $1`;
+      const enrichedRes = await pool.query(enrichedQ, [eid]);
+      const metadataRow = enrichedRes.rows[0] || result.rows[0];
+      await pool.query(`
+        INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, subject_type, subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        actorId,
+        req.user && req.user.username ? req.user.username : null,
+        'expense_update',
+        `Updated expense ${eid}`,
+        'expense',
+        eid,
+        JSON.stringify(metadataRow)
+      ]);
+    } catch (logErr) {
+      rl.error(logErr, 'Failed to write activity log for expense update');
     }
 
-    // Description validation - TEXT NOT NULL
-    if (!description || typeof description !== 'string' || description.trim() === '') {
-      validationErrors.push('Expense description is required and must be a non-empty string');
-    } else if (description.trim().length < 3) {
-      validationErrors.push('Description must be at least 3 characters long');
-    } else if (description.trim().length > 1000) {
-      validationErrors.push('Description cannot exceed 1000 characters');
-    }
-
-    // Amount validation - NUMERIC(10,2) NOT NULL
-    if (!amount) {
-      validationErrors.push('Expense amount is required');
-    } else if (isNaN(amount)) {
-      validationErrors.push('Amount must be a valid number');
-    } else {
-      const numAmount = parseFloat(amount);
-      if (numAmount <= 0) {
-        validationErrors.push('Amount must be a positive number');
-      } else if (numAmount > 99999999.99) {
-        validationErrors.push('Amount exceeds maximum allowed value (99,999,999.99)');
-      }
-    }
-
-    // Expense date validation - TIMESTAMP NOT NULL
-    if (!expense_date) {
-      validationErrors.push('Expense date is required');
-    } else {
-      const expenseDate = new Date(expense_date);
-      if (isNaN(expenseDate.getTime())) {
-        validationErrors.push('Expense date must be a valid date');
-      }
-    }
-
-    // Category validation - VARCHAR(50) NOT NULL
-    if (!category || typeof category !== 'string' || category.trim() === '') {
-      validationErrors.push('Category is required');
-    } else if (category.trim().length > 50) {
-      validationErrors.push('Category cannot exceed 50 characters');
-    }
-
-    if (validationErrors.length > 0) {
-      rl.validationError('update', validationErrors);
-      return res.status(400).json({ error: 'Validation failed', details: validationErrors, timestamp: new Date().toISOString() });
-    }
-    rl.businessLogic('Preparing expense update query');
-    const query = `
-      UPDATE expenses 
-      SET 
-        description = $2,
-        amount = $3,
-        expense_date = $4,
-        category = $5,
-        modified_by = $6,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING *
-    `;
-    
-    const queryStart = rl.queryStart('update expense', query, [id, description.trim(), parseFloat(amount), expense_date, category.trim(), req.user?.userId || req.user?.id || 1]);
-    const result = await pool.query(query, [id, description.trim(), parseFloat(amount), expense_date, category.trim(), req.user?.userId || req.user?.id || 1]);
-    rl.querySuccess('update expense', queryStart, result, true);
-
-    if (result.rows.length === 0) {
-      rl.warn('Expense not found for update', { id });
-      return res.status(404).json({ error: 'Expense not found', timestamp: new Date().toISOString() });
-    }
-
-    rl.success({ id });
     res.json(result.rows[0]);
   } catch (error) {
-    rl.error(error, { expenseId: req.params.id, requestBody: req.body });
-    res.status(500).json({ error: 'Failed to update expense', timestamp: new Date().toISOString() });
+    rl.error(error);
+    res.status(500).json({ error: 'Failed to update expense', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
@@ -232,73 +236,55 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const rl = logger.createRequestLogger('DELETE', '/api/expenses/:id', req);
   try {
-    rl.requestStart(req);
     const { id } = req.params;
-    rl.info('Delete expense requested', { id, requestedBy: req.user?.userId || req.user?.id || 'unknown' });
-    if (!id || isNaN(id)) {
-      rl.validationError('id', ['Valid expense ID is required']);
-      return res.status(400).json({ error: 'Valid expense ID is required', timestamp: new Date().toISOString() });
+    if (!id || isNaN(id)) return res.status(400).json({ error: 'Valid id is required' });
+
+    // Fetch enriched row (with category_name) before deleting so we can log it
+    const existingRes = await pool.query('SELECT e.*, c.name as category_name FROM expenses e LEFT JOIN expense_categories c ON e.expense_category_id = c.id WHERE e.id = $1', [id]);
+    const existingRow = existingRes.rows[0] || null;
+    const del = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING *', [id]);
+    if (del.rows.length === 0) return res.status(404).json({ error: 'Expense not found' });
+    // Log deletion in activity logs using enrichedRow when available
+    try {
+      const metadataRow = existingRow || del.rows[0];
+      await pool.query(`
+        INSERT INTO activity_logs (actor_user_id, actor_username, action_type, action_description, subject_type, subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        req.user && req.user.userId ? req.user.userId : null,
+        req.user && req.user.username ? req.user.username : null,
+        'expense_delete',
+        `Deleted expense ${del.rows[0].id}`,
+        'expense',
+        del.rows[0].id,
+        JSON.stringify(metadataRow)
+      ]);
+    } catch (logErr) {
+      logger.error('Failed to write activity log for expense delete', { error: logErr.message });
     }
 
-    const query = 'DELETE FROM expenses WHERE id = $1 RETURNING *';
-    const queryStart = rl.queryStart('delete expense', query, [id]);
-    const result = await pool.query(query, [id]);
-    rl.querySuccess('delete expense', queryStart, result, true);
-
-    if (result.rows.length === 0) {
-      rl.warn('Expense not found', { id });
-      return res.status(404).json({ error: 'Expense not found', timestamp: new Date().toISOString() });
-    }
-
-    rl.success({ id });
-    res.json({ message: 'Expense deleted successfully', expense: result.rows[0], timestamp: new Date().toISOString() });
+    res.json({ message: 'Expense deleted', expense: del.rows[0] });
   } catch (error) {
-    rl.error(error, { expenseId: req.params.id });
-    res.status(500).json({ error: 'Failed to delete expense', timestamp: new Date().toISOString() });
+    rl.error(error);
+    res.status(500).json({ error: 'Failed to delete expense', requestId: rl.requestId, timestamp: new Date().toISOString() });
   }
 });
 
-// GET /api/expenses/summary - Get expense summary/statistics
+// GET /api/expenses/summary/stats - simple 30-day summary
 router.get('/summary/stats', async (req, res) => {
   try {
     const query = `
-      SELECT 
-        COUNT(*) as total_expenses,
-        SUM(amount) as total_amount,
-        AVG(amount) as avg_amount,
-        MIN(amount) as min_amount,
-        MAX(amount) as max_amount
+      SELECT
+        COALESCE(SUM(amount),0) as total,
+        COALESCE((SELECT SUM(amount) FROM expenses WHERE expense_date >= CURRENT_DATE - INTERVAL '60 days' AND expense_date < CURRENT_DATE - INTERVAL '30 days'),0) as prev_month
       FROM expenses
       WHERE expense_date >= CURRENT_DATE - INTERVAL '30 days'
     `;
-    
     const result = await pool.query(query);
     res.json(result.rows[0]);
   } catch (error) {
-    logger.error('Error fetching expense summary', { error: { message: error.message, stack: error.stack } });
+    logger.error('Error fetching expense summary', { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch expense summary' });
-  }
-});
-
-// GET /api/expenses/monthly - Get monthly expense breakdown
-router.get('/monthly/breakdown', async (req, res) => {
-  try {
-    const query = `
-      SELECT 
-        DATE_TRUNC('month', expense_date) as month,
-        COUNT(*) as expense_count,
-        SUM(amount) as total_amount
-      FROM expenses
-      WHERE expense_date >= CURRENT_DATE - INTERVAL '12 months'
-      GROUP BY DATE_TRUNC('month', expense_date)
-      ORDER BY month DESC
-    `;
-    
-    const result = await pool.query(query);
-    res.json(result.rows);
-  } catch (error) {
-    logger.error('Error fetching monthly expenses', { error: { message: error.message, stack: error.stack } });
-    res.status(500).json({ error: 'Failed to fetch monthly expenses' });
   }
 });
 

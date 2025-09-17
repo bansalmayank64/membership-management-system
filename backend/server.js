@@ -10,6 +10,7 @@ const seatRoutes = require('./routes/seats');
 const studentRoutes = require('./routes/students');
 const paymentRoutes = require('./routes/payments');
 const expenseRoutes = require('./routes/expenses');
+const financeRoutes = require('./routes/finance');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const auth = require('./middleware/auth');
@@ -61,6 +62,18 @@ app.use('/api/seats', auth, seatRoutes);
 app.use('/api/students', auth, studentRoutes);
 app.use('/api/payments', auth, paymentRoutes);
 app.use('/api/expenses', auth, expenseRoutes);
+app.use('/api/finance', auth, financeRoutes);
+
+// Public endpoint for frontend to fetch expense categories (protected)
+app.get('/api/expense-categories', auth, async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT id, name, description FROM expense_categories ORDER BY name`);
+    res.json({ categories: result.rows });
+  } catch (err) {
+    logger.error('Error fetching expense categories', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Failed to fetch expense categories' });
+  }
+});
 
 // Error handling middleware
 // Use enhanced error logging middleware

@@ -8,6 +8,7 @@ import AdminRoute from './components/AdminRoute';
 import Students from './pages/Students';
 import StudentProfile from './pages/StudentProfile';
 import Payments from './pages/Payments';
+import Expenses from './pages/Expenses';
 import AdminPanel from './pages/AdminPanel';
 import ActivityLog from './pages/ActivityLog';
 
@@ -32,6 +33,11 @@ function App() {
             <Route path="/payments" element={
               <ProtectedRoute>
                 <Payments />
+              </ProtectedRoute>
+            } />
+            <Route path="/expenses" element={
+              <ProtectedRoute>
+                <Expenses />
               </ProtectedRoute>
             } />
             <Route path="/admin" element={

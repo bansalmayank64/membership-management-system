@@ -1,1000 +1,698 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Container,
+  Box,
   Typography,
   Paper,
-  Grid,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  useTheme,
-  useMediaQuery,
-  Box,
-  Card,
-  CardContent,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   TextField,
+  Button,
+  Grid,
   Select,
   MenuItem,
   FormControl,
   InputLabel,
-  Alert,
+  Card,
+  CardContent,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  TableContainer,
+  useTheme,
+  useMediaQuery,
   CircularProgress,
-  Chip,
+  Alert,
   IconButton,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Stack,
-  Divider,
-  TableSortLabel,
-  InputAdornment,
+  TablePagination,
   Fab,
-  ToggleButton,
-  ToggleButtonGroup
+  Chip,
 } from '@mui/material';
-import MobileFilters from '../components/MobileFilters';
-import {
-  Add as AddIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Receipt as ReceiptIcon,
-  ElectricBolt as ElectricityIcon,
-  Home as RentIcon,
-  Search as SearchIcon,
-  Clear as ClearIcon,
-  FilterList as FilterIcon,
-  CalendarToday as CalendarIcon,
-  ExpandMore as ExpandIcon,
-  Analytics as AnalyticsIcon,
-  AccountBalance as AccountBalanceIcon,
-  Refresh as RefreshIcon,
-  Download as DownloadIcon
-} from '@mui/icons-material';
-import { pageStyles } from '../styles/commonStyles';
-import Footer from '../components/Footer';
+import { Add as AddIcon, Refresh as RefreshIcon, Edit as EditIcon, Delete as DeleteIcon, FileDownload as FileDownloadIcon, Money as MoneyIcon, Restaurant as RestaurantIcon, LocalCafe as CafeIcon, Home as HomeIcon, LocalShipping as TravelIcon, MedicalServices as MedicalIcon, Bolt as BoltIcon, CleaningServices as BrushIcon, Work as WorkIcon } from '@mui/icons-material';
+import { ToggleButton, ToggleButtonGroup } from '@mui/material';
 import api from '../services/api';
+import Footer from '../components/Footer';
+import DurationFilter from '../components/DurationFilter';
+import { formatDateTimeForDisplay, todayInIST, isoToISTDateInput, isoToISTDateTimeInput, getUtcMidnightForDateInTZ, nowInISTDateTimeLocal } from '../utils/dateUtils';
+import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
+import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 
-function Expenses() {
+// Expenses page: timezone-aware, server-paginated, edit/delete, CSV export, monthly breakdown
+export default function Expenses() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+
+  // Data & loading
   const [expenses, setExpenses] = useState([]);
-  const [totalIncome, setTotalIncome] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [dateRange, setDateRange] = useState('all');
-  const [sortConfig, setSortConfig] = useState({ field: 'date', direction: 'desc' });
-  const [viewMode, setViewMode] = useState(isMobile ? 'cards' : 'table');
-  
-  // New expense form state
-  const todayInIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-  const [newExpense, setNewExpense] = useState({
-    date: todayInIST(),
-    type: 'electricity',
-    description: '',
-    amount: ''
-  });
+  const [total, setTotal] = useState(0);
 
-  // Global error handler for API calls
-  const handleApiError = (error, fallbackMessage = 'An error occurred') => {
-    if (error?.response?.data?.error === 'TOKEN_EXPIRED') {
-      // Let the global interceptor handle token expiration
-      return;
-    }
-    setError(error?.response?.data?.message || error?.message || fallbackMessage);
+  // Pagination
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 10 : 25);
+  const [totalRows, setTotalRows] = useState(0);
+
+  // Filters
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [durationOpen, setDurationOpen] = useState(false);
+  const [durationLabel, setDurationLabel] = useState('');
+
+  // Categories
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+
+  // New / edit form state
+  const [formOpen, setFormOpen] = useState(false);
+  const [formSaving, setFormSaving] = useState(false);
+  const [formError, setFormError] = useState(null);
+  const [formData, setFormData] = useState({ id: null, category: '', description: '', amount: '', expense_date: nowInISTDateTimeLocal() });
+
+  // Delete confirmation
+  const [deleteId, setDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Loading initial data
+  useEffect(() => {
+    fetchCategories();
+    fetchExpenses({ page: 0 });
+  }, []);
+
+  // Map category text or id to an icon for quick visual scanning
+  const renderCategoryIcon = (expense) => {
+    // prefer category name (category_name), fall back to category id or raw category
+    const key = (expense && (expense.category_name || expense.category || '')).toString().toLowerCase();
+  let IconComp = MoneyIcon; // default for Others -> money icon
+  if (/clean|cleaning|sweep|janitor|mop|brush/.test(key)) IconComp = BrushIcon;
+  else if (/caretaker|caretaker salary|caretaker-salary|caretaker_salary|care taker|caretaker payment|salary.*caretaker|wages.*caretaker/.test(key)) IconComp = WorkIcon;
+  else if (/electric|electricity|power|meter|current|bill.*electric|energy/.test(key)) IconComp = BoltIcon;
+  else if (/food|restaurant|meal|dinner|lunch|breakfast/.test(key)) IconComp = RestaurantIcon;
+  else if (/cafe|coffee|tea/.test(key)) IconComp = CafeIcon;
+  else if (/rent|home|house|utility/.test(key)) IconComp = HomeIcon;
+  else if (/travel|taxi|uber|bus|train|flight|transport/.test(key)) IconComp = TravelIcon;
+  else if (/medical|doctor|pharmacy|health/.test(key)) IconComp = MedicalIcon;
+
+    return <IconComp fontSize="small" color="action" aria-hidden={false} titleAccess={expense && (expense.category_name || expense.category || '')} />;
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    // reset rowsPerPage on mobile change
+    setRowsPerPage(isMobile ? 10 : 25);
+  }, [isMobile]);
 
-  const fetchData = async () => {
+  const fetchCategories = async () => {
+    setLoadingCategories(true);
+    try {
+      const resp = await fetch('/api/expense-categories', { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+      if (!resp.ok) throw new Error('Failed to load categories');
+      const data = await resp.json();
+      setCategories(data.categories || []);
+    } catch (err) {
+      console.warn('Failed to load categories', err);
+      setCategories([]);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
+  // Fetch expenses from server with pagination & filters
+  const fetchExpenses = async (opts = {}) => {
     setLoading(true);
     setError(null);
     try {
-      const authHeaders = {
-        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        'Content-Type': 'application/json'
-      };
-      
-      // Fetch expenses
-  const expensesResponse = await fetch(`/api/expenses`, {
-        headers: authHeaders
-      });
-      
-      if (expensesResponse.ok) {
-        const expensesData = await expensesResponse.json();
-        setExpenses(expensesData || []);
-      }
+      const pageToUse = typeof opts.page === 'number' ? opts.page : page;
+      const sizeToUse = typeof opts.pageSize === 'number' ? opts.pageSize : rowsPerPage;
 
-      // Fetch payments to calculate total income
-  const paymentsResponse = await fetch(`/api/payments`, {
-        headers: authHeaders
-      });
-      
-      if (paymentsResponse.ok) {
-        const paymentsData = await paymentsResponse.json();
-        const payments = paymentsData || [];
-        const income = payments
-          .filter(payment => payment.amount > 0) // Only positive amounts (exclude refunds)
-          .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-        setTotalIncome(income);
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      handleApiError(error, 'Failed to load data. Please try again.');
+  const params = new URLSearchParams();
+  // backend expects zero-based page index
+  params.set('page', String(pageToUse));
+  params.set('pageSize', String(sizeToUse));
+  // allow callers to override filters to avoid race with setState
+  const catToUse = typeof opts.filterCategory !== 'undefined' ? opts.filterCategory : filterCategory;
+  const sToUse = typeof opts.filterStartDate !== 'undefined' ? opts.filterStartDate : filterStartDate;
+  const eToUse = typeof opts.filterEndDate !== 'undefined' ? opts.filterEndDate : filterEndDate;
+  if (catToUse) params.set('category', catToUse);
+  if (sToUse) params.set('startDate', getUtcMidnightForDateInTZ(sToUse));
+  if (eToUse) params.set('endDate', getUtcMidnightForDateInTZ(eToUse));
+
+      const resp = await fetch(`/api/expenses?${params.toString()}`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+      if (!resp.ok) throw new Error(`Failed to load expenses (${resp.status})`);
+      const payload = await resp.json();
+
+      // Expecting { expenses: [], total: <number> }
+      setExpenses(payload.expenses || []);
+      setTotalRows(payload.total || 0);
+      setTotal(payload.total_amount || (payload.expenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0));
+
+    } catch (err) {
+      console.error('fetchExpenses error', err);
+      setError(err.message || 'Failed to load expenses');
+      setExpenses([]);
+      setTotalRows(0);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddExpense = async () => {
-    if (!newExpense.description || !newExpense.amount) {
-      setError('Please fill in all required fields');
-      return;
-    }
+  const applyFilter = () => {
+  setPage(0);
+  fetchExpenses({ page: 0, filterCategory: filterCategory, filterStartDate: filterStartDate, filterEndDate: filterEndDate });
+  };
 
+  const onDurationApply = ({ label, startDate: s, endDate: e }) => {
+  setDurationLabel(label || '');
+  setFilterStartDate(s || '');
+  setFilterEndDate(e || '');
+  setDurationOpen(false);
+  setPage(0);
+  // fetch with explicit overrides to avoid reading stale state
+  fetchExpenses({ page: 0, filterStartDate: s || '', filterEndDate: e || '' });
+  };
+
+  // Pagination handlers
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+    fetchExpenses({ page: newPage });
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    const newSize = parseInt(event.target.value, 10);
+    setRowsPerPage(newSize);
+    setPage(0);
+    fetchExpenses({ page: 0, pageSize: newSize });
+  };
+
+  // Open add dialog
+  const openAdd = () => {
+  setFormData({ id: null, category: '', description: '', amount: '', expense_date: nowInISTDateTimeLocal() });
+    setFormError(null);
+    setFormOpen(true);
+  };
+
+  const openEdit = (expense) => {
+    // Map server fields into formData. Use category id if available.
+  setFormData({ id: expense.id, category: expense.expense_category_id || expense.category, description: expense.description || '', amount: expense.amount || '', expense_date: isoToISTDateTimeInput(expense.expense_date) || nowInISTDateTimeLocal() });
+    setFormError(null);
+    setFormOpen(true);
+  };
+
+  const saveForm = async () => {
+    setFormError(null);
+  if (!formData.category) return setFormError('Category is required');
+  if (!formData.amount || Number(formData.amount) <= 0) return setFormError('Amount must be > 0');
+  if (!formData.expense_date) return setFormError('Date & Time is required');
+    setFormSaving(true);
     try {
-      setLoading(true);
-      
-      // Prepare form data for POST request
-      const formData = new FormData();
-      const expenseData = {
-        category: newExpense.type,
-        description: newExpense.description,
-        amount: parseFloat(newExpense.amount),
-        expense_date: newExpense.date,
-        modified_by: 1 // TODO: Get actual user ID from auth context
+      const payload = {
+        expense_category_id: formData.category,
+        description: formData.description,
+        amount: Number(formData.amount),
+        expense_date: formData.expense_date
       };
-
-  const response = await fetch(`/api/expenses`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(expenseData)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        // Add to local state
-        const newExpenseWithId = {
-          ...newExpense,
-          amount: Number(newExpense.amount),
-          id: result.data.expense.id
-        };
-        setExpenses([...expenses, newExpenseWithId]);
-        
-        setAddDialogOpen(false);
-        setNewExpense({
-          date: todayInIST(),
-          type: 'electricity',
-          description: '',
-          amount: ''
-        });
-        setError(null);
+      if (formData.id) {
+        await api.updateExpense(formData.id, payload);
       } else {
-        throw new Error(result.data?.error || 'Failed to add expense');
+        await api.addExpense(payload);
       }
-    } catch (error) {
-      console.error('Error adding expense:', error);
-      handleApiError(error, 'Failed to add expense. Please try again.');
+  setFormOpen(false);
+  // Refresh table, summary and month cards
+  fetchExpenses({ page: page });
+  fetchSummary();
+  setMonthsOffset(0);
+  loadMonths({ monthsToLoad: 6, offset: 0, replace: true, periodToUse: period });
+    } catch (err) {
+      console.error('saveForm error', err);
+      setFormError(err.message || 'Failed to save');
     } finally {
-      setLoading(false);
+      setFormSaving(false);
     }
   };
 
-  const calculateTotals = () => {
-    const filtered = getFilteredExpenses();
-    const totalRent = filtered
-      .filter(exp => exp.type === 'rent')
-      .reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
-    
-    const totalElectricity = filtered
-      .filter(exp => exp.type === 'electricity')
-      .reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
-
-    const totalOther = filtered
-      .filter(exp => exp.type !== 'rent' && exp.type !== 'electricity')
-      .reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
-
-    const total = totalRent + totalElectricity + totalOther;
-
-    return {
-      rent: totalRent,
-      electricity: totalElectricity,
-      other: totalOther,
-      total
-    };
+  const formatTimeAmPm = (dateTimeLocalStr) => {
+    if (!dateTimeLocalStr) return '';
+    try {
+      // dateTimeLocalStr expected as 'YYYY-MM-DDTHH:MM'
+      const d = new Date(dateTimeLocalStr);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+    } catch (e) {
+      return '';
+    }
   };
 
-  const getFilteredExpenses = () => {
-    let filtered = [...expenses];
+  const confirmDelete = (id) => {
+    setDeleteId(id);
+  };
 
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(expense => 
-        (expense.description || '').toLowerCase().includes(query) ||
-        (expense.type || '').toLowerCase().includes(query)
-      );
+  const doDelete = async () => {
+    if (!deleteId) return;
+    setDeleting(true);
+    try {
+      await api.deleteExpense(deleteId);
+      setDeleteId(null);
+      // refresh current page (if last item removed, server should handle empty pages)
+  // Refresh table, summary and month cards
+  fetchExpenses({ page });
+  fetchSummary();
+  setMonthsOffset(0);
+  loadMonths({ monthsToLoad: 6, offset: 0, replace: true, periodToUse: period });
+    } catch (err) {
+      console.error('delete error', err);
+      setError(err.message || 'Failed to delete');
+    } finally {
+      setDeleting(false);
     }
+  };
 
-    // Type filter
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(expense => expense.type === typeFilter);
+  // Refresh everything: expenses list, summary cards and month cards
+  const refreshAll = () => {
+    fetchExpenses({ page });
+    fetchSummary();
+    setMonthsOffset(0);
+    loadMonths({ monthsToLoad: 6, offset: 0, replace: true, periodToUse: period });
+  };
+
+  // CSV Export
+  const exportCsv = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filterCategory) params.set('category', filterCategory);
+      if (filterStartDate) params.set('startDate', getUtcMidnightForDateInTZ(filterStartDate));
+      if (filterEndDate) params.set('endDate', getUtcMidnightForDateInTZ(filterEndDate));
+      const resp = await fetch(`/api/expenses?${params.toString()}&export=csv`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+      if (!resp.ok) throw new Error('Export failed');
+      const text = await resp.text();
+      const blob = new Blob([text], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `expenses_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('exportCsv error', err);
+      setError(err.message || 'Export failed');
     }
+  };
 
-    // Date range filter
-    if (dateRange !== 'all') {
-      const now = new Date();
-      const filterDate = new Date();
-      
-      switch (dateRange) {
-        case 'thisMonth':
-          filterDate.setMonth(now.getMonth());
-          filterDate.setDate(1);
-          break;
-        case 'lastMonth':
-          filterDate.setMonth(now.getMonth() - 1);
-          filterDate.setDate(1);
-          break;
-        case 'last3Months':
-          filterDate.setMonth(now.getMonth() - 3);
-          break;
-        case 'thisYear':
-          filterDate.setFullYear(now.getFullYear());
-          filterDate.setMonth(0);
-          filterDate.setDate(1);
-          break;
-      }
-      
-      filtered = filtered.filter(expense => {
-        const expenseDate = new Date(expense.date);
-        return expenseDate >= filterDate;
-      });
+  // Monthly breakdown cards (compute from current page or fetch summary)
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summary, setSummary] = useState({ totalExpenses: 0, prevMonth: 0, income: 0 });
+
+  // Monthly cards state
+  const [months, setMonths] = useState([]); // array of { monthLabel, income, expenses, net }
+  const [monthsLoading, setMonthsLoading] = useState(false);
+  const [monthsOffset, setMonthsOffset] = useState(0); // how many months already loaded (0 = current)
+  const [monthsHasMore, setMonthsHasMore] = useState(true);
+  const [period, setPeriod] = useState('month'); // 'month' or 'year'
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const toggleDebounceRef = useRef(null);
+  const [tilesVisible, setTilesVisible] = useState(true);
+
+  const fetchSummary = async () => {
+    setSummaryLoading(true);
+    try {
+      const resp = await fetch('/api/expenses/summary/stats', { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+      if (!resp.ok) throw new Error('Failed to load summary');
+      const data = await resp.json();
+      // Expecting { total: <num>, prev_month: <num>, income: <num>, net: <num> }
+      setSummary({ totalExpenses: data.total || 0, prevMonth: data.prev_month || 0, income: data.income || 0 });
+    } catch (err) {
+      console.warn('Failed to load summary', err);
+      setSummary({ totalExpenses: 0, prevMonth: 0, income: 0 });
+    } finally {
+      setSummaryLoading(false);
     }
+  };
 
-    // Sort
-    filtered.sort((a, b) => {
-      let aValue = a[sortConfig.field];
-      let bValue = b[sortConfig.field];
+  useEffect(() => { fetchSummary(); }, []);
 
-      if (sortConfig.field === 'amount') {
-        aValue = Number(aValue) || 0;
-        bValue = Number(bValue) || 0;
-      } else if (sortConfig.field === 'date') {
-        aValue = new Date(aValue || 0);
-        bValue = new Date(bValue || 0);
+  useEffect(() => {
+    // initial load: last 6 months or 3 years depending on period
+    const initialBatch = period === 'year' ? 3 : 6;
+    setPeriodLoading(true);
+    // animate: hide tiles then load and fade in
+    setTilesVisible(false);
+  loadMonths({ monthsToLoad: initialBatch, offset: 0, replace: true, periodToUse: period })
+      .then(() => setTimeout(() => setTilesVisible(true), 80))
+      .catch(() => {})
+      .finally(() => setPeriodLoading(false));
+  }, []);
+
+  const loadMonths = async ({ monthsToLoad = 6, offset = 0, replace = false, periodToUse = null } = {}) => {
+    setMonthsLoading(true);
+    try {
+      const params = new URLSearchParams();
+  params.set('months', String(monthsToLoad));
+  params.set('offset', String(offset));
+  params.set('period', String(periodToUse ? periodToUse : period));
+      const resp = await fetch(`/api/finance/monthly?${params.toString()}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+      if (!resp.ok) throw new Error('Failed to load monthly data');
+      const payload = await resp.json();
+  const loaded = payload.months || [];
+  const serverHasMore = payload.hasMore === true;
+      if (replace) {
+        setMonths(loaded);
       } else {
-        aValue = String(aValue || '').toLowerCase();
-        bValue = String(bValue || '').toLowerCase();
+        // append older months to the end of array (we show most recent left-to-right)
+        setMonths(prev => [...prev, ...loaded]);
       }
 
-      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    return filtered;
-  };
-
-  const handleSort = (field) => {
-    setSortConfig(prevConfig => ({
-      field,
-      direction: prevConfig.field === field && prevConfig.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  };
-
-  const getTypeIcon = (type) => {
-    switch (type?.toLowerCase()) {
-      case 'electricity':
-        return <ElectricityIcon sx={{ fontSize: 16, color: 'warning.main' }} />;
-      case 'rent':
-        return <RentIcon sx={{ fontSize: 16, color: 'primary.main' }} />;
-      case 'internet':
-        return <ElectricityIcon sx={{ fontSize: 16, color: 'info.main' }} />;
-      case 'water':
-        return <RentIcon sx={{ fontSize: 16, color: 'info.main' }} />;
-      case 'maintenance':
-        return <ReceiptIcon sx={{ fontSize: 16, color: 'success.main' }} />;
-      case 'supplies':
-        return <ReceiptIcon sx={{ fontSize: 16, color: 'secondary.main' }} />;
-      case 'cleaning':
-        return <ReceiptIcon sx={{ fontSize: 16, color: 'success.main' }} />;
-      case 'security':
-        return <ReceiptIcon sx={{ fontSize: 16, color: 'error.main' }} />;
-      default:
-        return <ReceiptIcon sx={{ fontSize: 16, color: 'text.secondary' }} />;
+      // Use server-side hasMore when available, otherwise fall back to length check
+      if (typeof serverHasMore === 'boolean') {
+        setMonthsHasMore(serverHasMore);
+      } else {
+        setMonthsHasMore(!(loaded.length < monthsToLoad));
+      }
+  } catch (err) {
+      console.error('loadMonths error', err);
+    } finally {
+  // If this load was triggered as part of a period change, ensure periodLoading cleared by caller
+      setMonthsLoading(false);
     }
   };
 
-  const getTypeColor = (type) => {
-    switch (type?.toLowerCase()) {
-      case 'electricity':
-        return 'warning';
-      case 'rent':
-        return 'primary';
-      case 'internet':
-        return 'info';
-      case 'water':
-        return 'info';
-      case 'maintenance':
-        return 'success';
-      case 'supplies':
-        return 'secondary';
-      case 'cleaning':
-        return 'success';
-      case 'security':
-        return 'error';
-      default:
-        return 'default';
-    }
+  const handlePeriodChange = (event, newPeriod) => {
+    if (!newPeriod) return;
+    // prevent toggling while a period load is in progress
+    if (periodLoading) return;
+    // simple debounce to avoid rapid toggles
+    if (toggleDebounceRef.current) return;
+    toggleDebounceRef.current = setTimeout(() => { toggleDebounceRef.current = null; }, 600);
+
+    setPeriod(newPeriod);
+    // load initial tiles for the selected period with fade animation
+    const monthsToLoad = newPeriod === 'year' ? 3 : 6;
+    setMonthsOffset(0);
+    setTilesVisible(false);
+    setPeriodLoading(true);
+  loadMonths({ monthsToLoad, offset: 0, replace: true, periodToUse: newPeriod })
+      .then(() => setTimeout(() => setTilesVisible(true), 80))
+      .catch(() => {})
+      .finally(() => setPeriodLoading(false));
   };
 
-  const exportToCSV = () => {
-    const filtered = getFilteredExpenses();
-    const headers = ['Date', 'Type', 'Description', 'Amount'];
-    const csv = [
-      headers.join(','),
-      ...filtered.map(expense => [
-        expense.date,
-        expense.type,
-        `"${expense.description}"`,
-        expense.amount
-      ].join(','))
-    ].join('\n');
+  // Page render helpers
+  const ExpenseCard = ({ e }) => (
+    <Card sx={{ mb: 1.5, boxShadow: 1 }}>
+      <CardContent>
+        <Box>
+          {/* First line: icon + category (left) and amount (right) */}
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box display="flex" alignItems="center" gap={1} sx={{ minWidth: 0 }}>
+              {renderCategoryIcon(e)}
+              <Typography variant="subtitle2" fontWeight={600} noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.category_name || e.category || 'N/A'}</Typography>
+            </Box>
+            <Box sx={{ flexShrink: 0, textAlign: 'right', ml: 1 }}>
+              <Typography variant="subtitle2" fontWeight={700}>₹{Number(e.amount || 0).toLocaleString()}</Typography>
+            </Box>
+          </Box>
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.setAttribute('hidden', '');
-    a.setAttribute('href', url);
-  a.setAttribute('download', `expenses_${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })}.csv`);
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  const getMonthlyTrends = () => {
-    const now = new Date();
-    const thisMonth = now.getMonth();
-    const thisYear = now.getFullYear();
-    
-    const thisMonthExpenses = expenses.filter(expense => {
-      const expenseDate = new Date(expense.date);
-      return expenseDate.getMonth() === thisMonth && expenseDate.getFullYear() === thisYear;
-    }).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-    
-    const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1;
-    const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear;
-    
-    const lastMonthExpenses = expenses.filter(expense => {
-      const expenseDate = new Date(expense.date);
-      return expenseDate.getMonth() === lastMonth && expenseDate.getFullYear() === lastMonthYear;
-    }).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-    
-    const change = lastMonthExpenses > 0 
-      ? ((thisMonthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100 
-      : 0;
-    
-    return {
-      thisMonth: thisMonthExpenses,
-      lastMonth: lastMonthExpenses,
-      change: Math.round(change * 100) / 100,
-      isIncrease: change > 0
-    };
-  };
-
-  const totals = calculateTotals();
-  const filteredExpenses = getFilteredExpenses();
-  const netProfit = totalIncome - totals.total;
-  const monthlyTrends = getMonthlyTrends();
-
-  if (loading) {
-    return (
-      <Container sx={pageStyles.container}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-          <CircularProgress />
+          {/* Second line: description (single truncated line) + date and actions aligned right */}
+          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" color="text.secondary" noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 'calc(100vw - 180px)' }}>{e.description || ''}</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 1 }}>
+              <Typography variant="caption" color="text.secondary">{formatDateTimeForDisplay(e.expense_date)}</Typography>
+              <IconButton size="small" onClick={() => openEdit(e)} aria-label={`edit-${e.id}`}><EditIcon fontSize="small" /></IconButton>
+              <IconButton size="small" onClick={() => confirmDelete(e.id)} aria-label={`delete-${e.id}`}><DeleteIcon fontSize="small" /></IconButton>
+            </Box>
+          </Box>
         </Box>
-      </Container>
-    );
-  }
+      </CardContent>
+    </Card>
+  );
 
   return (
-    <Container sx={pageStyles.container}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography 
-          variant={isMobile ? "h5" : "h4"} 
-          component="h1"
-          fontWeight="bold"
-        >
-          <AnalyticsIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-          Expenses Dashboard
-        </Typography>
-        <Stack direction="row" spacing={1}>
-          <Tooltip title="Refresh Data">
-            <IconButton onClick={fetchData} color="primary">
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Export to CSV">
-            <IconButton onClick={exportToCSV} color="primary">
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setAddDialogOpen(true)}
-            size={isMobile ? "small" : "medium"}
-          >
-            Add Expense
-          </Button>
-        </Stack>
+    <Box sx={{ p: isMobile ? 1 : 3 }}>
+      {/* Header - responsive: stack on small screens to avoid overlap */}
+      <Box mb={2}>
+        <Grid container spacing={1} alignItems="center">
+          <Grid item xs={12}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, width: '100%' }}>
+              <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight="bold">Expenses</Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexShrink: 0 }}>
+                <Button variant="contained" color="primary" startIcon={<AddIcon />} onClick={openAdd} sx={{ textTransform: 'none' }} size={isMobile ? 'small' : 'medium'}>Add Expense</Button>
+                <IconButton onClick={refreshAll} aria-label="refresh-expenses" size="small" sx={{ border: '1px solid', borderColor: 'divider' }}>
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+          </Grid>
+        </Grid>
       </Box>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      {/* Summary Cards */}
-      <Grid container spacing={isMobile ? 2 : 3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} lg={2.4}>
-          <Card sx={{ 
-            p: isMobile ? 2 : 3, 
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
-            color: 'white'
-          }}>
-            <CardContent sx={{ p: isMobile ? 1 : 2, '&:last-child': { pb: isMobile ? 1 : 2 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <TrendingUpIcon sx={{ mr: 1 }} />
-                <Typography variant={isMobile ? "subtitle2" : "h6"} fontWeight="bold">
-                  Total Income
-                </Typography>
-              </Box>
-              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
-                ₹{totalIncome.toLocaleString()}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} lg={2.4}>
-          <Card sx={{ 
-            p: isMobile ? 2 : 3, 
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)',
-            color: 'white'
-          }}>
-            <CardContent sx={{ p: isMobile ? 1 : 2, '&:last-child': { pb: isMobile ? 1 : 2 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <TrendingDownIcon sx={{ mr: 1 }} />
-                <Typography variant={isMobile ? "subtitle2" : "h6"} fontWeight="bold">
-                  Total Expenses
-                </Typography>
-              </Box>
-              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
-                ₹{totals.total.toLocaleString()}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} lg={2.4}>
-          <Card sx={{ 
-            p: isMobile ? 2 : 3, 
-            textAlign: 'center',
-            background: netProfit >= 0 
-              ? 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)'
-              : 'linear-gradient(135deg, #FF9800 0%, #F57C00 100%)',
-            color: 'white'
-          }}>
-            <CardContent sx={{ p: isMobile ? 1 : 2, '&:last-child': { pb: isMobile ? 1 : 2 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <AccountBalanceIcon sx={{ mr: 1 }} />
-                <Typography variant={isMobile ? "subtitle2" : "h6"} fontWeight="bold">
-                  Net Profit
-                </Typography>
-              </Box>
-              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
-                ₹{netProfit.toLocaleString()}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} lg={2.4}>
-          <Card sx={{ p: isMobile ? 2 : 3, textAlign: 'center' }}>
-            <CardContent sx={{ p: isMobile ? 1 : 2, '&:last-child': { pb: isMobile ? 1 : 2 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <ReceiptIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                <Typography variant={isMobile ? "subtitle2" : "h6"} color="text.secondary">
-                  Total Records
-                </Typography>
-              </Box>
-              <Typography variant={isMobile ? "h5" : "h4"} color="primary" fontWeight="bold">
-                {filteredExpenses.length}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} lg={2.4}>
-          <Card sx={{ p: isMobile ? 2 : 3, textAlign: 'center' }}>
-            <CardContent sx={{ p: isMobile ? 1 : 2, '&:last-child': { pb: isMobile ? 1 : 2 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                <CalendarIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                <Typography variant={isMobile ? "subtitle2" : "h6"} color="text.secondary">
-                  This Month
-                </Typography>
-              </Box>
-              <Typography variant={isMobile ? "h6" : "h5"} color="error.main" fontWeight="bold">
-                ₹{monthlyTrends.thisMonth.toLocaleString()}
-              </Typography>
-              {monthlyTrends.lastMonth > 0 && (
-                <Typography variant="body2" color={monthlyTrends.isIncrease ? 'error.main' : 'success.main'}>
-                  {monthlyTrends.isIncrease ? '↑' : '↓'} {Math.abs(monthlyTrends.change)}%
-                </Typography>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Expense Breakdown */}
-      {totals.total > 0 && (
-        <Grid container spacing={isMobile ? 2 : 3} sx={{ mb: 3 }}>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="subtitle1" gutterBottom>
-                <ElectricityIcon sx={{ mr: 1, verticalAlign: 'middle', color: 'warning.main' }} />
-                Electricity
-              </Typography>
-              <Typography variant="h5" color="warning.main" fontWeight="bold">
-                ₹{totals.electricity.toLocaleString()}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {totals.total > 0 ? Math.round((totals.electricity / totals.total) * 100) : 0}% of total
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="subtitle1" gutterBottom>
-                <RentIcon sx={{ mr: 1, verticalAlign: 'middle', color: 'primary.main' }} />
-                Rent
-              </Typography>
-              <Typography variant="h5" color="primary.main" fontWeight="bold">
-                ₹{totals.rent.toLocaleString()}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {totals.total > 0 ? Math.round((totals.rent / totals.total) * 100) : 0}% of total
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="subtitle1" gutterBottom>
-                <ReceiptIcon sx={{ mr: 1, verticalAlign: 'middle', color: 'text.secondary' }} />
-                Other
-              </Typography>
-              <Typography variant="h5" color="text.secondary" fontWeight="bold">
-                ₹{totals.other.toLocaleString()}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {totals.total > 0 ? Math.round((totals.other / totals.total) * 100) : 0}% of total
-              </Typography>
-            </Paper>
-          </Grid>
-        </Grid>
-      )}
-
-      {/* Search and Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
-            <FilterIcon sx={{ mr: 1 }} />
-            Filters & Search
-          </Typography>
-          <ToggleButtonGroup
-            value={viewMode}
-            exclusive
-            onChange={(e, value) => value && setViewMode(value)}
-            size="small"
-          >
-            <ToggleButton value="table">Table</ToggleButton>
-            <ToggleButton value="cards">Cards</ToggleButton>
-          </ToggleButtonGroup>
+      {/* Horizontal months/year cards - scrollable */}
+      <Box sx={{ mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="subtitle2">{period === 'year' ? 'Yearly overview' : 'Monthly overview'}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ToggleButtonGroup value={period} exclusive onChange={handlePeriodChange} size="small">
+              <ToggleButton value="month">Month</ToggleButton>
+              <ToggleButton value="year">Year</ToggleButton>
+            </ToggleButtonGroup>
+            {periodLoading && <CircularProgress size={18} />}
+          </Box>
         </Box>
-        
-        <MobileFilters
-          title="Expense Filters"
-          filterCount={[searchQuery, typeFilter !== 'all' ? typeFilter : '', dateRange !== 'all' ? dateRange : ''].filter(v => v).length}
-          onClearAll={() => {
-            setSearchQuery('');
-            setTypeFilter('all');
-            setDateRange('all');
-          }}
-          activeFilters={{
-            search: searchQuery,
-            type: typeFilter !== 'all' ? typeFilter : '',
-            dateRange: dateRange !== 'all' ? dateRange : ''
-          }}
-          onFilterRemove={(key) => {
-            switch (key) {
-              case 'search': setSearchQuery(''); break;
-              case 'type': setTypeFilter('all'); break;
-              case 'dateRange': setDateRange('all'); break;
-            }
-          }}
-        >
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="Search expenses..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-              endAdornment: searchQuery && (
-                <InputAdornment position="end">
-                  <IconButton onClick={() => setSearchQuery('')} size="small">
-                    <ClearIcon />
-                  </IconButton>
-                </InputAdornment>
-              )
+        <Box sx={{ position: 'relative' }}>
+          <Box
+            id="months-scroll"
+            sx={{
+              display: 'flex',
+              gap: 1,
+              overflowX: 'auto',
+              py: 1,
+              px: 0.5,
+              scrollBehavior: 'smooth',
+              transition: 'opacity 240ms ease, transform 260ms ease',
+              opacity: tilesVisible ? 1 : 0,
+              transform: tilesVisible ? 'translateY(0px)' : 'translateY(6px)'
             }}
-          />
-          
-          <FormControl fullWidth>
-            <InputLabel>Type</InputLabel>
-            <Select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              label="Type"
-            >
-              <MenuItem value="all">All Types</MenuItem>
-              <MenuItem value="electricity">Electricity</MenuItem>
-              <MenuItem value="rent">Rent</MenuItem>
-              <MenuItem value="maintenance">Maintenance</MenuItem>
-              <MenuItem value="supplies">Supplies</MenuItem>
-              <MenuItem value="internet">Internet</MenuItem>
-              <MenuItem value="water">Water</MenuItem>
-              <MenuItem value="cleaning">Cleaning</MenuItem>
-              <MenuItem value="security">Security</MenuItem>
-              <MenuItem value="other">Other</MenuItem>
-            </Select>
-          </FormControl>
-          
-          <FormControl fullWidth>
-            <InputLabel>Date Range</InputLabel>
-            <Select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              label="Date Range"
-            >
-              <MenuItem value="all">All Time</MenuItem>
-              <MenuItem value="thisMonth">This Month</MenuItem>
-              <MenuItem value="lastMonth">Last Month</MenuItem>
-              <MenuItem value="last3Months">Last 3 Months</MenuItem>
-              <MenuItem value="thisYear">This Year</MenuItem>
-            </Select>
-          </FormControl>
-        </MobileFilters>
-
-        {/* Filter Summary */}
-        {(searchQuery || typeFilter !== 'all' || dateRange !== 'all') && (
-          <Box sx={{ mt: 2, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              {filteredExpenses.length === 0 
-                ? `No expenses found` 
-                : `Found ${filteredExpenses.length} expense${filteredExpenses.length !== 1 ? 's' : ''}`
-              }
-              {searchQuery && ` for "${searchQuery}"`}
-              {typeFilter !== 'all' && ` in ${typeFilter}`}
-              {dateRange !== 'all' && ` for ${dateRange.replace(/([A-Z])/g, ' $1').toLowerCase()}`}
-            </Typography>
-          </Box>
-        )}
-      </Paper>
-
-      {/* Expenses List */}
-      <Paper sx={{ p: isMobile ? 1 : 2 }}>
-        <Typography variant={isMobile ? "h6" : "h5"} sx={{ mb: 2, fontWeight: 'bold' }}>
-          Expense Details
-        </Typography>
-        {filteredExpenses.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <ReceiptIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-            <Typography variant="body1" color="text.secondary">
-              {expenses.length === 0 ? 'No expenses recorded yet' : 'No expenses match your filters'}
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setAddDialogOpen(true)}
-              sx={{ mt: 2 }}
-            >
-              Add First Expense
-            </Button>
-          </Box>
-        ) : viewMode === 'cards' || isMobile ? (
-          // Card View
-          <Box>
-            {filteredExpenses.map((expense, index) => (
-              <Card key={expense.id || index} sx={{ mb: 2, boxShadow: 2 }}>
+          >
+            {monthsLoading && months.length === 0 ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}><CircularProgress size={20} /></Box>
+            ) : (
+              months.map((m, idx) => (
+                <Card key={`${m.year}-${m.month}-${idx}`} sx={{ minWidth: 180, flex: '0 0 auto' }}>
+                  <CardContent>
+                    <Typography variant="subtitle2" fontWeight={700}>{m.monthLabel}</Typography>
+                    <Typography variant="caption" color="text.secondary">Income</Typography>
+                    <Typography variant="h6" fontWeight={700}>₹{Number(m.income || 0).toLocaleString()}</Typography>
+                    <Typography variant="caption" color="text.secondary">Expenses</Typography>
+                    <Typography variant="body1" sx={{ color: 'error.main' }}>₹{Number(m.expenses || 0).toLocaleString()}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Net</Typography>
+                    <Typography variant="body2" fontWeight={600} sx={{ color: m.net >= 0 ? 'success.main' : 'error.main' }}>₹{Number(m.net || 0).toLocaleString()}</Typography>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+            {/* Load more indicator at the end */}
+            {monthsHasMore && !monthsLoading && (
+              <Card sx={{ minWidth: 140, flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {getTypeIcon(expense.type)}
-                      <Chip 
-                        label={expense.type?.charAt(0).toUpperCase() + expense.type?.slice(1) || 'N/A'}
-                        color={getTypeColor(expense.type)}
-                        size="small"
-                      />
-                    </Box>
-                    <Typography variant="h6" color="error.main" fontWeight="bold">
-                      ₹{Number(expense.amount || 0).toLocaleString()}
-                    </Typography>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <CalendarIcon sx={{ fontSize: 16 }} />
-                    {expense.date ? new Date(expense.date).toLocaleDateString() : 'N/A'}
-                  </Typography>
-                  <Typography variant="body1">
-                    {expense.description || 'No description'}
-                  </Typography>
+                  <Button size="small" onClick={() => { const batch = period === 'year' ? 3 : 6; const nextOffset = monthsOffset + batch; setMonthsOffset(nextOffset); loadMonths({ monthsToLoad: batch, offset: nextOffset, replace: false, periodToUse: period }); }}>Load more</Button>
                 </CardContent>
               </Card>
-            ))}
+            )}
+            {monthsLoading && months.length > 0 && (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 120, flex: '0 0 auto' }}><CircularProgress size={20} /></Box>
+            )}
           </Box>
-        ) : (
-          // Table View
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>
-                  <TableSortLabel
-                    active={sortConfig.field === 'date'}
-                    direction={sortConfig.direction}
-                    onClick={() => handleSort('date')}
-                  >
-                    Date
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell>
-                  <TableSortLabel
-                    active={sortConfig.field === 'type'}
-                    direction={sortConfig.direction}
-                    onClick={() => handleSort('type')}
-                  >
-                    Type
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell>
-                  <TableSortLabel
-                    active={sortConfig.field === 'description'}
-                    direction={sortConfig.direction}
-                    onClick={() => handleSort('description')}
-                  >
-                    Description
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell align="right">
-                  <TableSortLabel
-                    active={sortConfig.field === 'amount'}
-                    direction={sortConfig.direction}
-                    onClick={() => handleSort('amount')}
-                  >
-                    Amount
-                  </TableSortLabel>
-                </TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredExpenses.map((expense, index) => (
-                <TableRow key={expense.id || index} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CalendarIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                      {expense.date ? new Date(expense.date).toLocaleDateString() : 'N/A'}
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {getTypeIcon(expense.type)}
-                      <Chip 
-                        label={expense.type?.charAt(0).toUpperCase() + expense.type?.slice(1) || 'N/A'}
-                        color={getTypeColor(expense.type)}
-                        size="small"
-                      />
-                    </Box>
-                  </TableCell>
-                  <TableCell>{expense.description || 'No description'}</TableCell>
-                  <TableCell align="right">
-                    <Typography variant="body1" fontWeight="bold" color="error.main">
-                      ₹{Number(expense.amount || 0).toLocaleString()}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Paper>
-      {/* Add Expense Dialog */}
-      <Dialog 
-        open={addDialogOpen} 
-        onClose={() => setAddDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        fullScreen={isMobile}
-      >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          alignItems: 'center',
-          background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-          color: 'white'
-        }}>
-          <AddIcon sx={{ mr: 1 }} />
-          Add New Expense
-        </DialogTitle>
-        <DialogContent sx={{ mt: 2 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Date"
-                type="date"
-                value={newExpense.date}
-                onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Type</InputLabel>
-                <Select
-                  value={newExpense.type}
-                  onChange={(e) => setNewExpense({ ...newExpense, type: e.target.value })}
-                  label="Type"
-                >
-                  <MenuItem value="electricity">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ElectricityIcon sx={{ color: 'warning.main' }} />
-                      Electricity
+        </Box>
+      </Box>
+
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      {/* Filters */}
+      {/* Filters: compact on mobile */}
+      <Paper sx={{ p: isMobile ? 1.5 : 2, mb: 2 }}>
+        <Grid container spacing={isMobile ? 1 : 2} alignItems="center">
+          <Grid item xs={8} sm={4}>
+            <FormControl fullWidth size={isMobile ? 'small' : 'medium'}>
+              <InputLabel>Category</InputLabel>
+              <Select value={filterCategory} label="Category" onChange={(e) => { const v = e.target.value; setFilterCategory(v); setPage(0); fetchExpenses({ page: 0, filterCategory: v }); }}>
+                <MenuItem value="">All</MenuItem>
+                {categories.map(c => (
+                  <MenuItem key={c.id} value={c.id}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      {renderCategoryIcon({ category: c.name, category_name: c.name })}
+                      <span>{c.name}</span>
                     </Box>
                   </MenuItem>
-                  <MenuItem value="rent">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <RentIcon sx={{ color: 'primary.main' }} />
-                      Rent
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="maintenance">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Maintenance
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="supplies">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Supplies
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="internet">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Internet
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="water">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Water
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="cleaning">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Cleaning
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="security">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Security
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="other">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ReceiptIcon sx={{ color: 'text.secondary' }} />
-                      Other
-                    </Box>
-                  </MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Description"
-                value={newExpense.description}
-                onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                multiline
-                rows={3}
-                placeholder="Enter expense description..."
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Amount"
-                type="number"
-                value={newExpense.amount}
-                onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
-                InputProps={{
-                  startAdornment: <InputAdornment position="start">₹</InputAdornment>
-                }}
-                placeholder="0.00"
-              />
-            </Grid>
+                ))}
+              </Select>
+            </FormControl>
           </Grid>
+
+          <Grid item xs={4} sm={3}>
+            <Button
+              variant="outlined"
+              fullWidth
+              size={isMobile ? 'small' : 'medium'}
+              onClick={() => setDurationOpen(true)}
+              startIcon={<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>}
+              sx={{ borderRadius: 2, textTransform: 'none', justifyContent: 'flex-start', px: 1.25 }}
+            >
+              Duration
+            </Button>
+          </Grid>
+
+          {/* Apply Filter button removed: selecting a category or choosing duration auto-applies the filter */}
+        </Grid>
+      </Paper>
+
+      {/* Export button moved here so it respects filters */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, gap: 1, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+          {durationLabel && <Chip label={durationLabel} onDelete={() => { setDurationLabel(''); setFilterStartDate(''); setFilterEndDate(''); setPage(0); fetchExpenses({ page: 0, filterStartDate: '', filterEndDate: '' }); }} />}
+          {filterCategory && <Chip label={categories.find(c => c.id === filterCategory)?.name || filterCategory} onDelete={() => { setFilterCategory(''); setPage(0); fetchExpenses({ page: 0, filterCategory: '' }); }} />}
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title="Download CSV" arrow>
+            <IconButton onClick={exportCsv} size="small" aria-label="download-csv" sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <FileDownloadIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          {(durationLabel || filterCategory || filterStartDate || filterEndDate) && (
+            <Button onClick={() => { setDurationLabel(''); setFilterStartDate(''); setFilterEndDate(''); setFilterCategory(''); setPage(0); fetchExpenses({ page: 0, filterCategory: '', filterStartDate: '', filterEndDate: '' }); }} size="small">Clear filters</Button>
+          )}
+        </Box>
+      </Box>
+
+      {/* List & pagination */}
+      {loading ? (
+        <Box sx={{ textAlign: 'center', py: 6 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          {isMobile ? (
+            <Box>
+              {expenses.map(e => <ExpenseCard key={e.id} e={e} />)}
+              <Box sx={{ mt: 2 }}>
+                <TablePagination
+                  component="div"
+                  count={totalRows}
+                  page={page}
+                  onPageChange={handleChangePage}
+                  rowsPerPage={rowsPerPage}
+                  onRowsPerPageChange={handleChangeRowsPerPage}
+                  rowsPerPageOptions={[10, 25, 50]}
+                />
+              </Box>
+              {/* Add button remains in header only */}
+            </Box>
+          ) : (
+            <>
+              <TableContainer component={Paper}>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Category</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell>Amount (₹)</TableCell>
+                      <TableCell>Expense Date</TableCell>
+                      <TableCell align="right">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {expenses.map(e => (
+                      <TableRow key={e.id}>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {renderCategoryIcon(e)}
+                            <span>{e.category_name || e.category}</span>
+                          </Box>
+                        </TableCell>
+                        <TableCell>{e.description}</TableCell>
+                        <TableCell>₹{Number(e.amount || 0).toLocaleString()}</TableCell>
+                        <TableCell>{formatDateTimeForDisplay(e.expense_date)}</TableCell>
+                        <TableCell align="right">
+                          <IconButton size="small" onClick={() => openEdit(e)}><EditIcon fontSize="small" /></IconButton>
+                          <IconButton size="small" onClick={() => confirmDelete(e.id)}><DeleteIcon fontSize="small" /></IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                <TablePagination
+                  component="div"
+                  count={totalRows}
+                  page={page}
+                  onPageChange={handleChangePage}
+                  rowsPerPage={rowsPerPage}
+                  onRowsPerPageChange={handleChangeRowsPerPage}
+                  rowsPerPageOptions={[10, 25, 50]}
+                />
+              </Box>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Edit/Add Dialog */}
+      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{formData.id ? 'Edit Expense' : 'Add Expense'}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth required>
+              <InputLabel>Category</InputLabel>
+              <Select value={formData.category} label="Category" onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}>
+                <MenuItem value="">Select</MenuItem>
+                {categories.map(c => (
+                  <MenuItem key={c.id} value={c.id}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      {renderCategoryIcon({ category: c.name, category_name: c.name })}
+                      <span>{c.name}</span>
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+              <TextField fullWidth label="Amount (₹)" type="number" value={formData.amount} onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))} required inputProps={{ min: 0 }} />
+              <TextField fullWidth label="Date & Time" type="datetime-local" value={formData.expense_date} onChange={(e) => setFormData(prev => ({ ...prev, expense_date: e.target.value }))} InputLabelProps={{ shrink: true }} required />
+            <Typography variant="caption" color="text.secondary">{formatTimeAmPm(formData.expense_date)}</Typography>
+            <TextField fullWidth label="Description" value={formData.description} onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))} />
+            {formError && <Typography color="error" variant="caption">{formError}</Typography>}
+          </Stack>
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setAddDialogOpen(false)} color="inherit">
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleAddExpense} 
-            variant="contained"
-            disabled={!newExpense.description || !newExpense.amount}
-            startIcon={<AddIcon />}
-          >
-            Add Expense
-          </Button>
+        <DialogActions>
+          <Button onClick={() => setFormOpen(false)}>Cancel</Button>
+          {/* Save only enabled when required fields are valid */}
+          <Button variant="contained" onClick={saveForm} disabled={formSaving || !formData.category || !formData.amount || Number(formData.amount) <= 0 || !formData.expense_date}>{formSaving ? <CircularProgress size={18} /> : 'Save'}</Button>
         </DialogActions>
       </Dialog>
 
-      {/* Floating Action Button for Mobile */}
-      {isMobile && (
-        <Fab
-          color="primary"
-          aria-label="add expense"
-          onClick={() => setAddDialogOpen(true)}
-          sx={{
-            position: 'fixed',
-            bottom: 16,
-            right: 16,
-            zIndex: 1000
-          }}
-        >
-          <AddIcon />
-        </Fab>
-      )}
-      
+  <DurationFilter open={durationOpen} onClose={() => setDurationOpen(false)} onApply={onDurationApply} initialStart={filterStartDate} initialEnd={filterEndDate} />
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteId} onClose={() => setDeleteId(null)}>
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this expense?</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteId(null)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={doDelete} disabled={deleting}>{deleting ? <CircularProgress size={18} /> : 'Delete'}</Button>
+        </DialogActions>
+      </Dialog>
+
       <Footer />
-    </Container>
+    </Box>
   );
 }
-
-export default Expenses;
