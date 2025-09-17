@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -27,6 +27,8 @@ export default function BalanceSheet({ open, onClose, startDate, endDate, title 
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState({});
+  const [loadingGroups, setLoadingGroups] = useState({});
+  const timersRef = useRef({});
 
   useEffect(() => {
     if (!open) return;
@@ -39,8 +41,27 @@ export default function BalanceSheet({ open, onClose, startDate, endDate, title 
   }, [open, startDate, endDate]);
 
   const toggleExpand = (key) => {
-    setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+    // if already loading for this group, ignore click
+    if (loadingGroups[key]) return;
+
+    // set loading state immediately (disables button and shows spinner)
+    setLoadingGroups(prev => ({ ...prev, [key]: true }));
+
+    // debounce actual expand toggle to avoid rapid toggles
+    const delay = 250; // ms
+    if (timersRef.current[key]) clearTimeout(timersRef.current[key]);
+    timersRef.current[key] = setTimeout(() => {
+      setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+      timersRef.current[key] = null;
+    }, delay);
   };
+
+  useEffect(() => {
+    return () => {
+      // clear any pending timers on unmount
+      Object.values(timersRef.current).forEach(t => { if (t) clearTimeout(t); });
+    };
+  }, []);
 
   const exportCsv = () => {
     if (!data) return;
@@ -148,9 +169,12 @@ export default function BalanceSheet({ open, onClose, startDate, endDate, title 
                       <React.Fragment key={`pay-group-${idx}`}>
                         <TableRow key={`p-${idx}`}>
                           <TableCell sx={{ width: 36 }}>
-                            <IconButton size="small" onClick={() => toggleExpand(`pay-${idx}`)}>
-                              {expanded[`pay-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                            </IconButton>
+                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <IconButton size="small" onClick={() => toggleExpand(`pay-${idx}`)} disabled={!!loadingGroups[`pay-${idx}`]}>
+                                  {expanded[`pay-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                </IconButton>
+                                {loadingGroups[`pay-${idx}`] ? <CircularProgress size={18} sx={{ ml: 1 }} /> : null}
+                              </Box>
                           </TableCell>
                           <TableCell>{p.type}</TableCell>
                           <TableCell>₹{Number(p.amount || 0).toLocaleString()}</TableCell>
@@ -158,7 +182,13 @@ export default function BalanceSheet({ open, onClose, startDate, endDate, title 
                         </TableRow>
                         <TableRow key={`p-collapse-${idx}`}>
                           <TableCell colSpan={4} sx={{ p: 0, border: 0 }}>
-                            <Collapse in={!!expanded[`pay-${idx}`]} timeout="auto" unmountOnExit>
+                            <Collapse
+                              in={!!expanded[`pay-${idx}`]}
+                              timeout="auto"
+                              unmountOnExit
+                              onEntered={() => setLoadingGroups(prev => ({ ...prev, [`pay-${idx}`]: false }))}
+                              onExited={() => setLoadingGroups(prev => ({ ...prev, [`pay-${idx}`]: false }))}
+                            >
                               <Box sx={{ p: 1 }}>
                                 <Table size="small">
                                   <TableHead>
@@ -212,9 +242,12 @@ export default function BalanceSheet({ open, onClose, startDate, endDate, title 
                     <React.Fragment key={`exp-group-${idx}`}>
                       <TableRow key={`c-${idx}`}>
                         <TableCell sx={{ width: 36 }}>
-                          <IconButton size="small" onClick={() => toggleExpand(`exp-${idx}`)}>
-                            {expanded[`exp-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                          </IconButton>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <IconButton size="small" onClick={() => toggleExpand(`exp-${idx}`)} disabled={!!loadingGroups[`exp-${idx}`]}>
+                              {expanded[`exp-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                            </IconButton>
+                            {loadingGroups[`exp-${idx}`] ? <CircularProgress size={18} sx={{ ml: 1 }} /> : null}
+                          </Box>
                         </TableCell>
                         <TableCell>{c.category}</TableCell>
                         <TableCell>₹{Number(c.amount || 0).toLocaleString()}</TableCell>
@@ -222,7 +255,13 @@ export default function BalanceSheet({ open, onClose, startDate, endDate, title 
                       </TableRow>
                       <TableRow key={`c-collapse-${idx}`}>
                         <TableCell colSpan={4} sx={{ p: 0, border: 0 }}>
-                          <Collapse in={!!expanded[`exp-${idx}`]} timeout="auto" unmountOnExit>
+                          <Collapse
+                            in={!!expanded[`exp-${idx}`]}
+                            timeout="auto"
+                            unmountOnExit
+                            onEntered={() => setLoadingGroups(prev => ({ ...prev, [`exp-${idx}`]: false }))}
+                            onExited={() => setLoadingGroups(prev => ({ ...prev, [`exp-${idx}`]: false }))}
+                          >
                             <Box sx={{ p: 1 }}>
                               <Table size="small">
                                 <TableHead>
