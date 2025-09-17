@@ -38,6 +38,7 @@ import { ToggleButton, ToggleButtonGroup } from '@mui/material';
 import api from '../services/api';
 import Footer from '../components/Footer';
 import DurationFilter from '../components/DurationFilter';
+import BalanceSheet from '../components/BalanceSheet';
 import { formatDateTimeForDisplay, todayInIST, isoToISTDateInput, isoToISTDateTimeInput, getUtcMidnightForDateInTZ, nowInISTDateTimeLocal } from '../utils/dateUtils';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
@@ -317,6 +318,9 @@ export default function Expenses() {
   const [periodLoading, setPeriodLoading] = useState(false);
   const toggleDebounceRef = useRef(null);
   const [tilesVisible, setTilesVisible] = useState(true);
+  // Balance sheet dialog state
+  const [balanceOpen, setBalanceOpen] = useState(false);
+  const [balanceContext, setBalanceContext] = useState(null); // { startDate, endDate, title }
 
   const fetchSummary = async () => {
     setSummaryLoading(true);
@@ -483,7 +487,29 @@ export default function Expenses() {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}><CircularProgress size={20} /></Box>
             ) : (
               months.map((m, idx) => (
-                <Card key={`${m.year}-${m.month}-${idx}`} sx={{ minWidth: 180, flex: '0 0 auto' }}>
+                <Card
+                  key={`${m.year}-${m.month}-${idx}`}
+                  sx={{ minWidth: 180, flex: '0 0 auto', cursor: 'pointer' }}
+                  onClick={() => {
+                    // Compute ISO startDate and endDate for the period
+                    let startDate = '';
+                    let endDate = '';
+                    if (period === 'year' || m.month == null) {
+                      // year: use Jan 1 to Dec 31
+                      startDate = `${m.year}-01-01`;
+                      endDate = `${m.year}-12-31`;
+                    } else {
+                      // month: m.month is 1-12
+                      const mm = String(m.month).padStart(2, '0');
+                      startDate = `${m.year}-${mm}-01`;
+                      // compute last day of month
+                      const lastDay = new Date(m.year, m.month, 0).getDate();
+                      endDate = `${m.year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+                    }
+                    setBalanceContext({ startDate, endDate, title: `${m.monthLabel}` });
+                    setBalanceOpen(true);
+                  }}
+                >
                   <CardContent>
                     <Typography variant="subtitle2" fontWeight={700}>{m.monthLabel}</Typography>
                     <Typography variant="caption" color="text.secondary">Income</Typography>
@@ -693,6 +719,13 @@ export default function Expenses() {
       </Dialog>
 
       <Footer />
+      <BalanceSheet
+        open={balanceOpen}
+        onClose={() => setBalanceOpen(false)}
+        startDate={balanceContext?.startDate}
+        endDate={balanceContext?.endDate}
+        title={balanceContext?.title}
+      />
     </Box>
   );
 }

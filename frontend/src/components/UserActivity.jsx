@@ -267,7 +267,7 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
   }
 
   // Render a compact expense summary: Amount, Category, Description
-  function ExpenseSummary({ details, expenseCategoriesMap: localExpenseCategoriesMap = {} }) {
+  function ExpenseSummary({ details, expenseCategoriesMap: localExpenseCategoriesMap = {}, actionType = '' }) {
     // support details stored as JSON string inside metadata
     let det = details;
     if (!det) return <Typography variant="body2" color="text.secondary">No details</Typography>;
@@ -280,10 +280,22 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
     let category = det.category ?? det.expense_category ?? det.category_name ?? det.expenseCategory ?? det.categoryName ?? det.expense_category_id ?? null;
     const description = det.description ?? det.desc ?? det.remarks ?? det.note ?? null;
 
+    // Determine if this action is a category-only update (hide amount)
+    const isCategoryUpdate = (actionType || '').toString().toLowerCase().includes('category');
+
     // if category is an id, resolve via fetched map
+    let resolvedCategoryName = null;
     if (category !== null && (typeof category === 'number' || (/^\d+$/.test(String(category))))) {
       const name = (localExpenseCategoriesMap || {})[String(category)];
-      if (name) category = name;
+      if (name) resolvedCategoryName = name;
+    } else if (typeof category === 'string' && category.trim() !== '') {
+      // if it's already a string (maybe category_name), use it
+      resolvedCategoryName = category;
+    }
+
+    // For category-update actions, prefer to hide unresolved category instead of showing numeric id or placeholder
+    if (isCategoryUpdate && !resolvedCategoryName) {
+      resolvedCategoryName = '';
     }
 
     const Row = ({ label, value }) => (
@@ -295,8 +307,12 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
 
   return (
       <Box sx={{ display: 'grid', gap: 0.5 }}>
-    <Row label="Amount" value={amount !== null ? `₹${amount}` : '—'} />
-    <Row label="Category" value={category || '—'} />
+    { !isCategoryUpdate && (
+      <Row label="Amount" value={amount !== null ? `₹${amount}` : '—'} />
+    ) }
+    { resolvedCategoryName !== '' && (
+      <Row label="Category" value={resolvedCategoryName || '—'} />
+    ) }
     <Row label="Description" value={description || '—'} />
       </Box>
     );
@@ -349,8 +365,8 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                     {/* For UPDATE actions show a concise diff: only changed fields */}
                     {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
                       // For UPDATE actions show a diff for most subjects; but for expense subjects show a compact summary of key fields
-                      ((a.subjectType || a.subject_type || '').toString().toLowerCase() === 'expense') ? (
-                        <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} />
+                        ((a.subjectType || a.subject_type || '').toString().toLowerCase() === 'expense') ? (
+                        <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />
                       ) : (
                         <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
                       )
@@ -360,7 +376,7 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                         const atype = (a.type || a.action_type || '').toString().toLowerCase();
                         const subj = (a.subjectType || a.subject_type || '').toString().toLowerCase();
                         if (atype.includes('expense') || subj === 'expense') {
-                          return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} />;
+                          return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />;
                         }
                         if (atype === 'monthly_fee' || subj === 'payment' || atype.includes('payment')) {
                           const d = a.details || {};
@@ -463,7 +479,7 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                     const subjectId = a.subjectId || a.subject_id;
                     // If this is an expense-related activity, show compact expense summary
                     if (subjectType === 'expense' || (a.type || a.action_type || '').toString().toLowerCase().includes('expense')) {
-                      return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} />;
+                      return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />;
                     }
                     if (isUpdate && subjectType && subjectId) {
                       return (

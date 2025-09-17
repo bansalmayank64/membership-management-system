@@ -80,7 +80,7 @@ const PaymentCard = ({ payment, onDelete, onViewStudent, onEdit }) => {
               #{payment.student_id} • 🪑{payment.seat_number || 'N/A'}
             </Typography>
           </Box>
-          <Chip 
+          <Chip
             label={formatCurrency(payment.amount)}
             color={getAmountColor(payment.amount)}
             variant="filled"
@@ -88,7 +88,7 @@ const PaymentCard = ({ payment, onDelete, onViewStudent, onEdit }) => {
             sx={{ minWidth: 80, fontWeight: 600 }}
           />
         </Box>
-        
+
         {/* Details Row */}
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box display="flex" alignItems="center" gap={1}>
@@ -123,7 +123,7 @@ const PaymentCard = ({ payment, onDelete, onViewStudent, onEdit }) => {
 function Payments() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -131,12 +131,12 @@ function Payments() {
   const [totalPayments, setTotalPayments] = useState(0);
   // Students list for Add Payment dropdown
   const [students, setStudents] = useState([]);
-    // Student details dialog state
-    const [studentDialogOpen, setStudentDialogOpen] = useState(false);
-    const [studentDialogData, setStudentDialogData] = useState(null);
-    const [studentDialogLoading, setStudentDialogLoading] = useState(false);
-    const [studentDialogError, setStudentDialogError] = useState(null);
-    const [studentDialogTotalPaid, setStudentDialogTotalPaid] = useState(0);
+  // Student details dialog state
+  const [studentDialogOpen, setStudentDialogOpen] = useState(false);
+  const [studentDialogData, setStudentDialogData] = useState(null);
+  const [studentDialogLoading, setStudentDialogLoading] = useState(false);
+  const [studentDialogError, setStudentDialogError] = useState(null);
+  const [studentDialogTotalPaid, setStudentDialogTotalPaid] = useState(0);
   const [addPaymentOpen, setAddPaymentOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   // Default date should be today's date in Asia/Kolkata (YYYY-MM-DD)
@@ -153,9 +153,9 @@ function Payments() {
     seatNumber: '',
     studentName: '',
     studentId: '',
-  startDate: '',
-  endDate: '',
-  paymentMode: ''
+    startDate: '',
+    endDate: '',
+    paymentMode: ''
   });
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -177,7 +177,7 @@ function Payments() {
   };
 
   useEffect(() => {
-  fetchPayments();
+    fetchPayments();
     // Prefetch students for dropdown
     fetchStudentsForDropdown();
   }, []);
@@ -217,7 +217,7 @@ function Payments() {
       if (filtersToUse.studentId) params.set('studentId', filtersToUse.studentId);
       if (filtersToUse.startDate) params.set('startDate', filtersToUse.startDate);
       if (filtersToUse.endDate) params.set('endDate', filtersToUse.endDate);
-  if (filtersToUse.paymentMode) params.set('paymentMode', filtersToUse.paymentMode);
+      if (filtersToUse.paymentMode) params.set('paymentMode', filtersToUse.paymentMode);
 
       const response = await fetch(`/api/payments?${params.toString()}`, {
         headers: {
@@ -318,7 +318,7 @@ function Payments() {
   // Open Add Payment dialog
   const handleOpenAddPayment = () => {
     setSelectedStudentId('');
-  setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
+    setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
     setFeeConfig(null);
     setMembershipExtensionDays(0);
     setAddPaymentOpen(true);
@@ -331,13 +331,13 @@ function Payments() {
     if (!student || !student.sex) {
       setFeeConfig(null);
       setMembershipExtensionDays(0);
-  setMembershipCurrentTill(null);
-  setMembershipNewTill(null);
+      setMembershipCurrentTill(null);
+      setMembershipNewTill(null);
       return;
     }
     try {
-  const membershipType = student.membership_type;
-  const resp = await fetch(`/api/students/fee-config/${membershipType}/${student.sex}`, {
+      const membershipType = student.membership_type;
+      const resp = await fetch(`/api/students/fee-config/${membershipType}/${student.sex}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
           'Content-Type': 'application/json'
@@ -352,7 +352,7 @@ function Payments() {
       setFeeConfig(cfg);
       // compute membership extension days if amount present
       const amount = parseFloat(paymentDataLocal.amount || 0);
-  if (amount > 0 && cfg && parseFloat(cfg.monthly_fees) > 0) {
+      if (amount > 0 && cfg && parseFloat(cfg.monthly_fees) > 0) {
         const days = Math.floor((amount / cfg.monthly_fees) * 30);
         setMembershipExtensionDays(days);
       } else {
@@ -403,7 +403,7 @@ function Payments() {
   const handleLocalAmountChange = (val) => {
     setPaymentDataLocal(prev => ({ ...prev, amount: val }));
     const amount = parseFloat(val || 0);
-  if (amount > 0 && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
+    if (amount > 0 && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
       const days = Math.floor((amount / feeConfig.monthly_fees) * 30);
       setMembershipExtensionDays(days);
       // recompute projected membership date
@@ -420,7 +420,7 @@ function Payments() {
           newDt.setDate(newDt.getDate() + extDays);
         }
       }
-  setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
+      setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
     } else {
       setMembershipExtensionDays(0);
       setMembershipNewTill(null);
@@ -439,7 +439,7 @@ function Payments() {
     }
 
     // Check for free membership students (monthly fee = 0) - only for monthly_fee payments, allow refunds
-  if (paymentDataLocal.type === 'monthly_fee' && feeConfig && parseFloat(feeConfig.monthly_fees) <= 0) {
+    if (paymentDataLocal.type === 'monthly_fee' && feeConfig && parseFloat(feeConfig.monthly_fees) <= 0) {
       setError('Cannot add monthly fee payment for free membership students (monthly fee = ₹0)');
       return;
     }
@@ -466,17 +466,24 @@ function Payments() {
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to add payment');
+        // Display server provided error and details to the user
+        const serverMessage = err.error || err.message || 'Failed to add payment';
+        const details = Array.isArray(err.details) && err.details.length ? ` — ${err.details.join(', ')}` : '';
+        setError(`${serverMessage}${details}`);
+        throw new Error(serverMessage);
       }
       // success
       setAddPaymentOpen(false);
       setSelectedStudentId('');
-  setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
+      setPaymentDataLocal({ amount: '', method: 'cash', type: 'monthly_fee', date: todayInIST(), notes: '' });
       setFeeConfig(null);
       setMembershipExtensionDays(0);
       fetchPayments();
     } catch (err) {
-      setError(err.message || 'Failed to add payment');
+      // If the server message was already set in state above, avoid overwriting it
+      if (!error) {
+        setError(err.message || 'Failed to add payment');
+      }
     } finally {
       setPaymentLoadingLocal(false);
     }
@@ -486,7 +493,7 @@ function Payments() {
   useEffect(() => {
     if (!feeConfig) return;
     const amount = parseFloat(paymentDataLocal.amount || 0);
-  if (!(amount > 0 && feeConfig && parseFloat(feeConfig.monthly_fees) > 0)) {
+    if (!(amount > 0 && feeConfig && parseFloat(feeConfig.monthly_fees) > 0)) {
       setMembershipExtensionDays(0);
       setMembershipNewTill(null);
       return;
@@ -505,7 +512,7 @@ function Payments() {
         newDt.setDate(newDt.getDate() + extDays);
       }
     }
-          setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
+    setMembershipNewTill(newDt ? newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null);
   }, [paymentDataLocal.type]);
 
   const getAmountStyle = (amount) => {
@@ -562,13 +569,13 @@ function Payments() {
                   const monthlyFee = cfg && cfg.monthly_fees ? Number(cfg.monthly_fees) : null;
                   if (monthlyFee && monthlyFee > 0) {
                     reductionDays = Math.floor((Number(payment.amount) / monthlyFee) * 30);
-            if (reductionDays > 0 && currentMembershipTill) {
+                    if (reductionDays > 0 && currentMembershipTill) {
                       // compute new membership_till by subtracting reductionDays
                       const cur = new Date(currentMembershipTill);
                       if (!isNaN(cur.getTime())) {
                         const newDt = new Date(cur);
                         newDt.setDate(newDt.getDate() - reductionDays);
-              newMembershipTill = newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+                        newMembershipTill = newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
                       }
                     }
                   }
@@ -595,7 +602,7 @@ function Payments() {
   const closeDeleteDialog = () => {
     setDeleteDialogOpen(false);
     setPaymentToDelete(null);
-  setDeleteInfo(null);
+    setDeleteInfo(null);
   };
 
   // Perform delete (called after confirmation)
@@ -617,8 +624,8 @@ function Payments() {
         throw new Error(err.error || 'Failed to delete payment');
       }
 
-  // Membership adjustments (if any) are handled server-side in the DELETE endpoint.
-  // Do not perform a client-side PUT here; simply refresh data from server to reflect changes.
+      // Membership adjustments (if any) are handled server-side in the DELETE endpoint.
+      // Do not perform a client-side PUT here; simply refresh data from server to reflect changes.
 
       // Refresh list
       await fetchPayments();
@@ -654,15 +661,15 @@ function Payments() {
   return (
     <Container sx={pageStyles.container}>
       <Box sx={pageStyles.header}>
-        <Typography 
+        <Typography
           variant={isMobile ? "h6" : "h4"}
           component="h1"
           fontWeight="bold"
-          sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
             gap: 1,
-            fontSize: isMobile ? '1.1rem' : undefined 
+            fontSize: isMobile ? '1.1rem' : undefined
           }}
         >
           💰 Payments (Only last 30 Days)
@@ -700,7 +707,7 @@ function Payments() {
             Add/Refund Payment
           </Button>
         </Box>
-  </Box>
+      </Box>
 
       <Paper sx={tableStyles.paper}>
         {/* Filters */}
@@ -887,45 +894,45 @@ function Payments() {
                     </Typography>
                   </Paper>
                 ) : (
-                          displayedPayments.map((payment) => (
-                            <div key={payment.id}>
-                              <PaymentCard
-                                payment={payment}
-                                onDelete={openDeleteDialog}
-                                onViewStudent={openStudentDialog}
-                                onEdit={(p) => { setPaymentBeingEdited(p); setEditDialogOpen(true); }}
-                              />
-                            </div>
-                          ))
+                  displayedPayments.map((payment) => (
+                    <div key={payment.id}>
+                      <PaymentCard
+                        payment={payment}
+                        onDelete={openDeleteDialog}
+                        onViewStudent={openStudentDialog}
+                        onEdit={(p) => { setPaymentBeingEdited(p); setEditDialogOpen(true); }}
+                      />
+                    </div>
+                  ))
                 )}
 
                 {/* Mobile Pagination */}
                 <Paper sx={{ mt: 1 }}>
                   <TablePagination
-                      component="div"
-                      count={totalPayments}
-                      page={page}
-                      onPageChange={handleChangePage}
-                      rowsPerPage={rowsPerPage}
-                      onRowsPerPageChange={handleChangeRowsPerPage}
-                      rowsPerPageOptions={[10, 25, 50]}
-                      labelRowsPerPage="Per page:"
-                      labelDisplayedRows={({ from, to, count }) => 
-                        `${from}-${to} of ${count}`
+                    component="div"
+                    count={totalPayments}
+                    page={page}
+                    onPageChange={handleChangePage}
+                    rowsPerPage={rowsPerPage}
+                    onRowsPerPageChange={handleChangeRowsPerPage}
+                    rowsPerPageOptions={[10, 25, 50]}
+                    labelRowsPerPage="Per page:"
+                    labelDisplayedRows={({ from, to, count }) =>
+                      `${from}-${to} of ${count}`
+                    }
+                    sx={{
+                      '& .MuiTablePagination-toolbar': {
+                        paddingLeft: 1,
+                        paddingRight: 1,
+                      },
+                      '& .MuiTablePagination-selectLabel': {
+                        fontSize: '0.875rem',
+                      },
+                      '& .MuiTablePagination-displayedRows': {
+                        fontSize: '0.875rem',
                       }
-                      sx={{
-                        '& .MuiTablePagination-toolbar': {
-                          paddingLeft: 1,
-                          paddingRight: 1,
-                        },
-                        '& .MuiTablePagination-selectLabel': {
-                          fontSize: '0.875rem',
-                        },
-                        '& .MuiTablePagination-displayedRows': {
-                          fontSize: '0.875rem',
-                        }
-                      }}
-                    />
+                    }}
+                  />
                 </Paper>
               </Box>
             )}
@@ -1002,25 +1009,25 @@ function Payments() {
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
         <DialogTitle>Confirm delete</DialogTitle>
-          <DialogContent>
-            <Typography>Are you sure you want to delete this payment? This action cannot be undone.</Typography>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this payment? This action cannot be undone.</Typography>
 
-            {/* Show computed membership impact when available (including zero or negative reductions) */}
-            {deleteInfo && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>Membership impact</Typography>
-                {deleteInfo.currentMembershipTill ? (
-                  <Typography variant="body2">Current membership till: {formatShortDate(deleteInfo.currentMembershipTill)}</Typography>
-                ) : (
-                  <Typography variant="body2">Current membership till: N/A</Typography>
-                )}
-                <Typography variant="body2">Reduction days: {typeof deleteInfo.reductionDays === 'number' ? deleteInfo.reductionDays : 0} day(s)</Typography>
-                <Typography variant="body2">New membership till: {deleteInfo.newMembershipTill ? formatShortDate(deleteInfo.newMembershipTill) : 'No change'}</Typography>
-              </Box>
-            )}
+          {/* Show computed membership impact when available (including zero or negative reductions) */}
+          {deleteInfo && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>Membership impact</Typography>
+              {deleteInfo.currentMembershipTill ? (
+                <Typography variant="body2">Current membership till: {formatShortDate(deleteInfo.currentMembershipTill)}</Typography>
+              ) : (
+                <Typography variant="body2">Current membership till: N/A</Typography>
+              )}
+              <Typography variant="body2">Reduction days: {typeof deleteInfo.reductionDays === 'number' ? deleteInfo.reductionDays : 0} day(s)</Typography>
+              <Typography variant="body2">New membership till: {deleteInfo.newMembershipTill ? formatShortDate(deleteInfo.newMembershipTill) : 'No change'}</Typography>
+            </Box>
+          )}
 
-            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-          </DialogContent>
+          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        </DialogContent>
         <DialogActions>
           <Button onClick={closeDeleteDialog} disabled={deleting}>Cancel</Button>
           {/* Show Delete button only when membership impact info is available (deleteInfo) */}

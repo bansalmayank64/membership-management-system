@@ -1757,24 +1757,25 @@ function AdminPanel() {
                 <Card>
                   <CardContent>
                     <Typography variant="subtitle1" gutterBottom>Add New Category</Typography>
-                    <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
                       <TextField
                         label="Name"
                         value={newCategoryForm.name}
                         onChange={(e) => setNewCategoryForm(prev => ({ ...prev, name: e.target.value }))}
                         fullWidth
                       />
-                      <Button variant="contained" onClick={handleAddCategory} startIcon={<AddIcon />} disabled={loading}>Add</Button>
+                      <TextField
+                        label="Description (optional)"
+                        value={newCategoryForm.description}
+                        onChange={(e) => setNewCategoryForm(prev => ({ ...prev, description: e.target.value }))}
+                        fullWidth
+                        multiline
+                        rows={2}
+                      />
+                      <Box sx={{ mt: 1 }}>
+                        <Button variant="contained" onClick={handleAddCategory} startIcon={<AddIcon />} disabled={loading} fullWidth size="large" disableElevation sx={{ width: '100%', py: 1.5 }}>Add</Button>
+                      </Box>
                     </Box>
-                    <TextField
-                      label="Description (optional)"
-                      value={newCategoryForm.description}
-                      onChange={(e) => setNewCategoryForm(prev => ({ ...prev, description: e.target.value }))}
-                      fullWidth
-                      multiline
-                      rows={2}
-                      sx={{ mt: 2 }}
-                    />
                   </CardContent>
                 </Card>
               </Grid>

@@ -100,4 +100,80 @@ router.get('/monthly', async (req, res) => {
   }
 });
 
+// GET /api/finance/detail?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+// Returns aggregated totals, payments and expenses within the requested date range,
+// plus grouped breakdowns for frontend consumption.
+router.get('/detail', async (req, res) => {
+  try {
+    const startDate = req.query.startDate || null;
+    const endDate = req.query.endDate || null;
+
+    // Validation: both dates required
+    if (!startDate || !endDate) return res.status(400).json({ error: 'startDate and endDate are required (YYYY-MM-DD)' });
+
+    // Normalize: treat endDate as inclusive end-of-day
+    const paymentsQuery = `
+      SELECT p.*, s.name as student_name, s.seat_number
+      FROM payments p
+      LEFT JOIN students s ON p.student_id = s.id
+      WHERE p.payment_date >= $1::timestamp
+        AND p.payment_date < ($2::timestamp + INTERVAL '1 day')
+      ORDER BY p.payment_date DESC
+    `;
+
+    const expensesQuery = `
+      SELECT e.*, c.name as category_name
+      FROM expenses e
+      LEFT JOIN expense_categories c ON e.expense_category_id = c.id
+      WHERE e.expense_date >= $1::timestamp
+        AND e.expense_date < ($2::timestamp + INTERVAL '1 day')
+      ORDER BY e.expense_date DESC
+    `;
+
+  const paymentsResult = await pool.query(paymentsQuery, [startDate, endDate]);
+  const expensesResult = await pool.query(expensesQuery, [startDate, endDate]);
+
+  const payments = paymentsResult.rows || [];
+  const expenses = expensesResult.rows || [];
+
+  // Use server-side aggregate queries to compute totals using the same date range semantics
+  const totalIncomeRes = await pool.query(`SELECT COALESCE(SUM(amount),0) as total_income FROM payments WHERE payment_date >= $1::timestamp AND payment_date < ($2::timestamp + INTERVAL '1 day')`, [startDate, endDate]);
+  const totalExpensesRes = await pool.query(`SELECT COALESCE(SUM(amount),0) as total_expenses FROM expenses WHERE expense_date >= $1::timestamp AND expense_date < ($2::timestamp + INTERVAL '1 day')`, [startDate, endDate]);
+
+  const totalIncome = parseFloat(totalIncomeRes.rows[0].total_income) || 0;
+  const totalExpenses = parseFloat(totalExpensesRes.rows[0].total_expenses) || 0;
+
+    // Group expenses by category
+    const expenseByCategoryMap = {};
+    for (const e of expenses) {
+      const key = e.category_name || e.category || 'Uncategorized';
+      if (!expenseByCategoryMap[key]) expenseByCategoryMap[key] = { category: key, amount: 0, items: [] };
+      expenseByCategoryMap[key].amount += parseFloat(e.amount) || 0;
+      expenseByCategoryMap[key].items.push(e);
+    }
+
+    // Group payments by type
+    const paymentsByTypeMap = {};
+    for (const p of payments) {
+      const key = p.payment_type || 'other';
+      if (!paymentsByTypeMap[key]) paymentsByTypeMap[key] = { type: key, amount: 0, items: [] };
+      paymentsByTypeMap[key].amount += parseFloat(p.amount) || 0;
+      paymentsByTypeMap[key].items.push(p);
+    }
+
+    res.json({
+      payments,
+      expenses,
+      totalIncome,
+      totalExpenses,
+      net: totalIncome - totalExpenses,
+      expenseByCategory: Object.values(expenseByCategoryMap),
+      paymentsByType: Object.values(paymentsByTypeMap)
+    });
+  } catch (error) {
+    logger.error('Error fetching finance detail', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch finance detail' });
+  }
+});
+
 module.exports = router;

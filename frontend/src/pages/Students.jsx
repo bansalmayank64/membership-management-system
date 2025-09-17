@@ -650,7 +650,7 @@ function Students() {
   const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
 
   useEffect(() => {
-  fetchData();
+    fetchData();
     // Fetch membership fee options for dropdown previews
     (async () => {
       try {
@@ -706,7 +706,7 @@ function Students() {
       }
     })();
     // Clear location.state to avoid repeated open when navigating back
-    try { window.history.replaceState({}, document.title); } catch (e) {}
+    try { window.history.replaceState({}, document.title); } catch (e) { }
   }, [location?.state]);
 
   // Measure header height (including margin-bottom) and update sticky top offset
@@ -1248,10 +1248,7 @@ function Students() {
     }
 
     if (statusFilterLocal) {
-      if (statusFilterLocal === 'expiring') {
-        // Only items that are expiring soon and not already expired
-        data = data.filter(item => item.expiring && !item.expired);
-      } else if (statusFilterLocal === 'assigned') {
+      if (statusFilterLocal === 'assigned') {
         // Seats view: 'assigned' means the seat is occupied; Students view: student has a seat
         if (currentTab === 0) {
           data = data.filter(item => item.occupied);
@@ -1283,6 +1280,19 @@ function Students() {
           const todayUtcMs = getTodayUtcMidnightInTZ();
           return membershipUtcMs ? (membershipUtcMs < todayUtcMs) : true;
         });
+        // After filtering for expired, sort by membership_till descending (latest expiry first)
+        try {
+          data.sort((a, b) => {
+            const aMs = getUtcMidnightForDateInTZ(a.membership_till);
+            const bMs = getUtcMidnightForDateInTZ(b.membership_till);
+            const aVal = (aMs === null || aMs === undefined) ? Number.NEGATIVE_INFINITY : aMs;
+            const bVal = (bMs === null || bMs === undefined) ? Number.NEGATIVE_INFINITY : bMs;
+            // Ascending: earlier/older membership_till first
+            return aVal - bVal;
+          });
+        } catch (e) {
+          // ignore sorting errors
+        }
       } else if (statusFilterLocal === 'expiring') {
         // Students view: filter students whose membership expires in next 7 days
         data = data.filter(item => {
@@ -1296,6 +1306,17 @@ function Students() {
           const sevenDaysFromNowUtcMs = todayUtcMs + (7 * MS_PER_DAY);
           return membershipUtcMs ? (membershipUtcMs > todayUtcMs && membershipUtcMs <= sevenDaysFromNowUtcMs) : false;
         });
+        // After filtering for expiring, sort by membership_till ascending (earliest first) so items expiring sooner appear first
+        try {
+          data.sort((a, b) => {
+            const aMs = getUtcMidnightForDateInTZ(a.membership_till) || 0;
+            const bMs = getUtcMidnightForDateInTZ(b.membership_till) || 0;
+            // Ascending: earlier expiry dates first
+            return aMs - bMs;
+          });
+        } catch (e) {
+          // ignore sorting errors
+        }
       }
     }
 
@@ -1401,7 +1422,7 @@ function Students() {
       return;
     }
 
-  // Aadhaar is optional for create; backend will validate format/uniqueness only if provided
+    // Aadhaar is optional for create; backend will validate format/uniqueness only if provided
 
     if (!newStudent.address || !newStudent.address.trim()) {
       setSnackbarMessage('*Address is required');
@@ -2304,9 +2325,16 @@ function Students() {
       logger.debug('[processPayment] API response', { status: response.status });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         logger.error('❌ [processPayment] API request failed', errorData);
-        throw new Error(errorData.error || `Failed to add payment (Status: ${response.status})`);
+        // Surface server-provided error and details to the user via snackbar
+        const serverMessage = errorData.error || errorData.message || `Failed to add payment (Status: ${response.status})`;
+        const details = Array.isArray(errorData.details) && errorData.details.length ? ` — ${errorData.details.join(', ')}` : '';
+        setSnackbarMessage(`${serverMessage}${details}`);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        // Throw to allow upstream logging/flows to continue
+        throw new Error(serverMessage);
       }
 
       const responseData = await response.json();
@@ -2342,7 +2370,17 @@ function Students() {
     } catch (err) {
       logger.error('❌ [processPayment] Error occurred during payment creation', err);
       logger.debug('🔍 [processPayment] Error details', { message: err.message, studentId: selectedItemForAction?.id });
-      handleApiError(err, 'Failed to add payment');
+      // If the error was already shown in snackbar above, avoid duplicating; otherwise show a generic/server message
+      if (!snackbarOpen) {
+        // Token expiry or other global errors can be handled by global handler
+        if (err?.response?.data?.error === 'TOKEN_EXPIRED') {
+          handleApiError(err, 'Failed to add payment');
+        } else {
+          setSnackbarMessage(err.message || 'Failed to add payment');
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+        }
+      }
     } finally {
       setPaymentLoading(false);
       logger.debug('🔄 [processPayment] Payment loading state set to false');
@@ -2478,7 +2516,7 @@ function Students() {
         return;
       }
     }
-  // Aadhaar is optional for edit; backend will validate format/uniqueness only if provided
+    // Aadhaar is optional for edit; backend will validate format/uniqueness only if provided
     // Check if aadhaar is used by another student
     try {
       const cleanAadhaar = (editStudent.aadhaarNumber || '').replace(/\D/g, '');
@@ -4810,19 +4848,21 @@ function Students() {
         loading={historyLoading}
         error={error}
         totalPaid={viewStudentTotalPaid}
-        onEdit={(s) => { setViewStudentOpen(false); setSelectedItemForAction({ ...s }); setEditStudent({
-          id: s.id,
-          name: s.name,
-          contactNumber: s.contact_number,
-          sex: s.sex,
-          seatNumber: s.seat_number || '',
-          fatherName: s.father_name || '',
-          membershipDate: s.membership_date ? isoToISTDateInput(s.membership_date) : '',
-          membershipTill: s.membership_till ? isoToISTDateInput(s.membership_till) : '',
-          membershipType: s.membership_type || s.membershipType,
-          aadhaarNumber: s.aadhaar_number || s.aadhaarNumber || '',
-          address: s.address || ''
-        }); setEditStudentOpen(true); }}
+        onEdit={(s) => {
+          setViewStudentOpen(false); setSelectedItemForAction({ ...s }); setEditStudent({
+            id: s.id,
+            name: s.name,
+            contactNumber: s.contact_number,
+            sex: s.sex,
+            seatNumber: s.seat_number || '',
+            fatherName: s.father_name || '',
+            membershipDate: s.membership_date ? isoToISTDateInput(s.membership_date) : '',
+            membershipTill: s.membership_till ? isoToISTDateInput(s.membership_till) : '',
+            membershipType: s.membership_type || s.membershipType,
+            aadhaarNumber: s.aadhaar_number || s.aadhaarNumber || '',
+            address: s.address || ''
+          }); setEditStudentOpen(true);
+        }}
         onViewPayments={(s) => { setSelectedItemForAction({ ...s }); handlePaymentHistory(s); }}
       />
 

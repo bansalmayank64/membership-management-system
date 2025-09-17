@@ -93,6 +93,7 @@ export default function ActivityLog() {
                   <MenuItem value="student">Student</MenuItem>
                   <MenuItem value="seat">Seat</MenuItem>
                   <MenuItem value="payment">Payment</MenuItem>
+                  <MenuItem value="expense">Expense</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 200 }}>
