@@ -1,13 +1,14 @@
 // Lightweight finance helper to fetch detailed payments and expenses for a period
 const API_BASE = '/api';
 
-export async function getFinanceDetails({ startDate, endDate }) {
+export async function getFinanceDetails({ startDate, endDate, groupPageSize } = {}) {
   // startDate/endDate expected as ISO date strings (YYYY-MM-DD) or timestamp; backend accepts ISO
   try {
     // Prefer server-side pre-aggregated detail endpoint for better performance
     const params = new URLSearchParams();
     if (startDate) params.set('startDate', startDate);
     if (endDate) params.set('endDate', endDate);
+  if (groupPageSize !== undefined && groupPageSize !== null) params.set('groupPageSize', String(groupPageSize));
 
     try {
       const resp = await fetch(`${API_BASE}/finance/detail?${params.toString()}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
@@ -80,4 +81,28 @@ export async function getFinanceDetails({ startDate, endDate }) {
   }
 }
 
-export default { getFinanceDetails };
+// Default export used by components that import a financeService default object.
+// Include both helpers so callers can use financeService.getFinanceDetails and financeService.getGroupItems
+export default { getFinanceDetails, getGroupItems };
+
+export async function getGroupItems({ group, key, startDate, endDate, page = 0, pageSize = 10 }) {
+  const params = new URLSearchParams();
+  if (group) params.set('group', group);
+  if (key !== undefined && key !== null) params.set('key', key);
+  if (startDate) params.set('startDate', startDate);
+  if (endDate) params.set('endDate', endDate);
+  params.set('page', String(page));
+  params.set('pageSize', String(pageSize));
+
+  const resp = await fetch(`${API_BASE}/finance/group-items?${params.toString()}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
+  if (!resp.ok) {
+    let body = null;
+    try { body = await resp.json(); } catch (e) { try { body = await resp.text(); } catch (e2) { body = null; } }
+    const msg = `Failed to fetch group items (${resp.status})${body && body.error ? ': ' + body.error : body ? ': ' + JSON.stringify(body) : ''}`;
+    const err = new Error(msg);
+    err.status = resp.status;
+    err.body = body;
+    throw err;
+  }
+  return resp.json();
+}

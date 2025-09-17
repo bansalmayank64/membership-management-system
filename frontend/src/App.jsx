@@ -11,6 +11,7 @@ import Payments from './pages/Payments';
 import Expenses from './pages/Expenses';
 import AdminPanel from './pages/AdminPanel';
 import ActivityLog from './pages/ActivityLog';
+import BalanceSheet from './components/BalanceSheet';
 
 function App() {
   return (
@@ -38,6 +39,11 @@ function App() {
             <Route path="/expenses" element={
               <ProtectedRoute>
                 <Expenses />
+              </ProtectedRoute>
+            } />
+            <Route path="/balance-sheet" element={
+              <ProtectedRoute>
+                <BalanceSheet />
               </ProtectedRoute>
             } />
             <Route path="/admin" element={

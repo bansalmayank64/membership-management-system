@@ -507,7 +507,12 @@ export default function Expenses() {
                       endDate = `${m.year}-${mm}-${String(lastDay).padStart(2, '0')}`;
                     }
                     setBalanceContext({ startDate, endDate, title: `${m.monthLabel}` });
-                    setBalanceOpen(true);
+                    // Navigate to full page balance sheet
+                    const params = new URLSearchParams();
+                    if (startDate) params.set('startDate', startDate);
+                    if (endDate) params.set('endDate', endDate);
+                    if (m.monthLabel) params.set('title', m.monthLabel);
+                    window.location.href = `/balance-sheet?${params.toString()}`;
                   }}
                 >
                   <CardContent>
@@ -718,14 +723,7 @@ export default function Expenses() {
         </DialogActions>
       </Dialog>
 
-      <Footer />
-      <BalanceSheet
-        open={balanceOpen}
-        onClose={() => setBalanceOpen(false)}
-        startDate={balanceContext?.startDate}
-        endDate={balanceContext?.endDate}
-        title={balanceContext?.title}
-      />
+  <Footer />
     </Box>
   );
 }

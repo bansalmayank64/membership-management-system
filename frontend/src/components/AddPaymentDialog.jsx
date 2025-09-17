@@ -14,7 +14,8 @@ import {
   Box,
   Typography,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Alert
 } from '@mui/material';
 import { Autocomplete } from '@mui/material';
 import { CalendarToday as CalendarTodayIcon } from '@mui/icons-material';
@@ -42,6 +43,9 @@ const AddPaymentDialog = ({
   // Loading and UI state
   loading = false,
   isMobile = false
+  ,
+  // optional error message (server validation etc.)
+  error = null
 }) => {
   const theme = useTheme();
   const { user } = useAuth();
@@ -116,6 +120,10 @@ const AddPaymentDialog = ({
       <DialogTitle>{getDialogTitle()}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
+          {/* Server / parent-provided error (e.g. refund validation) */}
+          {error && (
+            <Alert severity="error">{error}</Alert>
+          )}
           {/* Student selector - only show for Payments.jsx */}
           {!selectedStudent && students.length > 0 && (
             <FormControl fullWidth>

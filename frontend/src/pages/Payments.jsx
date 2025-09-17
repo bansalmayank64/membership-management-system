@@ -954,6 +954,7 @@ function Payments() {
         membershipExtensionDays={membershipExtensionDays}
         loading={paymentLoadingLocal}
         isMobile={isMobile}
+  error={error}
       />
 
       {/* Edit Payment Dialog */}

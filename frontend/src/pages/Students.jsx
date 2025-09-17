@@ -2031,7 +2031,14 @@ function Students() {
         if (!payResp.ok) {
           const errBody = await payResp.json().catch(() => ({}));
           logger.error('❌ [confirmDeactivateStudent] Refund payment failed', errBody);
-          throw new Error(errBody.error || 'Failed to create refund payment');
+          // Surface server-provided validation messages (e.g., refund > total paid) to the user
+          const serverMessage = errBody.error || errBody.message || 'Failed to create refund payment';
+          const details = Array.isArray(errBody.details) && errBody.details.length ? ` — ${errBody.details.join(', ')}` : '';
+          setSnackbarMessage(`${serverMessage}${details}`);
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+          // Abort deactivate flow since refund failed
+          return;
         }
       }
 
