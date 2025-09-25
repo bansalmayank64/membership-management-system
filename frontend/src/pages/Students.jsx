@@ -1811,6 +1811,38 @@ function Students() {
   };
 
   // Deactivate student handler
+  // Deactivate Only: directly deactivate student without refund
+  const handleDeactivateOnly = async () => {
+    if (!selectedItemForAction) return;
+    setProcessingDeactivate(true);
+    try {
+      // API call to deactivate student without refund
+      const resp = await fetch(`/api/students/${selectedItemForAction.id}/deactivate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ refund: false })
+      });
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        logger.error('❌ [handleDeactivateOnly] Student update failed', { errorText });
+        throw new Error('Failed to deactivate student');
+      }
+      setSnackbarMessage('Student deactivated successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      setDeleteConfirmOpen(false);
+      handleActionClose();
+      fetchData();
+    } catch (err) {
+      logger.error('❌ [handleDeactivateOnly] Error', err);
+      handleApiError(err, 'Failed to deactivate student');
+    } finally {
+      setProcessingDeactivate(false);
+    }
+  };
   const handleDeactivateStudent = () => {
     logger.debug('🔴 [handleDeactivateStudent] Called', { selectedItemForAction });
     logger.debug('🔴 [handleDeactivateStudent] Student name', { name: selectedItemForAction?.name });
@@ -4913,7 +4945,15 @@ function Students() {
             onClick={confirmDeactivateStudent}
             disabled={processingDeactivate}
           >
-            {processingDeactivate ? 'Processing...' : (deactivateRefundAmount > 0 ? `Deactivate & Refund ₹${deactivateRefundAmount}` : 'Deactivate Student')}
+            {processingDeactivate ? 'Processing...' : (deactivateRefundAmount > 0 ? `Deactivate & Refund ₹${deactivateRefundAmount}` : 'Deactivate & Refund')}
+          </Button>
+          <Button
+            variant="outlined"
+            color="warning"
+            onClick={handleDeactivateOnly}
+            disabled={processingDeactivate}
+          >
+            {processingDeactivate ? 'Processing...' : 'Deactivate Only'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -750,6 +750,29 @@ router.patch('/:id/activate', async (req, res) => {
   }
 });
 
+// POST /api/students/:id/deactivate - Deactivate student (no refund)
+router.post('/:id/deactivate', async (req, res) => {
+  const requestId = `deactivate-student-${Date.now()}`;
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'Student id required' });
+
+    // Only allow if user is admin or authorized (add your auth logic as needed)
+    // if (!req.user || !req.user.isAdmin) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Set membership_status to 'inactive', clear seat assignment, set membership_till to today
+    const today = new Date();
+    const todayIso = today.toISOString().slice(0, 10);
+    const updateQuery = `UPDATE students SET membership_status = 'inactive', seat_number = NULL, membership_till = $1, updated_at = CURRENT_TIMESTAMP, modified_by = $2 WHERE id = $3 RETURNING *`;
+    const result = await pool.query(updateQuery, [todayIso, req.user?.userId || req.user?.id || 1, id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
+    res.json({ success: true, student: result.rows[0] });
+  } catch (err) {
+    logger.requestError('POST', `/api/students/${req.params.id}/deactivate`, requestId, Date.now(), err);
+    res.status(500).json({ error: 'Failed to deactivate student', details: err.message });
+  }
+});
+
 // DELETE /api/students/:id - Delete student
 router.delete('/:id', async (req, res) => {
   const startTime = Date.now();
