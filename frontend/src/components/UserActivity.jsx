@@ -22,8 +22,16 @@ function chipForType(t) {
   else if (tt === 'expense') color = 'warning';
   else if (tt === 'student') color = 'info';
   else if (tt === 'seat') color = 'secondary';
+  else if (tt === 'deactivate' || tt === 'deactivated') color = 'error';
+  else if (tt === 'unassign' || tt === 'unassigned') color = 'default';
   else if (tt === 'activity' || tt === 'login' || tt === 'auth') color = 'primary';
-  return { label: t || '', color };
+  const labelMap = {
+    deactivate: 'Deactivated',
+    deactivated: 'Deactivated',
+    unassign: 'Unassigned',
+    unassigned: 'Unassigned'
+  };
+  return { label: labelMap[tt] || t || '', color };
 }
 
 function formatToIST (dateString) {
@@ -165,12 +173,27 @@ function UpdateDiff({ details, subjectType, subjectId, timestamp }) {
       const d1 = normalizePrev(prev, details, subjectType);
       const d2 = details || {};
       const changed = {};
+      const isNullish = v => (v === null || typeof v === 'undefined' || (typeof v === 'string' && v.trim() === ''));
+      // Treat undefined, null, and empty string as equivalent "no value"; avoid noise like undefined -> null
+      const equivalent = (a, b) => {
+        if (a === b) return true;
+        if (isNullish(a) && isNullish(b)) return true;
+        // numeric/string loose equivalence (e.g., '5' vs 5) not needed for now
+        return false;
+      };
+      // Optionally ignore certain fields (internal metadata) if they appear
+      const ignoreFields = new Set(['updated_at','created_at','action_timestamp','modified_by_name']);
       // compare shallow fields
       Object.keys(d2).forEach(k => {
+        if (ignoreFields.has(k)) return; // skip ignored fields entirely
         const v1 = d1[k];
         const v2 = d2[k];
-        // stringify for safe comparison of objects/numbers
-        if (JSON.stringify(v1) !== JSON.stringify(v2)) changed[k] = { from: v1, to: v2 };
+        // If both sides are objects (non-null), fall back to JSON compare
+        if (typeof v1 === 'object' && v1 && typeof v2 === 'object' && v2) {
+          if (JSON.stringify(v1) !== JSON.stringify(v2)) changed[k] = { from: v1, to: v2 };
+          return;
+        }
+        if (!equivalent(v1, v2)) changed[k] = { from: v1, to: v2 };
       });
       setDiff(changed);
     } catch (err) {
@@ -209,9 +232,7 @@ function UpdateDiff({ details, subjectType, subjectId, timestamp }) {
             <Typography variant="body2" color="text.primary">To: {String(v.to)}</Typography>
           </Box>
         ))
-      ) : (
-        <Typography variant="caption" color="text.secondary">No visible field changes</Typography>
-      )}
+      ) : null}
     </Box>
   );
 }
@@ -336,14 +357,17 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
           const initials = (actor || 'S').toString().split(' ').map(s => s[0]).join('').slice(0,2).toUpperCase();
           // Prefer explicit student name fields from payloads
           const studentName = a.details?.name || a.details?.student_name || a.details?.studentName || a.details?.student || a.subjectName || a.studentName || null;
+          const atypeLower = t.toString().toLowerCase();
+          const subjectLower = (a.subjectType || a.subject_type || '').toString().toLowerCase();
+          const isPayment = subjectLower === 'payment' || atypeLower === 'monthly_fee' || atypeLower.includes('payment') || atypeLower.includes('fee');
+          const isLogin = atypeLower === 'login' || atypeLower === 'auth';
           return (
             <Card key={idx} variant="outlined" sx={{ display: 'flex', flexDirection: 'column', borderLeft: `4px solid ${borderColor}`, overflow: 'hidden' }}>
               <CardContent sx={{ pb: 1 }}>
                 <Stack direction="row" spacing={2} alignItems="flex-start">
                   <Box sx={{ minWidth: 0, flex: 1 }}>
                         <Typography variant="caption" color="text.secondary">{formatDateTimeForDisplay(a.timestamp)}</Typography>
-                        {/* Show amount prominently for payments; avoid repeating the action type (chip shows it) */}
-                        {a.details && a.details.amount ? (
+                        {isPayment && a.details?.amount ? (
                           <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 0.5 }}>₹{a.details.amount}</Typography>
                         ) : null}
                         {studentName ? (
@@ -360,61 +384,55 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                     <Typography variant="caption" color="text.secondary">{actor}</Typography>
                   </Box>
                 </Stack>
-                <Box sx={{ mt: 1 }}>
-                    <Paper variant="outlined" sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1, maxHeight: 140, overflow: 'auto' }}>
-                    {/* For UPDATE actions show a concise diff: only changed fields */}
-                    {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
-                      // For UPDATE actions show a diff for most subjects; but for expense subjects show a compact summary of key fields
-                        ((a.subjectType || a.subject_type || '').toString().toLowerCase() === 'expense') ? (
-                        <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />
-                      ) : (
-                        <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
-                      )
-                    ) : (
-                      // For expense/create or expense-type actions show only amount/category/description; otherwise fallback to existing payment handling or generic pretty details
-                      (() => {
-                        const atype = (a.type || a.action_type || '').toString().toLowerCase();
-                        const subj = (a.subjectType || a.subject_type || '').toString().toLowerCase();
-                        if (atype.includes('expense') || subj === 'expense') {
-                          return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />;
-                        }
-                        if (atype === 'monthly_fee' || subj === 'payment' || atype.includes('payment')) {
-                          const d = a.details || {};
-                          return (
-                            <Box>
-                              <Box sx={{ display: 'grid', gap: 0.5 }}>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Amount</Typography>
-                                  <Typography variant="body2">₹{d.amount ?? '—'}</Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Remarks</Typography>
-                                  <Typography variant="body2">{d.remarks ?? '—'}</Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Payment date</Typography>
-                                  <Typography variant="body2">{formatDateTimeForDisplay(d.payment_date || a.timestamp)}</Typography>
-                                </Box>
-                                {d.student_name ? (
-                                  <Box sx={{ display: 'flex', gap: 1 }}>
-                                    <Typography variant="caption" color="text.secondary" sx={{ minWidth: 110, fontWeight: 700 }}>Student</Typography>
-                                    <Typography variant="body2">{d.student_name}</Typography>
-                                  </Box>
-                                ) : null}
-                              </Box>
-                            </Box>
-                          );
-                        }
-                        // parse details if JSON string
-                        let parsed = a.details;
-                        if (typeof parsed === 'string') {
-                          try { parsed = JSON.parse(parsed); } catch (e) { /* leave string */ }
-                        }
-                        return <PrettyDetails details={parsed} />;
-                      })()
-                    )}
-                  </Paper>
-                </Box>
+                {/* Simplified content section */}
+                {(() => {
+                  if (isPayment) {
+                    const d = a.details || {};
+                    return (
+                      <Box sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          {formatDateTimeForDisplay(d.payment_date || a.timestamp)}
+                          {d.remarks ? ` • ${d.remarks}` : ''}
+                          {d.student_name ? ` • ${d.student_name}` : ''}
+                        </Typography>
+                      </Box>
+                    );
+                  }
+                  if (isLogin) {
+                    return (
+                      <Box sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary">User {actor} logged in</Typography>
+                      </Box>
+                    );
+                  }
+                  // Fallback: show existing rich panel only for non-payment/login
+                  return (
+                    <Box sx={{ mt: 1 }}>
+                      <Paper variant="outlined" sx={{ p: 1, bgcolor: 'action.hover', borderRadius: 1, maxHeight: 140, overflow: 'auto' }}>
+                        {((a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE') && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id) ? (
+                          ((a.subjectType || a.subject_type || '').toString().toLowerCase() === 'expense') ? (
+                            <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />
+                          ) : (
+                            <UpdateDiff details={a.details} subjectType={a.subjectType || a.subject_type} subjectId={a.subjectId || a.subject_id} timestamp={a.timestamp} />
+                          )
+                        ) : (
+                          (() => {
+                            const atype = (a.type || a.action_type || '').toString().toLowerCase();
+                            const subj = (a.subjectType || a.subject_type || '').toString().toLowerCase();
+                            if (atype.includes('expense') || subj === 'expense') {
+                              return <ExpenseSummary details={a.details} expenseCategoriesMap={expenseCategoriesMap} actionType={a.type || a.action_type} />;
+                            }
+                            let parsed = a.details;
+                            if (typeof parsed === 'string') {
+                              try { parsed = JSON.parse(parsed); } catch (e) { /* ignore */ }
+                            }
+                            return <PrettyDetails details={parsed} />;
+                          })()
+                        )}
+                      </Paper>
+                    </Box>
+                  );
+                })()}
               </CardContent>
             </Card>
           );

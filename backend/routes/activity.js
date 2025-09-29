@@ -32,20 +32,67 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     // Create union of history sources (no per-table WHERE) and apply filters in outer query for performance
     const snippets = [];
-  snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, id as subject_id, 'student' as subject_type, to_jsonb(json_build_object('name', name, 'aadhaar', aadhaar_number, 'contact', contact_number, 'seat', seat_number)) as details FROM students_history`);
-  snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, student_id as subject_id, 'seat' as subject_type, to_jsonb(json_build_object('seat_number', seat_number, 'student_name', student_name, 'occupant_sex', occupant_sex)) as details FROM seats_history`);
-  snippets.push(`SELECT p.created_at as ts, p.payment_type as action_type, p.modified_by, p.student_id as subject_id, 'payment' as subject_type, to_jsonb(json_build_object('amount', p.amount, 'payment_date', p.payment_date, 'remarks', p.remarks, 'student_name', s.name)) as details FROM payments p LEFT JOIN students s ON p.student_id = s.id`);
-  // Expense history table was removed; rely on activity_logs and the main expenses table for expense events
-  // For activity_logs, attempt to enrich expense metadata with category_name when possible
-  snippets.push(`SELECT al.created_at as ts, al.action_type as action_type, al.actor_user_id as modified_by, al.subject_id as subject_id, al.subject_type as subject_type, (
-    CASE WHEN al.subject_type = 'expense' THEN (
-      -- try to parse metadata and, if it has expense_category_id, include category_name from expense_categories
-      (to_jsonb(al.metadata) || COALESCE(to_jsonb(json_build_object('category_name', c.name)), '{}'::jsonb))
-    ) ELSE al.metadata END
-  ) as details FROM activity_logs al LEFT JOIN LATERAL (
-    SELECT name FROM expense_categories c WHERE c.id = (CASE WHEN (al.metadata->>'expense_category_id') IS NOT NULL THEN (al.metadata->>'expense_category_id')::int WHEN (al.metadata->>'category_id') IS NOT NULL THEN (al.metadata->>'category_id')::int WHEN (al.metadata->>'expenseCategory') IS NOT NULL THEN (al.metadata->>'expenseCategory')::int ELSE NULL END)
-  ) c ON true`);
-
+    // Raw history sources
+    // Base student history events, excluding the specific UPDATE rows that transition to inactive (those are replaced by synthetic 'deactivated' events)
+    snippets.push(`SELECT action_timestamp as ts,
+             action as action_type,
+             modified_by,
+             id as subject_id,
+             'student' as subject_type,
+             to_jsonb(json_build_object('name', name, 'aadhaar', aadhaar_number, 'contact', contact_number, 'seat', seat_number, 'membership_status', membership_status)) as details
+      FROM (
+        SELECT sh.*,
+               lag(membership_status) over (partition by id order by action_timestamp) as prev_status,
+               lag(name) over (partition by id order by action_timestamp) as prev_name,
+               lag(aadhaar_number) over (partition by id order by action_timestamp) as prev_aadhaar,
+               lag(contact_number) over (partition by id order by action_timestamp) as prev_contact,
+               lag(seat_number) over (partition by id order by action_timestamp) as prev_seat
+        FROM students_history sh
+      ) sh
+      WHERE NOT (
+          -- Exclude deactivation transition (handled by synthetic 'deactivated')
+          action = 'UPDATE' AND membership_status = 'inactive' AND COALESCE(prev_status,'') <> 'inactive'
+        )
+        AND NOT (
+          -- Exclude no-op UPDATEs where none of the key fields changed
+          action = 'UPDATE'
+          AND COALESCE(name,'') = COALESCE(prev_name,'')
+          AND COALESCE(aadhaar_number,'') = COALESCE(prev_aadhaar,'')
+          AND COALESCE(contact_number,'') = COALESCE(prev_contact,'')
+          AND COALESCE(seat_number,'') = COALESCE(prev_seat,'')
+          AND (membership_status = COALESCE(prev_status, membership_status))
+        )`);
+    // Seat history: exclude rows whose assignment already ended (end_date NOT NULL) because we emit a synthetic 'unassigned' event for those
+    snippets.push(`SELECT action_timestamp as ts, action as action_type, modified_by, student_id as subject_id, 'seat' as subject_type, to_jsonb(json_build_object('seat_number', seat_number, 'student_name', student_name, 'occupant_sex', occupant_sex, 'active_assignment', (end_date IS NULL))) as details FROM seats_history WHERE end_date IS NULL`);
+    snippets.push(`SELECT p.created_at as ts, p.payment_type as action_type, p.modified_by, p.student_id as subject_id, 'payment' as subject_type, to_jsonb(json_build_object('amount', p.amount, 'payment_date', p.payment_date, 'remarks', p.remarks, 'student_name', s.name)) as details FROM payments p LEFT JOIN students s ON p.student_id = s.id`);
+    // activity_logs (including expenses) with category enrichment
+    snippets.push(`SELECT al.created_at as ts, al.action_type as action_type, al.actor_user_id as modified_by, al.subject_id as subject_id, al.subject_type as subject_type, (
+      CASE WHEN al.subject_type = 'expense' THEN (
+        (to_jsonb(al.metadata) || COALESCE(to_jsonb(json_build_object('category_name', c.name)), '{}'::jsonb))
+      ) ELSE al.metadata END
+    ) as details FROM activity_logs al LEFT JOIN LATERAL (
+      SELECT name FROM expense_categories c WHERE c.id = (CASE WHEN (al.metadata->>'expense_category_id') IS NOT NULL THEN (al.metadata->>'expense_category_id')::int WHEN (al.metadata->>'category_id') IS NOT NULL THEN (al.metadata->>'category_id')::int WHEN (al.metadata->>'expenseCategory') IS NOT NULL THEN (al.metadata->>'expenseCategory')::int ELSE NULL END)
+    ) c ON true`);
+    // Synthetic DEACTIVATE event: only on transition to inactive (exclude already inactive to inactive)
+    snippets.push(`SELECT sh.action_timestamp as ts, 'deactivated' as action_type, sh.modified_by, sh.id as subject_id, 'student' as subject_type,
+      to_jsonb(json_build_object(
+        'name', sh.name,
+        'membership_status', sh.membership_status,
+        'seat_number_before', sh.prev_seat_number,
+        'seat_number_after', sh.seat_number
+      )) as details
+      FROM (
+        SELECT sh.*,
+               lag(sh.membership_status) over (partition by sh.id order by sh.action_timestamp) as prev_status,
+               lag(sh.seat_number) over (partition by sh.id order by sh.action_timestamp) as prev_seat_number
+        FROM students_history sh
+      ) sh
+      WHERE sh.membership_status = 'inactive' AND sh.action = 'UPDATE' AND COALESCE(sh.prev_status,'') <> 'inactive'`);
+    // Synthetic UNASSIGN event: seat assignment concluded (seat history row ended)
+    snippets.push(`SELECT sh.end_date as ts, 'unassigned' as action_type, sh.modified_by, sh.student_id as subject_id, 'seat' as subject_type,
+      to_jsonb(json_build_object('seat_number', sh.seat_number, 'student_name', sh.student_name)) as details
+      FROM seats_history sh
+      WHERE sh.end_date IS NOT NULL AND sh.action = 'ASSIGN'`);
     if (snippets.length === 0) return res.json({ activities: [], total: 0 });
 
     const union = snippets.join('\nUNION ALL\n');
@@ -69,13 +116,17 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     if (type && type !== 'all') {
-      const allowed = ['student','seat','payment','expense','activity'];
-      if (allowed.includes(type)) {
+      const allowedSubjects = ['student','seat','payment','expense','activity'];
+      let typeFilter = type;
+      const tl = type.toString().toLowerCase();
+  if (tl === 'deactivated' || tl === 'deactivate') typeFilter = 'deactivated';
+  if (tl === 'unassigned' || tl === 'unassign') typeFilter = 'unassigned';
+      if (allowedSubjects.includes(typeFilter)) {
         outerClauses.push(`t.subject_type = $${pidx++}`);
-        outerParams.push(type);
+        outerParams.push(typeFilter);
       } else {
         outerClauses.push(`t.action_type = $${pidx++}`);
-        outerParams.push(type);
+        outerParams.push(typeFilter);
       }
     }
 

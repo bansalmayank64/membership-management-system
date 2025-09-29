@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Box, Typography, FormControl, InputLabel, Select, MenuItem, Paper, CircularProgress, Alert, Grid, Stack } from '@mui/material';
+import { Container, Box, Typography, FormControl, InputLabel, Select, MenuItem, Paper, CircularProgress, Alert, Grid, Stack, ListItemIcon } from '@mui/material';
+import { AllInclusive, Person, EventSeat, Payment as PaymentIcon, ReceiptLong, PersonOff, PersonRemove } from '@mui/icons-material';
 import UserActivity from '../components/UserActivity';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -89,11 +90,34 @@ export default function ActivityLog() {
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center" justifyContent={{ xs: 'center', md: 'flex-start' }}>
               <FormControl size="small" sx={{ minWidth: 200, mr: { md: 2 } }}>
                 <Select displayEmpty value={selectedType} onChange={(e) => { const v = e.target.value; setSelectedType(v); setPage(0); fetchActivities(0, selectedUser, v); }}>
-                  <MenuItem value="all">(All types)</MenuItem>
-                  <MenuItem value="student">Student</MenuItem>
-                  <MenuItem value="seat">Seat</MenuItem>
-                  <MenuItem value="payment">Payment</MenuItem>
-                  <MenuItem value="expense">Expense</MenuItem>
+                  <MenuItem value="all">
+                    <ListItemIcon sx={{ minWidth: 32 }}><AllInclusive fontSize="small" /></ListItemIcon>
+                    (All types)
+                  </MenuItem>
+                  <MenuItem value="student">
+                    <ListItemIcon sx={{ minWidth: 32 }}><Person fontSize="small" /></ListItemIcon>
+                    Student
+                  </MenuItem>
+                  <MenuItem value="seat">
+                    <ListItemIcon sx={{ minWidth: 32 }}><EventSeat fontSize="small" /></ListItemIcon>
+                    Seat
+                  </MenuItem>
+                  <MenuItem value="payment">
+                    <ListItemIcon sx={{ minWidth: 32 }}><PaymentIcon fontSize="small" /></ListItemIcon>
+                    Payment
+                  </MenuItem>
+                  <MenuItem value="expense">
+                    <ListItemIcon sx={{ minWidth: 32 }}><ReceiptLong fontSize="small" /></ListItemIcon>
+                    Expense
+                  </MenuItem>
+                  <MenuItem value="deactivated">
+                    <ListItemIcon sx={{ minWidth: 32 }}><PersonOff fontSize="small" color="error" /></ListItemIcon>
+                    Deactivated Students
+                  </MenuItem>
+                  <MenuItem value="unassigned">
+                    <ListItemIcon sx={{ minWidth: 32 }}><PersonRemove fontSize="small" /></ListItemIcon>
+                    Unassigned Students
+                  </MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 200 }}>
