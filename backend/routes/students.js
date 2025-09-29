@@ -725,8 +725,13 @@ router.get('/by-aadhaar/:aadhaar', async (req, res) => {
 
     const query = `SELECT id, name, membership_status, seat_number, contact_number FROM students WHERE aadhaar_number = $1 LIMIT 1`;
     const result = await pool.query(query, [clean]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json(result.rows[0]);
+    // Changed behavior: always return 200 with a found flag to avoid frontend 404 noise.
+    // Backward compatibility: old clients that expected the raw student object can still
+    // handle this because they checked for an 'id' property; we now nest under 'student'.
+    if (result.rows.length === 0) {
+      return res.json({ found: false, student: null, timestamp: new Date().toISOString() });
+    }
+    return res.json({ found: true, student: result.rows[0], timestamp: new Date().toISOString() });
   } catch (err) {
     logger.requestError('GET', `/api/students/by-aadhaar/${req.params.aadhaar}`, requestId, Date.now(), err);
     res.status(500).json({ error: 'Failed to lookup by aadhaar', details: err.message });

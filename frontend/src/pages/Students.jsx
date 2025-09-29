@@ -2562,9 +2562,11 @@ function Students() {
       if (cleanAadhaar) {
         const lookupResp = await fetch(`/api/students/by-aadhaar/${cleanAadhaar}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } });
         if (lookupResp.ok) {
-          const found = await lookupResp.json();
-          // If found and id differs, abort
-          if (found && found.id && Number(found.id) !== Number(studentId)) {
+          const payload = await lookupResp.json();
+          // New format: { found: boolean, student: {...} }
+          const candidate = payload && (payload.student || (payload.found === undefined ? payload : null));
+          // Backward compatibility: if old format (direct student object) still comes, candidate will be that object
+          if (candidate && candidate.id && Number(candidate.id) !== Number(studentId)) {
             setSnackbarMessage('Aadhaar number already exists for another student. Please use a unique Aadhaar.');
             setSnackbarSeverity('error');
             setSnackbarOpen(true);
