@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Paper, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, IconButton, Card, CardContent, Chip, useMediaQuery, Stack, TablePagination, Avatar } from '@mui/material';
+import { Box, Paper, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel, Table, TableHead, TableRow, TableCell, TableBody, TableContainer, IconButton, Card, CardContent, Chip, useMediaQuery, Stack, TablePagination, Avatar, Tooltip } from '@mui/material';
+import {
+  Payment as PaymentIcon,
+  ReceiptLong as ReceiptLongIcon,
+  Person as PersonIcon,
+  PersonOff as PersonOffIcon,
+  PersonRemove as PersonRemoveIcon,
+  EventSeat as EventSeatIcon,
+  Edit as EditIcon,
+  AddCircle as AddCircleIcon,
+  Delete as DeleteIcon,
+  History as HistoryIcon
+} from '@mui/icons-material';
 import SearchIcon from '@mui/icons-material/Search';
 import dayjs from 'dayjs';
 import { formatDateTimeForDisplay } from '../utils/dateUtils';
@@ -32,6 +44,24 @@ function chipForType(t) {
     unassigned: 'Unassigned'
   };
   return { label: labelMap[tt] || t || '', color };
+}
+
+// Return an icon element for a given action/subject type
+function activityIcon({ actionType, subjectType }) {
+  const t = (actionType || '').toString().toLowerCase();
+  const s = (subjectType || '').toString().toLowerCase();
+  const commonProps = { fontSize: 'small' };
+  if (t.includes('payment') || t === 'monthly_fee' || s === 'payment') return <PaymentIcon {...commonProps} />;
+  if (t.includes('expense') || s === 'expense') return <ReceiptLongIcon {...commonProps} />;
+  if (t === 'deactivated') return <PersonOffIcon {...commonProps} color="error" />;
+  if (t === 'unassigned') return <PersonRemoveIcon {...commonProps} />;
+  if (s === 'seat' || t === 'assign' || t === 'unassign') return <EventSeatIcon {...commonProps} />;
+  if (t === 'insert' || t === 'create') return <AddCircleIcon {...commonProps} color="success" />;
+  if (t === 'delete') return <DeleteIcon {...commonProps} color="error" />;
+  if (t === 'update') return <EditIcon {...commonProps} />;
+  if (t === 'login' || t === 'auth') return <HistoryIcon {...commonProps} />;
+  // fallback
+  return <PersonIcon {...commonProps} />;
 }
 
 function formatToIST (dateString) {
@@ -361,21 +391,28 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
           const subjectLower = (a.subjectType || a.subject_type || '').toString().toLowerCase();
           const isPayment = subjectLower === 'payment' || atypeLower === 'monthly_fee' || atypeLower.includes('payment') || atypeLower.includes('fee');
           const isLogin = atypeLower === 'login' || atypeLower === 'auth';
+          const iconEl = activityIcon({ actionType: t, subjectType: a.subjectType || a.subject_type });
           return (
             <Card key={idx} variant="outlined" sx={{ display: 'flex', flexDirection: 'column', borderLeft: `4px solid ${borderColor}`, overflow: 'hidden' }}>
               <CardContent sx={{ pb: 1 }}>
                 <Stack direction="row" spacing={2} alignItems="flex-start">
                   <Box sx={{ minWidth: 0, flex: 1 }}>
                         <Typography variant="caption" color="text.secondary">{formatDateTimeForDisplay(a.timestamp)}</Typography>
-                        {isPayment && a.details?.amount ? (
-                          <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 0.5 }}>₹{a.details.amount}</Typography>
-                        ) : null}
-                        {studentName ? (
-                          <Typography variant="body1" sx={{ mt: 0.5, fontWeight: 700 }}>{studentName}</Typography>
-                        ) : null}
-                        {/* show subject type and id in light grey (only if available) */}
-                        {((a.subjectType || a.subject_type) || (a.subjectId || a.subject_id)) ? (
-                          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>{(a.subjectType || a.subject_type) || ''}{(a.subjectId || a.subject_id) ? ` • id:${a.subjectId || a.subject_id}` : ''}</Typography>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>{iconEl}</Box>
+                          {isPayment && a.details?.amount ? (
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>₹{a.details.amount}</Typography>
+                          ) : null}
+                          {studentName ? (
+                            <Typography variant="body1" sx={{ fontWeight: 700 }}>{studentName}</Typography>
+                          ) : null}
+                          {!studentName && (a.subjectType || a.subject_type) ? (
+                            <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize' }}>{(a.subjectType || a.subject_type)}</Typography>
+                          ) : null}
+                        </Stack>
+                        {/* subject id only if no student name to avoid duplication */}
+                        {!studentName && (a.subjectId || a.subject_id) ? (
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>id:{a.subjectId || a.subject_id}</Typography>
                         ) : null}
                   </Box>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
@@ -391,9 +428,9 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                     return (
                       <Box sx={{ mt: 0.5 }}>
                         <Typography variant="caption" color="text.secondary">
-                          {formatDateTimeForDisplay(d.payment_date || a.timestamp)}
+                          {d.student_name ? d.student_name : (studentName || 'Payment')}
+                          {d.payment_date ? ` • ${formatDateTimeForDisplay(d.payment_date)}` : ''}
                           {d.remarks ? ` • ${d.remarks}` : ''}
-                          {d.student_name ? ` • ${d.student_name}` : ''}
                         </Typography>
                       </Box>
                     );
@@ -404,6 +441,11 @@ function ResponsiveActivityList({ activities, totalCount = 0, page = 0, rowsPerP
                         <Typography variant="caption" color="text.secondary">User {actor} logged in</Typography>
                       </Box>
                     );
+                  }
+                  // Provide concise summary for small diffs (<=2 fields) without opening full detail complexity
+                  const isUpdate = (a.type || a.action_type || '').toString().toUpperCase() === 'UPDATE';
+                  if (isUpdate && (a.subjectType || a.subject_type) && (a.subjectId || a.subject_id)) {
+                    // We rely on UpdateDiff for full diff; here we attempt a lightweight preview by showing changed field keys (if precomputed later could refactor)
                   }
                   // Fallback: show existing rich panel only for non-payment/login
                   return (
