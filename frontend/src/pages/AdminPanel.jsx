@@ -135,6 +135,76 @@ function AdminPanel() {
   const [restoreLoading, setRestoreLoading] = useState(false);
   // Full Data Report state
   const [reportLoading, setReportLoading] = useState(false);
+  // Expired Students Report state
+  const [expiredReportLoading, setExpiredReportLoading] = useState(false);
+  const [expiredPreviewLoading, setExpiredPreviewLoading] = useState(false);
+  const [expiredPreviewData, setExpiredPreviewData] = useState(null);
+  
+  // Handle expired students report preview
+  const handleExpiredStudentsPreview = async () => {
+    setExpiredPreviewLoading(true);
+    try {
+      const response = await fetch('/api/students/reports/expired/preview', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setExpiredPreviewData(result);
+        setMessage({ 
+          type: 'info', 
+          text: `Preview loaded: ${result.count} expired students found` 
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to load preview');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+      setExpiredPreviewData(null);
+    } finally {
+      setExpiredPreviewLoading(false);
+    }
+  };
+
+  // Handle expired students report download
+  const handleExpiredStudentsDownload = async () => {
+    setExpiredReportLoading(true);
+    try {
+      const response = await fetch('/api/students/reports/expired', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const contentDisposition = response.headers.get('content-disposition');
+        let filename = 'expired_students_report.csv';
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+          if (filenameMatch) {
+            filename = filenameMatch[1];
+          }
+        }
+        link.download = filename;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        setMessage({ type: 'success', text: 'Expired students report downloaded successfully!' });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to download expired students report');
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setExpiredReportLoading(false);
+    }
+  };
+
   // Handle backup (download JSON)
   const handleBackup = async () => {
     setBackupLoading(true);
@@ -1241,7 +1311,7 @@ function AdminPanel() {
   {tabValue === IDX_IMPORT && (
           <Grid container spacing={3}>
             {/* Import Excel */}
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12} lg={4}>
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1303,7 +1373,7 @@ function AdminPanel() {
             </Grid>
 
             {/* Export Excel, Full Report & Backup/Restore */}
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12} lg={4}>
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1364,6 +1434,74 @@ function AdminPanel() {
                   >
                     {restoreLoading ? 'Restoring...' : 'Restore from Backup'}
                   </Button>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Expired Students Report */}
+            <Grid item xs={12} lg={4}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <WarningIcon color="warning" />
+                    Expired Students Report
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Download a detailed CSV report of all expired students with their information and payment history.
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                    <Button
+                      variant="outlined"
+                      color="info"
+                      onClick={handleExpiredStudentsPreview}
+                      disabled={expiredPreviewLoading}
+                      sx={{ flex: 1 }}
+                      startIcon={expiredPreviewLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
+                    >
+                      {expiredPreviewLoading ? 'Loading...' : 'Preview'}
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="warning"
+                      onClick={handleExpiredStudentsDownload}
+                      disabled={expiredReportLoading}
+                      sx={{ flex: 1 }}
+                      startIcon={expiredReportLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
+                    >
+                      {expiredReportLoading ? 'Downloading...' : 'Download CSV'}
+                    </Button>
+                  </Box>
+
+                  {/* Preview Data Display */}
+                  {expiredPreviewData && (
+                    <Alert severity={expiredPreviewData.count > 0 ? "warning" : "info"} sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Preview Results:
+                      </Typography>
+                      <Typography variant="body2">
+                        {expiredPreviewData.count > 0 
+                          ? `Found ${expiredPreviewData.count} expired students ready for download.`
+                          : 'No expired students found in the system.'
+                        }
+                      </Typography>
+                      {expiredPreviewData.count > 0 && expiredPreviewData.data && expiredPreviewData.data.length > 0 && (
+                        <Box sx={{ mt: 1 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Sample: {expiredPreviewData.data[0].student_name} 
+                            (Seat: {expiredPreviewData.data[0].seat_number || 'None'}, 
+                            Expired: {expiredPreviewData.data[0].days_expired} days)
+                          </Typography>
+                        </Box>
+                      )}
+                    </Alert>
+                  )}
+
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    <Typography variant="body2">
+                      <strong>Report includes:</strong> Student Name, Father Name, Mobile, Seat Number, Membership Details, Payment History, and Days Expired.
+                    </Typography>
+                  </Alert>
                 </CardContent>
               </Card>
             </Grid>

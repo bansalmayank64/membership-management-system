@@ -989,4 +989,230 @@ router.get('/fee-config/:gender', async (req, res) => {
   }
 });
 
+// GET /api/students/reports/expired - Download CSV report of all expired students
+router.get('/reports/expired', async (req, res) => {
+  const startTime = Date.now();
+  const requestId = req.requestId || `req-${Date.now()}`;
+  logger.info('GET /api/students/reports/expired start', { requestId });
+  
+  try {
+    // Authorization: Only admins should be able to download reports
+    if (!req.user || req.user.role !== 'admin') {
+      logger.warn('Unauthorized expired students report download attempt', { requestId, user: req.user && req.user.userId });
+      return res.status(403).json({ error: 'Admin privileges required to download reports', timestamp: new Date().toISOString() });
+    }
+
+    logger.info('Fetching expired students data for report', { requestId });
+    
+    const query = `
+      SELECT 
+        s.name as student_name,
+        s.father_name,
+        s.contact_number as mobile_number,
+        s.sex as gender,
+        s.seat_number,
+        s.membership_type,
+        s.membership_date,
+        s.membership_till,
+        s.membership_status,
+        s.created_at as registration_date,
+        COALESCE(payment_summary.total_paid, 0) as total_paid,
+        payment_summary.last_payment_date,
+        CASE 
+          WHEN s.membership_till < CURRENT_DATE THEN EXTRACT(DAY FROM (CURRENT_DATE - s.membership_till))
+          ELSE 0
+        END as days_expired
+      FROM students s
+      LEFT JOIN (
+        SELECT 
+          student_id,
+          SUM(amount) as total_paid,
+          MAX(payment_date) as last_payment_date
+        FROM payments 
+        GROUP BY student_id
+      ) payment_summary ON s.id = payment_summary.student_id
+      WHERE s.membership_status = 'expired' 
+         OR (s.membership_till < CURRENT_DATE AND s.membership_status != 'inactive')
+      ORDER BY s.membership_till ASC, s.name ASC
+    `;
+    
+    logger.queryStart('expired students report', query);
+    const result = await pool.query(query);
+    logger.querySuccess('expired students report', null, result, false);
+
+    if (result.rows.length === 0) {
+      logger.info('No expired students found for report', { requestId });
+      return res.status(404).json({ 
+        error: 'No expired students found', 
+        message: 'There are currently no expired students to report',
+        timestamp: new Date().toISOString() 
+      });
+    }
+
+    // Generate CSV content
+    logger.info('Generating CSV content for expired students report', { requestId, count: result.rows.length });
+    
+    const csvHeaders = [
+      'Student Name', 
+      'Father Name',
+      'Mobile Number',
+      'Gender',
+      'Seat Number',
+      'Membership Type',
+      'Membership Date',
+      'Membership Till',
+      'Membership Status',
+      'Registration Date',
+      'Total Paid',
+      'Last Payment Date',
+      'Days Expired'
+    ];
+
+    // Helper function to escape CSV values
+    const escapeCsvValue = (value) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    // Helper function to format date
+    const formatDate = (date) => {
+      if (!date) return '';
+      return new Date(date).toLocaleDateString('en-GB'); // DD/MM/YYYY format
+    };
+
+    const csvRows = [
+      csvHeaders.join(','),
+      ...result.rows.map(student => [
+        escapeCsvValue(student.student_name),
+        escapeCsvValue(student.father_name),
+        escapeCsvValue(student.mobile_number),
+        escapeCsvValue(student.gender),
+        escapeCsvValue(student.seat_number),
+        escapeCsvValue(student.membership_type),
+        escapeCsvValue(formatDate(student.membership_date)),
+        escapeCsvValue(formatDate(student.membership_till)),
+        escapeCsvValue(student.membership_status),
+        escapeCsvValue(formatDate(student.registration_date)),
+        escapeCsvValue(student.total_paid),
+        escapeCsvValue(formatDate(student.last_payment_date)),
+        escapeCsvValue(student.days_expired)
+      ].join(','))
+    ];
+
+    const csvContent = csvRows.join('\n');
+    
+    // Generate filename with current date
+    const currentDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filename = `expired_students_report_${currentDate}.csv`;
+
+    // Set response headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Pragma', 'no-cache');
+
+    const executionTime = Date.now() - startTime;
+    logger.info('GET /api/students/reports/expired success', { 
+      requestId, 
+      executionTime, 
+      count: result.rows.length,
+      filename 
+    });
+
+    // Send CSV content
+    res.send(csvContent);
+
+  } catch (error) {
+    const executionTime = Date.now() - startTime;
+    logger.requestError('GET', '/api/students/reports/expired', requestId, startTime, error);
+    res.status(500).json({ 
+      error: 'Failed to generate expired students report', 
+      details: error.message, 
+      timestamp: new Date().toISOString() 
+    });
+  }
+});
+
+// GET /api/students/reports/expired/preview - Preview expired students data (JSON format)
+router.get('/reports/expired/preview', async (req, res) => {
+  const startTime = Date.now();
+  const requestId = req.requestId || `req-${Date.now()}`;
+  logger.info('GET /api/students/reports/expired/preview start', { requestId });
+  
+  try {
+    // Authorization: Only admins should be able to preview reports
+    if (!req.user || req.user.role !== 'admin') {
+      logger.warn('Unauthorized expired students report preview attempt', { requestId, user: req.user && req.user.userId });
+      return res.status(403).json({ error: 'Admin privileges required to preview reports', timestamp: new Date().toISOString() });
+    }
+
+    logger.info('Fetching expired students data for preview', { requestId });
+    
+    const query = `
+      SELECT 
+        s.name as student_name,
+        s.father_name,
+        s.contact_number as mobile_number,
+        s.sex as gender,
+        s.seat_number,
+        s.membership_type,
+        s.membership_date,
+        s.membership_till,
+        s.membership_status,
+        s.created_at as registration_date,
+        COALESCE(payment_summary.total_paid, 0) as total_paid,
+        payment_summary.last_payment_date,
+        CASE 
+          WHEN s.membership_till < CURRENT_DATE THEN EXTRACT(DAY FROM (CURRENT_DATE - s.membership_till))
+          ELSE 0
+        END as days_expired
+      FROM students s
+      LEFT JOIN (
+        SELECT 
+          student_id,
+          SUM(amount) as total_paid,
+          MAX(payment_date) as last_payment_date
+        FROM payments 
+        GROUP BY student_id
+      ) payment_summary ON s.id = payment_summary.student_id
+      WHERE s.membership_status = 'expired' 
+         OR (s.membership_till < CURRENT_DATE AND s.membership_status != 'inactive')
+      ORDER BY s.membership_till ASC, s.name ASC
+      LIMIT 100
+    `;
+    
+    logger.queryStart('expired students preview', query);
+    const result = await pool.query(query);
+    logger.querySuccess('expired students preview', null, result, false);
+
+    const executionTime = Date.now() - startTime;
+    logger.info('GET /api/students/reports/expired/preview success', { 
+      requestId, 
+      executionTime, 
+      count: result.rows.length 
+    });
+
+    res.json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows,
+      message: result.rows.length === 0 ? 'No expired students found' : `Found ${result.rows.length} expired students`,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    const executionTime = Date.now() - startTime;
+    logger.requestError('GET', '/api/students/reports/expired/preview', requestId, startTime, error);
+    res.status(500).json({ 
+      error: 'Failed to preview expired students report', 
+      details: error.message, 
+      timestamp: new Date().toISOString() 
+    });
+  }
+});
+
 module.exports = router;
