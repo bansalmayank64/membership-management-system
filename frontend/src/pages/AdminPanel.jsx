@@ -50,6 +50,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import Footer from '../components/Footer';
+import AIChatWidget from '../components/AIChatWidget';
 import api from '../services/api';
 import ActivityLog from './ActivityLog';
 
@@ -2269,6 +2270,9 @@ function AdminPanel() {
           </DialogActions>
         </Dialog>
       </Paper>
+      
+      {/* AI Chat Widget for Admin */}
+      {isAdmin && <AIChatWidget />}
       
       <Footer />
     </Container>

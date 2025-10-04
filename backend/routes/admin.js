@@ -12,6 +12,8 @@ const { formatDateForFilenameInTZ } = require('../utils/dateUtils');
 const router = express.Router();
 // Activity routes
 const activityRoutes = require('./activity');
+// AI Chat routes
+const aiChatRoutes = require('./aiChat');
 
 // Helper to format worksheet columns
 function autoFitColumns(worksheet, data) {
@@ -461,19 +463,19 @@ router.delete('/blacklist/cleanup', auth, requireAdmin, async (req, res) => {
 router.get('/stats', auth, async (req, res) => {
   try {
     const stats = await Promise.all([
-      pool.query('SELECT COUNT(*) as total FROM students'),
-      pool.query('SELECT COUNT(*) as total FROM seats WHERE EXISTS (SELECT 1 FROM students WHERE students.seat_number = seats.seat_number)'),
+      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_status = 'active'"),
+      pool.query("SELECT COUNT(*) as total FROM seats WHERE EXISTS (SELECT 1 FROM students WHERE students.seat_number = seats.seat_number AND students.membership_status = 'active')"),
       pool.query('SELECT COUNT(*) as total FROM payments'),
       pool.query('SELECT COUNT(*) as total FROM expenses'),
       pool.query("SELECT COUNT(*) as total FROM users WHERE status = 'active'"),
       pool.query('SELECT SUM(amount) as total FROM payments'),
       pool.query('SELECT SUM(amount) as total FROM expenses'),
-      // Add expired students count - students whose membership_till date has passed
-      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_till < CURRENT_DATE"),
-      // Add expiring soon students count - students whose membership expires in next 7 days
-      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_till >= CURRENT_DATE AND membership_till <= CURRENT_DATE + INTERVAL '7 days'"),
-      // Add unassigned students count - students without seat assignment
-      pool.query("SELECT COUNT(*) as total FROM students WHERE seat_number IS NULL")
+      // Add expired students count - students whose membership_till date has passed OR status is expired
+      pool.query("SELECT COUNT(*) as total FROM students WHERE (membership_till < CURRENT_DATE OR membership_status = 'expired')"),
+      // Add expiring soon students count - active students whose membership expires in next 7 days
+      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_status = 'active' AND membership_till >= CURRENT_DATE AND membership_till <= CURRENT_DATE + INTERVAL '7 days'"),
+      // Add unassigned students count - active students without seat assignment
+      pool.query("SELECT COUNT(*) as total FROM students WHERE membership_status = 'active' AND seat_number IS NULL")
     ]);
 
     res.json({
@@ -783,6 +785,9 @@ router.get('/fees-config', auth, async (req, res) => {
 
 // Mount activity routes under /api/admin/activity
 router.use('/activity', auth, requireAdmin, activityRoutes);
+
+// Mount AI chat routes under /api/admin/ai-chat
+router.use('/ai-chat', auth, requireAdmin, aiChatRoutes);
 
 // Add new membership type
 router.post('/fees-config', auth, requireAdmin, async (req, res) => {

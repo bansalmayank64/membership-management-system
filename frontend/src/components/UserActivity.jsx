@@ -10,7 +10,8 @@ import {
   Edit as EditIcon,
   AddCircle as AddCircleIcon,
   Delete as DeleteIcon,
-  History as HistoryIcon
+  History as HistoryIcon,
+  Chat as ChatIcon
 } from '@mui/icons-material';
 import SearchIcon from '@mui/icons-material/Search';
 import dayjs from 'dayjs';
@@ -37,11 +38,13 @@ function chipForType(t) {
   else if (tt === 'deactivate' || tt === 'deactivated') color = 'error';
   else if (tt === 'unassign' || tt === 'unassigned') color = 'default';
   else if (tt === 'activity' || tt === 'login' || tt === 'auth') color = 'primary';
+  else if (tt === 'ai_chat_query') color = 'primary';
   const labelMap = {
     deactivate: 'Deactivated',
     deactivated: 'Deactivated',
     unassign: 'Unassigned',
-    unassigned: 'Unassigned'
+    unassigned: 'Unassigned',
+    ai_chat_query: 'AI Chat'
   };
   return { label: labelMap[tt] || t || '', color };
 }
@@ -60,6 +63,7 @@ function activityIcon({ actionType, subjectType }) {
   if (t === 'delete') return <DeleteIcon {...commonProps} color="error" />;
   if (t === 'update') return <EditIcon {...commonProps} />;
   if (t === 'login' || t === 'auth') return <HistoryIcon {...commonProps} />;
+  if (t === 'ai_chat_query') return <ChatIcon {...commonProps} color="primary" />;
   // fallback
   return <PersonIcon {...commonProps} />;
 }

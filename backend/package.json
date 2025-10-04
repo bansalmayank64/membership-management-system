@@ -8,9 +8,15 @@
     "dev": "nodemon server.js",
     "start:devdb": "cross-env DB_MODE=dev NODE_ENV=development nodemon server.js",
     "start:proddb": "cross-env NODE_ENV=production nodemon server.js",
-  "devdb": "npm run start:devdb",
-  "proddb": "npm run start:proddb",
+    "devdb": "npm run start:devdb",
+    "proddb": "npm run start:proddb",
     "test": "echo \"Error: no test specified\" ; exit 1",
+    "test:ai-chat": "node test-ai-chat.js",
+    "llm:setup": "node scripts/setup-local-llm.js",
+    "llm:test": "node scripts/test-local-llm.js",
+    "llm:status": "node scripts/setup-local-llm.js status",
+    "llm:quick": "node scripts/setup-local-llm.js quick",
+    "migrate:ai-frequency": "node scripts/migrate-ai-frequency.js",
     "postinstall": "node ./scripts/build-and-copy.js"
   },
   "dependencies": {

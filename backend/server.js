@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const { pool } = require('./config/database');
 const logger = require('./utils/logger');
 const { requestLoggingMiddleware, errorLoggingMiddleware } = require('./middleware/logging');
+const constants = require('./config/constants');
 
 // Import routes
 const seatRoutes = require('./routes/seats');
@@ -18,11 +19,11 @@ const auth = require('./middleware/auth');
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || constants.DEFAULT_PORT;
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: process.env.CORS_ORIGIN || constants.DEFAULT_CORS_ORIGIN,
   credentials: true
 }));
 app.use(express.json());

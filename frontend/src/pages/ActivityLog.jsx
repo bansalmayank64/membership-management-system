@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Box, Typography, FormControl, InputLabel, Select, MenuItem, Paper, CircularProgress, Alert, Grid, Stack, ListItemIcon } from '@mui/material';
+import { Container, Paper, CircularProgress, Alert, Grid, Stack, ListItemIcon, FormControl, InputLabel, Select, MenuItem, Box } from '@mui/material';
 import { AllInclusive, Person, EventSeat, Payment as PaymentIcon, ReceiptLong, PersonOff, PersonRemove } from '@mui/icons-material';
 import UserActivity from '../components/UserActivity';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,6 +15,7 @@ export default function ActivityLog() {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState('');
   const [selectedType, setSelectedType] = useState('all');
+  // Note: showAIChatQueries toggle removed since AI chat queries are no longer stored in activity logs
   // responsive layout handled via MUI Grid/Stack props
   useEffect(() => {
     // Initial load (respect current filters)
@@ -56,6 +57,9 @@ export default function ActivityLog() {
       // include selected activity type for server-side filtering (use explicit param if provided)
       const typeToSend = typeof typeParam !== 'undefined' ? typeParam : selectedType || 'all';
       if (typeToSend && typeToSend !== 'all') qs.set('type', typeToSend);
+      
+      // Note: AI chat queries are always excluded since they are no longer stored in activity logs
+      qs.set('excludeType', 'ai_chat_query');
 
       const resp = await fetch('/api/admin/activity?' + qs.toString(), { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` } });
       if (!resp.ok) {

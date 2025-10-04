@@ -801,7 +801,7 @@ function Students() {
     try {
       logger.debug('[fetchData] Making API calls');
       const [studentsResponse, seatChartData] = await Promise.all([
-        fetch(`/api/students/with-unassigned-seats`, {
+        fetch(`/api/students/with-unassigned-seats?include_inactive=true`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
             'Content-Type': 'application/json'

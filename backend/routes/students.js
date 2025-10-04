@@ -13,6 +13,10 @@ router.get('/', async (req, res) => {
   try {
   logger.info('Executing students query', { requestId });
     
+    // Check if including inactive students is requested (for admin interface)
+    const includeInactive = req.query.include_inactive === 'true';
+    const membershipStatusFilter = includeInactive ? '' : "WHERE s.membership_status = 'active'";
+    
     const query = `
       SELECT 
         s.*,
@@ -33,6 +37,7 @@ router.get('/', async (req, res) => {
         FROM payments 
         GROUP BY student_id
       ) payment_summary ON s.id = payment_summary.student_id
+      ${membershipStatusFilter}
       ORDER BY s.created_at DESC
     `;
     
@@ -60,6 +65,10 @@ router.get('/with-unassigned-seats', async (req, res) => {
   try {
   logger.info('Executing students + unassigned seats queries', { requestId });
     
+    // Check if including inactive students is requested (for admin interface)
+    const includeInactive = req.query.include_inactive === 'true';
+    const membershipStatusFilter = includeInactive ? '' : "WHERE s.membership_status = 'active'";
+    
     // Query to get all students with their seat information
     const studentsQuery = `
       SELECT 
@@ -72,6 +81,7 @@ router.get('/with-unassigned-seats', async (req, res) => {
         'student' as record_type
       FROM students s
       LEFT JOIN seats ON s.seat_number = seats.seat_number
+      ${membershipStatusFilter}
       ORDER BY s.created_at DESC
     `;
     
@@ -95,7 +105,7 @@ router.get('/with-unassigned-seats', async (req, res) => {
         'unassigned_seat' as record_type
       FROM seats 
       WHERE NOT EXISTS (
-        SELECT 1 FROM students WHERE students.seat_number = seats.seat_number
+        SELECT 1 FROM students WHERE students.seat_number = seats.seat_number ${includeInactive ? '' : "AND students.membership_status = 'active'"}
       )
       ORDER BY 
         CASE 
@@ -207,7 +217,7 @@ router.get('/available-seats/:gender', async (req, res) => {
       FROM seats 
       WHERE (occupant_sex IS NULL OR occupant_sex = $1)
         AND NOT EXISTS (
-          SELECT 1 FROM students WHERE students.seat_number = seats.seat_number
+          SELECT 1 FROM students WHERE students.seat_number = seats.seat_number AND students.membership_status = 'active'
         )
       ORDER BY 
         CASE 

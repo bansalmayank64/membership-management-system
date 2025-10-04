@@ -27,7 +27,7 @@ router.get('/', authenticateToken, async (req, res) => {
   rl.requestStart(req);
   if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
 
-  const { userId, start, end, type, search, page = 0, pageSize = 100 } = req.query;
+  const { userId, start, end, type, excludeType, search, page = 0, pageSize = 100 } = req.query;
 
   try {
     // Create union of history sources (no per-table WHERE) and apply filters in outer query for performance
@@ -128,6 +128,12 @@ router.get('/', authenticateToken, async (req, res) => {
         outerClauses.push(`t.action_type = $${pidx++}`);
         outerParams.push(typeFilter);
       }
+    }
+
+    // Add excludeType filter (primarily for excluding ai_chat_query)
+    if (excludeType) {
+      outerClauses.push(`t.action_type != $${pidx++}`);
+      outerParams.push(excludeType);
     }
 
     if (search) {
