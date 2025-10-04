@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch');
 const localLLMService = require('./localLLMService');
 const externalAPIService = require('./externalAPIService');
+const metabaseService = require('./metabaseService');
 const constants = require('../config/constants');
 
 class AIChatService {
@@ -1070,7 +1071,11 @@ Return ONLY the formatted response without any markdown code blocks.`;
       // Step 3: Format the results
       const formattedResults = await this.formatResults(results, query, userId);
 
-      // Step 4: Add to conversation history for context
+      // Step 4: Check if user requested download or chart
+      const reportOptions = this.extractReportOptions(query);
+      const chartOptions = this.extractChartOptions(query);
+
+      // Step 5: Add to conversation history for context
       this.addToConversationHistory(userId, query, formattedResults.formattedResponse, {
         sql,
         success: formattedResults.success,
@@ -1081,7 +1086,7 @@ Return ONLY the formatted response without any markdown code blocks.`;
       // Note: AI chat queries are not logged to activity logs for privacy reasons
       // await this.logChatInteraction(userId, query, sql, formattedResults.success, requestId);
 
-      return {
+      const response = {
         success: true,
         response: formattedResults.formattedResponse,
         data: formattedResults.data,
@@ -1094,6 +1099,56 @@ Return ONLY the formatted response without any markdown code blocks.`;
           useDemoMode: this.useDemoMode
         }
       };
+
+      // Step 6: Add report generation if requested
+      if (reportOptions.shouldGenerate && results.success && results.data?.length > 0) {
+        try {
+          const report = await metabaseService.generateReport(sql, userId, reportOptions.format, {
+            filename: reportOptions.filename
+          });
+          
+          if (report.success) {
+            response.downloadReport = {
+              available: true,
+              format: reportOptions.format,
+              filename: report.filename,
+              downloadUrl: `/api/reports/generate`,
+              method: 'POST',
+              body: { sqlQuery: sql, format: reportOptions.format, filename: reportOptions.filename }
+            };
+            
+            response.response += `\n\n📊 **Download Available**: ${reportOptions.format.toUpperCase()} report ready for download (${report.rowCount} rows)`;
+          }
+        } catch (error) {
+          logger.warn('Failed to generate report', { error: error.message });
+        }
+      }
+
+      // Step 7: Add chart generation if requested
+      if (chartOptions.shouldGenerate && results.success && results.data?.length > 0) {
+        try {
+          const chartData = metabaseService.generateChartData(results.data, chartOptions);
+          const chartConfig = metabaseService.generateChartConfig(chartData, chartOptions.chartType, {
+            title: chartOptions.title,
+            xLabel: chartOptions.xLabel,
+            yLabel: chartOptions.yLabel
+          });
+
+          response.chartData = {
+            available: true,
+            chartType: chartOptions.chartType,
+            data: chartData,
+            config: chartConfig,
+            dataPoints: results.data.length
+          };
+
+          response.response += `\n\n📈 **Chart Available**: ${chartOptions.chartType} chart generated with ${results.data.length} data points`;
+        } catch (error) {
+          logger.warn('Failed to generate chart', { error: error.message });
+        }
+      }
+
+      return response;
     } catch (error) {
       logger.error('Failed to process chat query', { 
         error: error.message, 
@@ -1504,6 +1559,92 @@ Return ONLY the formatted response without any markdown code blocks.`;
   }
 
   /**
+   * Extract report generation options from user query
+   */
+  extractReportOptions(query) {
+    const normalizedQuery = query.toLowerCase();
+    
+    // Check for download keywords
+    const downloadKeywords = ['download', 'export', 'save', 'generate report', 'create report'];
+    const shouldGenerate = downloadKeywords.some(keyword => normalizedQuery.includes(keyword));
+    
+    // Determine format
+    let format = 'csv'; // default
+    if (normalizedQuery.includes('excel') || normalizedQuery.includes('xlsx')) {
+      format = 'xlsx';
+    } else if (normalizedQuery.includes('json')) {
+      format = 'json';
+    } else if (normalizedQuery.includes('csv')) {
+      format = 'csv';
+    }
+    
+    // Generate filename
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = `query_result_${timestamp}.${format}`;
+    
+    return {
+      shouldGenerate,
+      format,
+      filename
+    };
+  }
+
+  /**
+   * Extract chart options from user query
+   */
+  extractChartOptions(query) {
+    const normalizedQuery = query.toLowerCase();
+    
+    // Check for chart keywords
+    const chartKeywords = ['chart', 'graph', 'plot', 'visualize', 'show chart', 'create chart'];
+    const shouldGenerate = chartKeywords.some(keyword => normalizedQuery.includes(keyword));
+    
+    // Determine chart type
+    let chartType = 'bar'; // default
+    if (normalizedQuery.includes('pie')) {
+      chartType = 'pie';
+    } else if (normalizedQuery.includes('line')) {
+      chartType = 'line';
+    } else if (normalizedQuery.includes('bar')) {
+      chartType = 'bar';
+    } else if (normalizedQuery.includes('doughnut')) {
+      chartType = 'doughnut';
+    }
+    
+    // Try to extract column information (basic heuristics)
+    const words = normalizedQuery.split(' ');
+    let xColumn = null;
+    let yColumn = null;
+    
+    // Look for common patterns
+    if (normalizedQuery.includes('by month')) {
+      xColumn = 'month';
+    } else if (normalizedQuery.includes('by date')) {
+      xColumn = 'date';
+    } else if (normalizedQuery.includes('by status')) {
+      xColumn = 'status';
+    } else if (normalizedQuery.includes('by floor')) {
+      xColumn = 'floor_number';
+    }
+    
+    if (normalizedQuery.includes('revenue') || normalizedQuery.includes('amount')) {
+      yColumn = 'amount';
+    } else if (normalizedQuery.includes('count')) {
+      yColumn = 'count';
+    }
+    
+    return {
+      shouldGenerate,
+      chartType,
+      xColumn,
+      yColumn,
+      title: 'Data Visualization',
+      xLabel: xColumn || 'Category',
+      yLabel: yColumn || 'Value'
+    };
+  }
+
+  /**
    * Check if error is a SQL syntax error that can be corrected
    */
   isSQLSyntaxError(error) {
@@ -1729,6 +1870,16 @@ Please provide ONLY the corrected SQL query without any explanations. The query 
     const frequentQueries = await this.getMostFrequentQueries(userId, 5);
     
     const baseSuggestions = [
+      {
+        category: 'Charts & Reports',
+        queries: [
+          'Download student enrollment data as CSV',
+          'Create a bar chart of monthly revenue',
+          'Export payment status report to Excel',
+          'Generate pie chart of seat utilization',
+          'Show line chart of daily attendance trends'
+        ]
+      },
       {
         category: 'Students',
         queries: [

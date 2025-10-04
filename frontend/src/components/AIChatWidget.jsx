@@ -42,10 +42,16 @@ import {
   TableChart as TableIcon,
   AutoAwesome as SparkleIcon,
   Error as ErrorIcon,
-  CheckCircle as SuccessIcon
+  CheckCircle as SuccessIcon,
+  Download as DownloadIcon,
+  BarChart as BarChartIcon,
+  PieChart as PieChartIcon,
+  ShowChart as LineChartIcon
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import ReactMarkdown from 'react-markdown';
+import Chart from './Chart';
+import ReportTemplates from './ReportTemplates';
 
 const ChatContainer = styled(Box)(({ theme }) => ({
   position: 'fixed',
@@ -184,7 +190,7 @@ const AIChatWidget = () => {
   const [history, setHistory] = useState([]);
   const [schema, setSchema] = useState([]);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('chat'); // chat, history, help
+  const [activeTab, setActiveTab] = useState('chat'); // chat, history, help, reports
   const [llmStatus, setLlmStatus] = useState(null); // Track local LLM status
   
   const messagesEndRef = useRef(null);
@@ -458,6 +464,103 @@ Try asking me something like "How many active students do we have?" or click on 
     }, 100);
   };
 
+  const downloadData = async (format, data, filename = 'report') => {
+    try {
+      setIsLoading(true);
+      
+      // Prepare data for download
+      const payload = { data, format, filename };
+      
+      const response = await fetch('/api/reports/generate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `${filename}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        throw new Error('Download failed');
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const generateChart = async (data, chartType) => {
+    try {
+      setIsLoading(true);
+      
+      const response = await fetch('/api/reports/chart', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          data, 
+          chartType,
+          options: {
+            responsive: true,
+            maintainAspectRatio: false
+          }
+        })
+      });
+
+      if (response.ok) {
+        const chartResponse = await response.json();
+        
+        // Add chart message to conversation
+        const chartMessage = {
+          id: Date.now() + Math.random(),
+          sender: 'ai',
+          content: {
+            originalData: data, // Keep original data for chart rendering
+            chartData: chartResponse.chartData,
+            config: chartResponse.config
+          },
+          timestamp: new Date(),
+          type: 'chart',
+          chartType: chartType
+        };
+        
+        setMessages(prev => [...prev, chartMessage]);
+      } else {
+        throw new Error('Chart generation failed');
+      }
+    } catch (error) {
+      console.error('Chart generation error:', error);
+      
+      // Fallback: Create chart directly with original data
+      const chartMessage = {
+        id: Date.now() + Math.random(),
+        sender: 'ai',
+        content: data, // Use original data directly
+        timestamp: new Date(),
+        type: 'chart',
+        chartType: chartType
+      };
+      
+      setMessages(prev => [...prev, chartMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const renderMessage = (message) => {
     if (message.type === 'table' && Array.isArray(message.content)) {
       return (
@@ -470,6 +573,59 @@ Try asking me something like "How many active students do we have?" or click on 
               <Typography variant="subtitle2" gutterBottom>
                 📊 Query Results ({message.content.length} rows)
               </Typography>
+              
+              {/* Action Buttons */}
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => downloadData('csv', message.content, 'query_results')}
+                  variant="outlined"
+                >
+                  CSV
+                </Button>
+                <Button
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => downloadData('xlsx', message.content, 'query_results')}
+                  variant="outlined"
+                >
+                  Excel
+                </Button>
+                <Button
+                  size="small"
+                  startIcon={<BarChartIcon />}
+                  onClick={() => generateChart(message.content, 'bar')}
+                  variant="outlined"
+                >
+                  Bar Chart
+                </Button>
+                <Button
+                  size="small"
+                  startIcon={<LineChartIcon />}
+                  onClick={() => generateChart(message.content, 'line')}
+                  variant="outlined"
+                >
+                  Line Chart
+                </Button>
+                <Button
+                  size="small"
+                  startIcon={<PieChartIcon />}
+                  onClick={() => generateChart(message.content, 'pie')}
+                  variant="outlined"
+                >
+                  Pie Chart
+                </Button>
+                <Button
+                  size="small"
+                  startIcon={<PieChartIcon />}
+                  onClick={() => generateChart(message.content, 'doughnut')}
+                  variant="outlined"
+                >
+                  Doughnut
+                </Button>
+              </Box>
+
               <TableContainer sx={{ maxHeight: 300 }}>
                 <Table size="small">
                   <TableHead>
@@ -504,6 +660,35 @@ Try asking me something like "How many active students do we have?" or click on 
                   ⚡ Query executed in {message.metadata.executionTime}ms
                 </Typography>
               )}
+            </Paper>
+          </Box>
+        </Box>
+      );
+    }
+
+    if (message.type === 'chart' && message.content) {
+      return (
+        <Box key={message.id} sx={{ mb: 1, display: 'flex' }}>
+          <Avatar sx={{ mr: 1, bgcolor: 'secondary.main', width: 32, height: 32 }}>
+            {message.chartType === 'bar' && <BarChartIcon sx={{ fontSize: 16 }} />}
+            {message.chartType === 'line' && <LineChartIcon sx={{ fontSize: 16 }} />}
+            {(message.chartType === 'pie' || message.chartType === 'doughnut') && <PieChartIcon sx={{ fontSize: 16 }} />}
+          </Avatar>
+          <Box sx={{ flex: 1 }}>
+            <Paper sx={{ p: 2, mt: 0.5 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                📈 {message.chartType.charAt(0).toUpperCase() + message.chartType.slice(1)} Chart
+              </Typography>
+              <Box sx={{ height: 300, mt: 2 }}>
+                <Chart 
+                  data={message.content.originalData || message.content} 
+                  chartType={message.chartType}
+                  title={`${message.chartType.charAt(0).toUpperCase() + message.chartType.slice(1)} Chart`}
+                />
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                {message.timestamp.toLocaleTimeString()}
+              </Typography>
             </Paper>
           </Box>
         </Box>
@@ -821,6 +1006,13 @@ Try asking me something like "How many active students do we have?" or click on 
               >
                 <HelpIcon fontSize="small" />
               </IconButton>
+              <IconButton 
+                size="small" 
+                onClick={() => setActiveTab('reports')}
+                sx={{ color: activeTab === 'reports' ? 'primary.contrastText' : 'primary.light' }}
+              >
+                <TableIcon fontSize="small" />
+              </IconButton>
               {activeTab === 'chat' && (
                 <IconButton size="small" onClick={clearChat} sx={{ color: 'primary.light' }}>
                   <CloseIcon fontSize="small" />
@@ -832,6 +1024,20 @@ Try asking me something like "How many active students do we have?" or click on 
           {activeTab === 'chat' && renderChatTab()}
           {activeTab === 'history' && renderHistoryTab()}
           {activeTab === 'help' && renderHelpTab()}
+          {activeTab === 'reports' && (
+            <ReportTemplates 
+              onGenerateReport={(query) => {
+                setActiveTab('chat');
+                setInputValue(query);
+                sendMessage(query);
+              }}
+              onGenerateChart={(query, chartType) => {
+                setActiveTab('chat');
+                setInputValue(query);
+                sendMessage(query);
+              }}
+            />
+          )}
         </ChatWindow>
       )}
     </ChatContainer>

@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const { pool } = require('./config/database');
 const logger = require('./utils/logger');
 const { requestLoggingMiddleware, errorLoggingMiddleware } = require('./middleware/logging');
+const metabaseService = require('./services/metabaseService');
 const constants = require('./config/constants');
 
 // Import routes
@@ -14,6 +15,7 @@ const expenseRoutes = require('./routes/expenses');
 const financeRoutes = require('./routes/finance');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
+const reportsRoutes = require('./routes/reports');
 const auth = require('./middleware/auth');
 
 dotenv.config();
@@ -64,6 +66,7 @@ app.use('/api/students', auth, studentRoutes);
 app.use('/api/payments', auth, paymentRoutes);
 app.use('/api/expenses', auth, expenseRoutes);
 app.use('/api/finance', auth, financeRoutes);
+app.use('/api/reports', auth, reportsRoutes);
 
 // Public endpoint for frontend to fetch expense categories (protected)
 app.get('/api/expense-categories', auth, async (req, res) => {
@@ -89,10 +92,22 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   const logger = require('./utils/logger');
   logger.info(`Server is running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Initialize Metabase service
+  try {
+    const metabaseInitialized = await metabaseService.initialize();
+    if (metabaseInitialized) {
+      logger.info('Metabase service initialized successfully');
+    } else {
+      logger.warn('Metabase service initialization failed - reports and charts may be limited');
+    }
+  } catch (error) {
+    logger.warn('Failed to initialize Metabase service', { error: error.message });
+  }
 });
 
 module.exports = app;
