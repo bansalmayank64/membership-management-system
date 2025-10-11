@@ -5,6 +5,106 @@ const auth = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 /**
+ * Download data as file
+ * POST /api/reports/download
+ */
+router.post('/download', auth, async (req, res) => {
+  try {
+    const { data, format = 'csv', filename = 'report' } = req.body;
+    const userId = req.user.id;
+
+    if (!data || !Array.isArray(data)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Data array is required'
+      });
+    }
+
+    if (data.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Data array cannot be empty'
+      });
+    }
+
+    // Generate file content based on format
+    let fileContent;
+    let mimeType;
+    let fileExtension;
+
+    if (format === 'csv') {
+      // Convert data to CSV
+      const headers = Object.keys(data[0]);
+      const csvRows = [
+        headers.join(','), // Header row
+        ...data.map(row => headers.map(header => {
+          const value = row[header];
+          // Escape commas and quotes in CSV values
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        }).join(','))
+      ];
+      fileContent = csvRows.join('\n');
+      mimeType = 'text/csv';
+      fileExtension = 'csv';
+    } else if (format === 'xlsx') {
+      try {
+        const XLSX = require('xlsx');
+        
+        // Create workbook and worksheet
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Query Results');
+        
+        // Generate Excel buffer
+        fileContent = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        fileExtension = 'xlsx';
+        
+        logger.info('Excel data download generated successfully', { userId, format });
+      } catch (error) {
+        logger.error(`Error generating Excel file: ${error.message}`, { userId, error: error.stack });
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate Excel file. Please try CSV format.'
+        });
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Unsupported format. Use csv or xlsx.'
+      });
+    }
+
+    // Set appropriate headers for file download
+    const finalFilename = `${filename}.${fileExtension}`;
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${finalFilename}"`);
+    res.setHeader('X-Report-Rows', data.length);
+
+    logger.info('Data download generated successfully', { 
+      userId, 
+      format, 
+      filename: finalFilename, 
+      rows: data.length 
+    });
+
+    res.send(fileContent);
+  } catch (error) {
+    logger.error('Failed to generate data download', { error: error.message, userId: req.user?.id });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate data download',
+      error: error.message
+    });
+  }
+});
+
+/**
  * Generate and download a report
  * POST /api/reports/generate
  */

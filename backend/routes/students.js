@@ -748,20 +748,148 @@ router.get('/by-aadhaar/:aadhaar', async (req, res) => {
   }
 });
 
-// PATCH /api/students/:id/activate - activate a student by id and optionally set membership_status to active
+// PATCH /api/students/:id/activate - activate a student by id with reactivation options
 router.patch('/:id/activate', async (req, res) => {
+  const startTime = Date.now();
   const requestId = `activate-student-${Date.now()}`;
+  logger.info('PATCH /api/students/:id/activate start', { requestId, studentId: req.params.id, body: req.body });
+  
   try {
     const { id } = req.params;
-    if (!id) return res.status(400).json({ error: 'Student id required' });
+    const { reactivationType } = req.body;
+    
+    // Validate required parameters
+    if (!id) {
+      logger.warn('Student ID required for activation', { requestId });
+      return res.status(400).json({ error: 'Student id required', timestamp: new Date().toISOString() });
+    }
 
-    const query = `UPDATE students SET membership_status = 'active', updated_at = CURRENT_TIMESTAMP, modified_by = $1 WHERE id = $2 RETURNING *`;
-    const result = await pool.query(query, [req.user?.userId || req.user?.id || 1, id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
-    res.json(result.rows[0]);
+    // Validate reactivationType - should be either 'resume' or 'fresh'
+    if (!reactivationType || !['resume', 'fresh'].includes(reactivationType)) {
+      logger.warn('Invalid reactivationType for activation', { requestId, reactivationType });
+      return res.status(400).json({ 
+        error: 'Invalid reactivationType. Must be either "resume" (Resume from previous membership end date) or "fresh" (Start fresh membership from today)',
+        received: reactivationType,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    logger.info('Starting activation transaction', { requestId, studentId: id, reactivationType });
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      logger.info('Transaction started for activation', { requestId });
+
+      // Get current student data to check previous membership details
+      const studentQuery = `SELECT * FROM students WHERE id = $1`;
+      const studentResult = await client.query(studentQuery, [id]);
+      
+      if (studentResult.rows.length === 0) {
+        logger.warn('Student not found for activation', { requestId, studentId: id });
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Student not found', studentId: id, timestamp: new Date().toISOString() });
+      }
+
+      const student = studentResult.rows[0];
+      logger.info('Student found for activation', { requestId, studentId: id, currentStatus: student.membership_status, membershipTill: student.membership_till });
+
+      // Calculate new membership start date based on reactivationType
+      let newMembershipDate;
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
+
+      if (reactivationType === 'resume') {
+        // Resume: Keep original membership start date
+        newMembershipDate = student.membership_date; // Keep existing membership_date
+        logger.info('Resume reactivation - keeping original membership date', { 
+          requestId, 
+          originalMembershipDate: student.membership_date, 
+          membershipTill: student.membership_till 
+        });
+      } else if (reactivationType === 'fresh') {
+        // Fresh: Update membership start date to today
+        newMembershipDate = today;
+        logger.info('Fresh reactivation - setting new membership date to today', { 
+          requestId, 
+          newMembershipDate, 
+          originalMembershipDate: student.membership_date,
+          membershipTill: student.membership_till 
+        });
+      }
+
+      // Update student with new activation details (only membership_status and membership_date)
+      logger.info('Updating student with new activation details', { requestId, studentId: id });
+      const updateQuery = `
+        UPDATE students 
+        SET membership_status = 'active', 
+            membership_date = $1,
+            updated_at = CURRENT_TIMESTAMP, 
+            modified_by = $2 
+        WHERE id = $3 
+        RETURNING *
+      `;
+      
+      const updateValues = [newMembershipDate, req.user?.userId || req.user?.id || 1, id];
+      logger.queryStart('activate student', updateQuery, updateValues);
+      const result = await client.query(updateQuery, updateValues);
+      logger.querySuccess('activate student', null, result, false);
+
+      if (result.rows.length === 0) {
+        logger.warn('Student activation affected no rows', { requestId, studentId: id });
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Student not found during activation', studentId: id, timestamp: new Date().toISOString() });
+      }
+
+      logger.info('Committing activation transaction', { requestId });
+      await client.query('COMMIT');
+      logger.info('Activation transaction committed', { requestId });
+
+      const activatedStudent = result.rows[0];
+      const executionTime = Date.now() - startTime;
+      
+      logger.info('Student activation success', { 
+        requestId, 
+        studentId: id, 
+        reactivationType, 
+        executionTime,
+        newMembershipDate,
+        membershipTill: activatedStudent.membership_till
+      });
+
+      res.json({
+        success: true,
+        student: activatedStudent,
+        reactivationType,
+        membershipPeriod: {
+          from: newMembershipDate,
+          till: activatedStudent.membership_till
+        },
+        message: reactivationType === 'resume' 
+          ? 'Student reactivated with original membership dates'
+          : 'Student reactivated with fresh membership start date',
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      logger.warn('Rolling back activation transaction due to error', { requestId, error: error.message });
+      await client.query('ROLLBACK');
+      logger.info('Activation transaction rolled back', { requestId });
+      throw error;
+    } finally {
+      logger.info('Releasing database connection after activation', { requestId });
+      client.release();
+      logger.info('Database connection released after activation', { requestId });
+    }
+
   } catch (err) {
-    logger.requestError('PATCH', `/api/students/${req.params.id}/activate`, requestId, Date.now(), err);
-    res.status(500).json({ error: 'Failed to activate student', details: err.message });
+    const executionTime = Date.now() - startTime;
+    logger.requestError('PATCH', `/api/students/${req.params.id}/activate`, requestId, startTime, err);
+    res.status(500).json({ 
+      error: 'Failed to activate student', 
+      details: err.message, 
+      studentId: req.params.id,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 

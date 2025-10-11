@@ -59,11 +59,20 @@ const formatDateForDisplay = (dateString) => {
   }
 };
 
-// Expect input like 'YYYY-MM-DD' or a Date; returns 'DD Mon YYYY' with zero-padded day
+// Expect input like 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS.sssZ' or a Date; returns 'DD Mon YYYY' with zero-padded day
 const formatIsoToDMonYYYY = (isoDate) => {
   if (!isoDate) return '';
   try {
-    const s = isoDate instanceof Date ? isoDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : isoDate.toString();
+    let s;
+    if (isoDate instanceof Date) {
+      s = isoDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    } else {
+      // Handle both ISO date (YYYY-MM-DD) and ISO datetime (YYYY-MM-DDTHH:MM:SS.sssZ)
+      s = isoDate.toString();
+      if (s.includes('T')) {
+        s = s.split('T')[0]; // Extract date part only
+      }
+    }
     const parts = s.split('-');
     if (parts.length < 3) return isoDate;
     const year = Number(parts[0]);

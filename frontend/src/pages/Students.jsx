@@ -309,6 +309,7 @@ function Students() {
 
   // Reactivate confirmation dialog state
   const [reactivateConfirmOpen, setReactivateConfirmOpen] = useState(false);
+  const [reactivationType, setReactivationType] = useState('fresh');
 
   // Fetch available seats when gender is selected
   const fetchAvailableSeats = async (gender) => {
@@ -488,23 +489,7 @@ function Students() {
     return opt.male_monthly_fees ?? opt.monthly_fees ?? null;
   };
 
-  // Helper: format ISO date (YYYY-MM-DD) to 'D Mon YYYY' (e.g., '5 Aug 2025')
-  const formatIsoToDMonYYYY = (isoDate) => {
-    if (!isoDate) return '';
-    try {
-      // Expecting 'YYYY-MM-DD'
-      const parts = isoDate.toString().split('-');
-      if (parts.length < 3) return isoDate;
-      const year = Number(parts[0]);
-      const monthIndex = Math.max(0, Math.min(11, Number(parts[1]) - 1));
-      const day = Number(parts[2]);
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const dayStr = String(day).padStart(2, '0');
-      return `${dayStr} ${months[monthIndex]} ${year}`;
-    } catch (e) {
-      return isoDate;
-    }
-  };
+  // Note: formatIsoToDMonYYYY is imported from dateUtils and handles timezone properly
 
   // Initiate membership type change from Edit dialog: compute adjustment and open confirm dialog
   const initiateEditMembershipTypeChange = (newType) => {
@@ -2148,8 +2133,35 @@ function Students() {
       return;
     }
 
-    // Reset seat selection and fetch available seats for this student's gender
+    // Reset reactivation options and calculate smart default
     setReactivateSelectedSeat('');
+    
+    // Calculate smart default based on membership end date
+    let defaultReactivationType = 'fresh'; // fallback default
+    
+    if (selectedItemForAction?.membership_till) {
+      const membershipEndDate = new Date(selectedItemForAction.membership_till);
+      const today = new Date();
+      const daysDifference = Math.floor((today - membershipEndDate) / (1000 * 60 * 60 * 24));
+      
+      // If membership ended 15 days ago or less, default to resume
+      // If membership ended more than 15 days ago, default to fresh
+      defaultReactivationType = daysDifference <= 15 ? 'resume' : 'fresh';
+      
+      logger.debug('🧠 [handleReactivateStudent] Smart default calculation', {
+        membershipEndDate: selectedItemForAction.membership_till,
+        daysSinceEnd: daysDifference,
+        defaultType: defaultReactivationType
+      });
+    }
+    
+    logger.debug('🎯 [handleReactivateStudent] Setting reactivationType', { 
+      from: reactivationType, 
+      to: defaultReactivationType 
+    });
+    setReactivationType(defaultReactivationType);
+    
+    // Fetch available seats for this student's gender
     fetchReactivateAvailableSeats(selectedItemForAction.sex);
 
     logger.debug('🟢 [handleReactivateStudent] Opening reactivate confirmation dialog');
@@ -2159,7 +2171,11 @@ function Students() {
 
   // Confirm reactivate student
   const confirmReactivateStudent = async () => {
-    logger.debug('🟢 [confirmReactivateStudent] Called', { selectedItemForAction, selectedSeat: reactivateSelectedSeat });
+    logger.debug('🟢 [confirmReactivateStudent] Called', { 
+      selectedItemForAction, 
+      selectedSeat: reactivateSelectedSeat,
+      reactivationType
+    });
 
     if (!selectedItemForAction) {
       logger.error('❌ [confirmReactivateStudent] No selected item for action, aborting');
@@ -2167,42 +2183,76 @@ function Students() {
     }
 
     try {
-      logger.debug('🟢 [confirmReactivateStudent] Preparing to reactivate student', { id: selectedItemForAction.id, name: selectedItemForAction.name });
+      logger.debug('🟢 [confirmReactivateStudent] Preparing to reactivate student', { 
+        id: selectedItemForAction.id, 
+        name: selectedItemForAction.name,
+        reactivationType
+      });
 
-      // Update student's membership_status to 'active' and optionally assign seat
-      const requestBody = {
-        ...selectedItemForAction,
-        membership_status: 'active'
+      // Use the new activation endpoint with reactivation options
+      const activationBody = {
+        reactivationType
       };
 
-      // Only include seat_number if a seat was selected
-      if (reactivateSelectedSeat) {
-        requestBody.seat_number = reactivateSelectedSeat;
-      }
+      logger.debug('🟢 [confirmReactivateStudent] Activation request body', activationBody);
 
-      logger.debug('🟢 [confirmReactivateStudent] Request body', requestBody);
-
-      const response = await fetch(`/api/students/${selectedItemForAction.id}`, {
-        method: 'PUT',
+      const activateResponse = await fetch(`/api/students/${selectedItemForAction.id}/activate`, {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(activationBody)
       });
 
-      logger.debug('🟢 [confirmReactivateStudent] Response status', { status: response.status, ok: response.ok });
+      logger.debug('🟢 [confirmReactivateStudent] Activation response status', { 
+        status: activateResponse.status, 
+        ok: activateResponse.ok 
+      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ [confirmReactivateStudent] Response error:', errorText);
+      if (!activateResponse.ok) {
+        const errorText = await activateResponse.text();
+        console.error('❌ [confirmReactivateStudent] Activation response error:', errorText);
         throw new Error('Failed to reactivate student');
       }
 
-      const responseData = await response.json();
-      logger.debug('✅ [confirmReactivateStudent] Response data', responseData);
+      const activationData = await activateResponse.json();
+      logger.debug('✅ [confirmReactivateStudent] Activation response data', activationData);
 
-      setSnackbarMessage('Student reactivated successfully');
+      // If a seat was selected, update the student with the seat assignment
+      if (reactivateSelectedSeat) {
+        logger.debug('🟢 [confirmReactivateStudent] Assigning seat', { seatNumber: reactivateSelectedSeat });
+        
+        const seatUpdateBody = {
+          ...activationData.student,
+          seat_number: reactivateSelectedSeat
+        };
+
+        const seatResponse = await fetch(`/api/students/${selectedItemForAction.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          },
+          body: JSON.stringify(seatUpdateBody)
+        });
+
+        if (!seatResponse.ok) {
+          const errorText = await seatResponse.text();
+          console.warn('⚠️ [confirmReactivateStudent] Seat assignment failed:', errorText);
+          // Don't throw error, student is already activated
+        } else {
+          logger.debug('✅ [confirmReactivateStudent] Seat assigned successfully');
+        }
+      }
+
+      // Show success message with reactivation details
+      const message = activationData.message || 
+        (reactivationType === 'resume' 
+          ? 'Student reactivated and membership resumed from previous end date'
+          : 'Student reactivated with fresh membership from today');
+      
+      setSnackbarMessage(`${message}${reactivateSelectedSeat ? ` (Seat ${reactivateSelectedSeat} assigned)` : ''}`);
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setReactivateConfirmOpen(false);
@@ -4964,18 +5014,68 @@ function Students() {
       <Dialog open={reactivateConfirmOpen} onClose={() => {
         setReactivateConfirmOpen(false);
         handleActionClose(); // Close action menu when dialog is cancelled
-      }}>
-        <DialogTitle>Confirm Reactivation</DialogTitle>
+      }} maxWidth="sm" fullWidth>
+        <DialogTitle>Reactivate Student</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to reactivate student "{selectedItemForAction?.name || 'Unknown'}"?
-            This will move them back to the active students list.
+            Reactivating student "{selectedItemForAction?.name || 'Unknown'}"
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-            Student ID: {selectedItemForAction?.id || 'N/A'}, Name: {selectedItemForAction?.name || 'N/A'}
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Student ID: {selectedItemForAction?.id || 'N/A'} | Current reactivationType: {reactivationType}
           </Typography>
 
+          {/* Show previous membership end date if available */}
+          {selectedItemForAction?.membership_till && (() => {
+            const membershipEndDate = new Date(selectedItemForAction.membership_till);
+            const today = new Date();
+            const daysDifference = Math.floor((today - membershipEndDate) / (1000 * 60 * 60 * 24));
+            const isRecentEnd = daysDifference <= 15;
+            
+            return (
+              <Box sx={{ mt: 2, p: 1.5, bgcolor: isRecentEnd ? 'success.light' : 'warning.light', borderRadius: 1, opacity: 0.7 }}>
+                <Typography variant="body2" color="text.primary">
+                  Previous membership ended on: {formatIsoToDMonYYYY(selectedItemForAction.membership_till)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {daysDifference === 0 && "Ended today"}
+                  {daysDifference === 1 && "Ended 1 day ago"}
+                  {daysDifference > 1 && `Ended ${daysDifference} days ago`}
+                  {daysDifference < 0 && `Ends in ${Math.abs(daysDifference)} days`}
+                </Typography>
+              </Box>
+            );
+          })()}
+
+          {/* Reactivation Type Selection */}
           <FormControl fullWidth sx={{ mt: 3 }}>
+            <InputLabel>Reactivation Type</InputLabel>
+            <Select
+              value={reactivationType}
+              onChange={(e) => setReactivationType(e.target.value)}
+              label="Reactivation Type"
+              key={`reactivation-select-${selectedItemForAction?.id}-${reactivationType}`}
+            >
+              <MenuItem value="fresh">
+                <Box>
+                  <Typography variant="body2">Start Fresh from Today</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Updates membership start date to today (recommended for old memberships)
+                  </Typography>
+                </Box>
+              </MenuItem>
+              <MenuItem value="resume">
+                <Box>
+                  <Typography variant="body2">Resume with Original Dates</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Keep original membership dates (recommended for recent memberships)
+                  </Typography>
+                </Box>
+              </MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* Seat Assignment */}
+          <FormControl fullWidth sx={{ mt: 2 }}>
             <InputLabel>Select Seat (Optional)</InputLabel>
             <Select
               value={reactivateSelectedSeat}
@@ -4993,10 +5093,34 @@ function Students() {
             </Select>
             {reactivateAvailableSeats.length === 0 && (
               <Typography variant="caption" color="warning.main" sx={{ mt: 1 }}>
-                No available seats for {selectedItemForAction?.gender || 'this'} gender
+                No available seats for {selectedItemForAction?.sex || 'this'} gender
               </Typography>
             )}
           </FormControl>
+
+          {/* Summary */}
+          <Box sx={{ mt: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+            <Typography variant="subtitle2" gutterBottom>Reactivation Summary:</Typography>
+            <Typography variant="body2">
+              • Type: {reactivationType === 'fresh' ? 'Start Fresh from Today' : 'Resume with Original Dates'}
+            </Typography>
+            <Typography variant="body2">
+              • Membership Start: {reactivationType === 'fresh' 
+                ? formatIsoToDMonYYYY(new Date().toISOString().split('T')[0])
+                : selectedItemForAction?.membership_date 
+                  ? formatIsoToDMonYYYY(selectedItemForAction.membership_date)
+                  : 'Original date'
+              }
+            </Typography>
+            {selectedItemForAction?.membership_till && (
+              <Typography variant="body2">
+                • Membership End: {formatIsoToDMonYYYY(selectedItemForAction.membership_till)}
+              </Typography>
+            )}
+            <Typography variant="body2">
+              • Seat: {reactivateSelectedSeat || 'No seat assigned'}
+            </Typography>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {

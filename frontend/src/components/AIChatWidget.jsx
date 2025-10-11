@@ -471,7 +471,7 @@ Try asking me something like "How many active students do we have?" or click on 
       // Prepare data for download
       const payload = { data, format, filename };
       
-      const response = await fetch('/api/reports/generate', {
+      const response = await fetch('/api/reports/download', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
@@ -491,11 +491,34 @@ Try asking me something like "How many active students do we have?" or click on 
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        
+        // Add success message to chat
+        const successMessage = {
+          id: Date.now(),
+          sender: 'ai',
+          content: `✅ **Download Complete:** ${filename}.${format} has been downloaded successfully.`,
+          timestamp: new Date(),
+          type: 'text'
+        };
+        
+        setMessages(prev => [...prev, successMessage]);
       } else {
-        throw new Error('Download failed');
+        const errorResponse = await response.json().catch(() => ({}));
+        throw new Error(`Download failed: ${errorResponse.message || response.statusText}`);
       }
     } catch (error) {
       console.error('Download error:', error);
+      
+      // Add error message to chat
+      const errorMessage = {
+        id: Date.now(),
+        sender: 'ai',
+        content: `❌ **Download Error:** ${error.message}. Please try again or contact support if the issue persists.`,
+        timestamp: new Date(),
+        type: 'text'
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
