@@ -280,7 +280,7 @@ router.post('/', async (req, res) => {
       let monthlyFees = null;
       try {
         if (student.membership_type) {
-          const feeCfgQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+          const feeCfgQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE';
           const feeCfgRes = await client.query(feeCfgQuery, [student.membership_type]);
           if (feeCfgRes.rows.length > 0) {
             const cfg = feeCfgRes.rows[0];
@@ -334,7 +334,7 @@ router.post('/', async (req, res) => {
         rl.businessLogic('Processing membership extension');
         // Determine membership_type for student (default to 'full_time' if missing)
         const membershipType = student.membership_type;
-        const feeConfigQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+        const feeConfigQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE';
         const feeConfigResult = await client.query(feeConfigQuery, [membershipType]);
         if (feeConfigResult.rows.length > 0) {
           const cfg = feeConfigResult.rows[0];
@@ -363,7 +363,7 @@ router.post('/', async (req, res) => {
       if (extend_membership && payment_type === 'refund') {
         rl.businessLogic('Processing membership reduction for refund');
         const membershipType = student.membership_type;
-        const feeConfigQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+        const feeConfigQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE';
         const feeConfigResult = await client.query(feeConfigQuery, [membershipType]);
         if (feeConfigResult.rows.length > 0) {
           const cfg = feeConfigResult.rows[0];
@@ -713,7 +713,7 @@ router.delete('/:id', async (req, res) => {
             if (!membershipType) {
               rl.warn('Student has no membership type - skipping membership adjustment', { studentId: student.id });
             } else {
-              const feeCfg = await client.query('SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1', [membershipType]);
+              const feeCfg = await client.query('SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE', [membershipType]);
               if (feeCfg.rows.length > 0) {
                 const cfg = feeCfg.rows[0];
                 const monthlyFees = parseFloat(student.sex === 'male' ? cfg.male_monthly_fees : cfg.female_monthly_fees);
@@ -885,7 +885,7 @@ router.post('/validate', async (req, res) => {
         
         // Get fee configuration for limits
         if (student.membership_type) {
-          const feeCfgQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1';
+          const feeCfgQuery = 'SELECT male_monthly_fees, female_monthly_fees FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE';
           const feeCfgRes = await pool.query(feeCfgQuery, [student.membership_type]);
           if (feeCfgRes.rows.length > 0) {
             const cfg = feeCfgRes.rows[0];

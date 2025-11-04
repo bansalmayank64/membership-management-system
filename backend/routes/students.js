@@ -1088,7 +1088,7 @@ router.get('/fee-config/:membershipType/:gender', async (req, res) => {
     }
 
     logger.info('Fetching fee configuration from DB', { requestId, membershipType, gender });
-    const query = 'SELECT * FROM student_fees_config WHERE membership_type = $1';
+    const query = 'SELECT * FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE';
     const result = await pool.query(query, [membershipType]);
 
     if (result.rows.length === 0) {
@@ -1116,7 +1116,7 @@ router.get('/fee-config/:gender', async (req, res) => {
     const { gender } = req.params;
     logger.warn('Deprecated endpoint /fee-config/:gender used; mapping to membership_type=full_time', { requestId, gender });
     // Reuse the new handler logic by querying membership_type='full_time'
-    const result = await pool.query('SELECT * FROM student_fees_config WHERE membership_type = $1', ['full_time']);
+    const result = await pool.query('SELECT * FROM student_fees_config WHERE membership_type = $1 AND is_active = TRUE', ['full_time']);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Fee configuration not found for membership_type=full_time' });
     const feeConfig = result.rows[0];
     const fee = (gender && gender.toLowerCase() === 'male') ? feeConfig.male_monthly_fees : feeConfig.female_monthly_fees;

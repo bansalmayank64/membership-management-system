@@ -132,6 +132,7 @@ CREATE TABLE student_fees_config (
     membership_type VARCHAR(50) NOT NULL,
     male_monthly_fees NUMERIC(10,2) NOT NULL,
     female_monthly_fees NUMERIC(10,2) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(membership_type)
@@ -302,6 +303,8 @@ CREATE INDEX idx_payments_date ON payments(payment_date);
 CREATE INDEX idx_expenses_date ON expenses(expense_date);
 -- Index by category id for faster category-based queries
 CREATE INDEX idx_expenses_category_id ON expenses(expense_category_id);
+-- Index for soft delete filtering on student_fees_config
+CREATE INDEX idx_student_fees_config_is_active ON student_fees_config(is_active);
 
 -- Create a view to demonstrate how to check seat status by joining with students table
 -- Status is determined as follows:

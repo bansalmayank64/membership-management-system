@@ -773,6 +773,7 @@ router.get('/fees-config', auth, async (req, res) => {
   try {
     const result = await pool.query(`
   SELECT * FROM student_fees_config 
+  WHERE is_active = TRUE
   ORDER BY membership_type
     `);
 
@@ -802,7 +803,7 @@ router.post('/fees-config', auth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Both male_monthly_fees and female_monthly_fees must be positive numbers' });
     }
 
-    // Check if membership type already exists
+    // Check if membership type already exists (including soft-deleted ones)
     const existingResult = await pool.query(
       'SELECT id FROM student_fees_config WHERE membership_type = $1', 
       [membership_type.trim()]
@@ -814,8 +815,8 @@ router.post('/fees-config', auth, requireAdmin, async (req, res) => {
 
     // Insert new membership type
     const insertResult = await pool.query(`
-      INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees)
-      VALUES ($1, $2, $3)
+      INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees, is_active)
+      VALUES ($1, $2, $3, TRUE)
       RETURNING *
     `, [membership_type.trim(), male_monthly_fees, female_monthly_fees]);
     
@@ -843,15 +844,15 @@ router.put('/fees-config/:membershipType', auth, requireAdmin, async (req, res) 
     const result = await pool.query(`
       UPDATE student_fees_config 
       SET male_monthly_fees = $1, female_monthly_fees = $2, updated_at = CURRENT_TIMESTAMP
-      WHERE membership_type = $3
+      WHERE membership_type = $3 AND is_active = TRUE
       RETURNING *
     `, [male_monthly_fees, female_monthly_fees, membershipType]);
 
     if (result.rows.length === 0) {
       // If no record exists, create one
       const insertResult = await pool.query(`
-        INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees)
-        VALUES ($1, $2, $3)
+        INSERT INTO student_fees_config (membership_type, male_monthly_fees, female_monthly_fees, is_active)
+        VALUES ($1, $2, $3, TRUE)
         RETURNING *
       `, [membershipType, male_monthly_fees, female_monthly_fees]);
       
@@ -890,21 +891,23 @@ router.delete('/fees-config/:membershipType', auth, requireAdmin, async (req, re
 
     const studentCount = parseInt(studentsUsingType.rows[0].count);
     
+    // Note: With soft delete, we allow "deletion" even if students are using this type
+    // The membership type will be hidden from admin interface but data is preserved
     if (studentCount > 0) {
-      return res.status(400).json({ 
-        error: `Cannot delete membership type. ${studentCount} student(s) are currently using this membership type.`,
-        studentsCount: studentCount
+      logger.info(`Soft deleting membership type with ${studentCount} active students`, { 
+        membershipType, 
+        studentCount 
       });
     }
 
-    // Delete the membership type
+    // Soft delete the membership type (mark as inactive)
     const result = await pool.query(
-      'DELETE FROM student_fees_config WHERE membership_type = $1 RETURNING *', 
+      'UPDATE student_fees_config SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE membership_type = $1 AND is_active = TRUE RETURNING *', 
       [membershipType]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Membership type not found' });
+      return res.status(404).json({ error: 'Membership type not found or already deleted' });
     }
 
     res.json({ 
@@ -942,7 +945,7 @@ router.put('/fees-config/:membershipType/rename', auth, requireAdmin, async (req
 
     const newName = new_membership_type.trim();
 
-    // Check if new name already exists
+    // Check if new name already exists (including soft-deleted ones)
     const existingCheck = await pool.query(
       'SELECT id FROM student_fees_config WHERE membership_type = $1', 
       [newName]
@@ -961,7 +964,7 @@ router.put('/fees-config/:membershipType/rename', auth, requireAdmin, async (req
       const configResult = await client.query(`
         UPDATE student_fees_config 
         SET membership_type = $1, updated_at = CURRENT_TIMESTAMP
-        WHERE membership_type = $2
+        WHERE membership_type = $2 AND is_active = TRUE
         RETURNING *
       `, [newName, membershipType]);
 
