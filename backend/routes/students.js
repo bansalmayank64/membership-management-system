@@ -417,10 +417,10 @@ router.post('/', async (req, res) => {
           $4,                             -- aadhaar_number (user input)
           $5,                             -- address (user input)
           $6,                             -- sex (user input)
-      $7,                             -- membership_type (user input)
-      $8,                             -- seat_number (user input)
+          $7,                             -- membership_type (user input)
+          $8,                             -- seat_number (user input)
           $9,                             -- membership_date (from client or null)
-          CURRENT_DATE,                   -- membership_till (default to today's date when created)
+          $9,                             -- membership_till (set to membership start date)
           'active',                       -- membership_status
           CURRENT_TIMESTAMP,              -- created_at
           CURRENT_TIMESTAMP,              -- updated_at
