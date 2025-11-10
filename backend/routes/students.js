@@ -817,12 +817,13 @@ router.patch('/:id/activate', async (req, res) => {
         });
       }
 
-      // Update student with new activation details (only membership_status and membership_date)
+      // Update student with new activation details (membership_status, membership_date, and membership_till)
       logger.info('Updating student with new activation details', { requestId, studentId: id });
       const updateQuery = `
         UPDATE students 
         SET membership_status = 'active', 
             membership_date = $1,
+            membership_till = $1,
             updated_at = CURRENT_TIMESTAMP, 
             modified_by = $2 
         WHERE id = $3 
