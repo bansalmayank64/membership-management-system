@@ -47,6 +47,7 @@ import { Autocomplete } from '@mui/material';
 import Footer from '../components/Footer';
 import AddPaymentDialog from '../components/AddPaymentDialog';
 import StudentDetailsDialog from '../components/StudentDetailsDialog';
+import StudentActivitiesDialog from '../components/StudentActivitiesDialog';
 import logger from '../utils/clientLogger';
 import {
   isoToISTDateInput,
@@ -82,7 +83,8 @@ import {
   CalendarToday as CalendarTodayIcon,
   AccessTime as AccessTimeIcon,
   Person as PersonIcon,
-  Clear as ClearIcon
+  Clear as ClearIcon,
+  Timeline as TimelineIcon
 } from '@mui/icons-material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import CloseIcon from '@mui/icons-material/Close';
@@ -296,6 +298,8 @@ function Students() {
   const [seatHistoryOpen, setSeatHistoryOpen] = useState(false);
   // Delete confirmation dialog state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // Student Activities Dialog
+  const [activitiesDialogOpen, setActivitiesDialogOpen] = useState(false);
   // Permanent delete (admin-only) dialog state
   const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
   const [permanentDeleteConfirmText, setPermanentDeleteConfirmText] = useState('');
@@ -1626,6 +1630,18 @@ function Students() {
       setHistoryLoading(false);
     }
     handleActionClose();
+  };
+
+  // Handle view activities (combined payment + change history)
+  const handleViewActivities = () => {
+    logger.debug('[handleViewActivities] Called', { selectedItemForAction });
+    console.log('🔍 DEBUG: User role check:', { user, role: user?.role, isAdmin: user?.role === 'admin' });
+    if (!selectedItemForAction) {
+      logger.error('[handleViewActivities] No student selected');
+      return;
+    }
+    setActivitiesDialogOpen(true);
+    closeMenuOnly();
   };
 
   // Payment history handler (accept optional student argument or handle being invoked as a menu click event)
@@ -4042,6 +4058,14 @@ function Students() {
               </ListItemIcon>
               <ListItemText>Student Seat History</ListItemText>
             </MenuItem>
+            {user?.role === 'admin' && (
+              <MenuItem key="viewActivities" onClick={handleViewActivities}>
+                <ListItemIcon>
+                  <TimelineIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>View Activities</ListItemText>
+              </MenuItem>
+            )}
             <Divider key="divider" />
             <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
               <ListItemIcon>
@@ -4088,6 +4112,14 @@ function Students() {
                 </ListItemIcon>
                 <ListItemText>Student Seat History</ListItemText>
               </MenuItem>,
+              ...(user?.role === 'admin' ? [
+                <MenuItem key="viewActivities" onClick={handleViewActivities}>
+                  <ListItemIcon>
+                    <TimelineIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>View Activities</ListItemText>
+                </MenuItem>
+              ] : []),
               <Divider key="divider" />,
               user && user.role === 'admin' && (
                 <MenuItem key="permanentDelete" onClick={() => { setPermanentDeleteDialogOpen(true); }} sx={{ color: 'error.main' }}>
@@ -4142,6 +4174,14 @@ function Students() {
                 </ListItemIcon>
                 <ListItemText>Student Seat History</ListItemText>
               </MenuItem>,
+              ...(user?.role === 'admin' ? [
+                <MenuItem key="viewActivities" onClick={handleViewActivities}>
+                  <ListItemIcon>
+                    <TimelineIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>View Activities</ListItemText>
+                </MenuItem>
+              ] : []),
               <Divider key="divider" />,
               <MenuItem key="deactivate" onClick={handleDeactivateStudent} sx={{ color: 'error.main' }}>
                 <ListItemIcon>
@@ -4172,6 +4212,14 @@ function Students() {
             </ListItemIcon>
             <ListItemText>Student Seat History</ListItemText>
           </MenuItem>,
+          ...(user?.role === 'admin' ? [
+            <MenuItem key="viewActivities" onClick={handleViewActivities}>
+              <ListItemIcon>
+                <TimelineIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>View Activities</ListItemText>
+            </MenuItem>
+          ] : []),
           <Divider key="divider" />,
           // Admin-only permanent delete option (only for inactive/deactivated students)
           user && user.role === 'admin' && (
@@ -4957,6 +5005,13 @@ function Students() {
           }); setEditStudentOpen(true);
         }}
         onViewPayments={(s) => { setSelectedItemForAction({ ...s }); handlePaymentHistory(s); }}
+      />
+
+      {/* Student Activities Dialog */}
+      <StudentActivitiesDialog
+        open={activitiesDialogOpen}
+        onClose={() => setActivitiesDialogOpen(false)}
+        student={selectedItemForAction}
       />
 
       {/* Deactivate Confirmation Dialog */}

@@ -1052,7 +1052,6 @@ router.get('/:id/history', async (req, res) => {
       LEFT JOIN users u ON sh.modified_by = u.id
       WHERE sh.student_id = $1
       ORDER BY sh.start_date DESC, sh.action_timestamp DESC
-      LIMIT 50
     `;
     
   logger.queryStart('student history', query, [id]);
@@ -1067,6 +1066,148 @@ router.get('/:id/history', async (req, res) => {
   const totalTime = Date.now() - startTime;
   logger.requestError('GET', `/api/students/${req.params.id}/history`, requestId, startTime, error);
   res.status(500).json({ error: 'Failed to fetch student history', details: error.message, requestId: requestId, timestamp: new Date().toISOString() });
+  }
+});
+
+// GET /api/students/:id/activities - Get combined student activities (changes + seat assignments)
+router.get('/:id/activities', async (req, res) => {
+  const requestId = `student-activities-${Date.now()}`;
+  const startTime = Date.now();
+  
+  try {
+    logger.info('GET /api/students/:id/activities start', { requestId, params: req.params });
+    const { id } = req.params;
+    if (!id) {
+      logger.warn('Validation failed: student id required', { requestId });
+      return res.status(400).json({ error: 'Student ID parameter is required', requestId: requestId, timestamp: new Date().toISOString() });
+    }
+    
+    // Get both students_history (change events) and seats_history (seat assignments)
+    // Use LAG to get previous values for showing what changed in UPDATE actions
+    const query = `
+      SELECT * FROM (
+        SELECT 
+          'student_change' as record_type,
+          sh.history_id,
+          sh.id as student_id,
+          sh.action,
+          sh.action_timestamp,
+          sh.name,
+          sh.father_name,
+          sh.contact_number,
+          sh.aadhaar_number,
+          sh.address,
+          sh.sex,
+          sh.seat_number,
+          sh.membership_date,
+          sh.membership_till,
+          sh.membership_status,
+          sh.modified_by,
+          u.username as modified_by_name,
+          -- Previous values using LAG window function
+          LAG(sh.name) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_name,
+          LAG(sh.father_name) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_father_name,
+          LAG(sh.contact_number) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_contact_number,
+          LAG(sh.aadhaar_number) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_aadhaar_number,
+          LAG(sh.address) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_address,
+          LAG(sh.sex) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_sex,
+          LAG(sh.seat_number) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_seat_number,
+          LAG(sh.membership_date) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_membership_date,
+          LAG(sh.membership_till) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_membership_till,
+          LAG(sh.membership_status) OVER (PARTITION BY sh.id ORDER BY sh.action_timestamp, sh.history_id) as prev_membership_status
+        FROM students_history sh
+        LEFT JOIN users u ON sh.modified_by = u.id
+        WHERE sh.id = $1
+        
+        UNION ALL
+        
+        SELECT 
+          'seat_assignment' as record_type,
+          sth.history_id,
+          sth.student_id,
+          sth.action,
+          sth.action_timestamp,
+          sth.student_name as name,
+          NULL as father_name,
+          NULL as contact_number,
+          NULL as aadhaar_number,
+          NULL as address,
+          sth.occupant_sex as sex,
+          sth.seat_number,
+          sth.start_date as membership_date,
+          sth.end_date as membership_till,
+          NULL as membership_status,
+          sth.modified_by,
+          u2.username as modified_by_name,
+          -- No previous values for seat assignments
+          NULL as prev_name,
+          NULL as prev_father_name,
+          NULL as prev_contact_number,
+          NULL as prev_aadhaar_number,
+          NULL as prev_address,
+          NULL as prev_sex,
+          NULL as prev_seat_number,
+          NULL as prev_membership_date,
+          NULL as prev_membership_till,
+          NULL as prev_membership_status
+        FROM seats_history sth
+        LEFT JOIN users u2 ON sth.modified_by = u2.id
+        WHERE sth.student_id = $1
+      ) combined
+      ORDER BY action_timestamp DESC, 
+               CASE WHEN action = 'INSERT' THEN 1 ELSE 0 END ASC
+    `;
+    
+  logger.queryStart('student activities', query, [id]);
+  const queryStart = Date.now();
+  const result = await pool.query(query, [id]);
+  const queryTime = Date.now() - queryStart;
+  logger.querySuccess('student activities', null, result, false);
+  logger.info('GET student activities success', { requestId, queryTime, count: result.rows.length });
+  res.json(result.rows);
+    
+  } catch (error) {
+  const totalTime = Date.now() - startTime;
+  logger.requestError('GET', `/api/students/${req.params.id}/activities`, requestId, startTime, error);
+  res.status(500).json({ error: 'Failed to fetch student activities', details: error.message, requestId: requestId, timestamp: new Date().toISOString() });
+  }
+});
+
+// GET /api/students/:id/payments - Get student payment history
+router.get('/:id/payments', async (req, res) => {
+  const requestId = `student-payments-${Date.now()}`;
+  const startTime = Date.now();
+  
+  try {
+    logger.info('GET /api/students/:id/payments start', { requestId, params: req.params });
+    const { id } = req.params;
+    if (!id) {
+      logger.warn('Validation failed: student id required', { requestId });
+      return res.status(400).json({ error: 'Student ID parameter is required', requestId: requestId, timestamp: new Date().toISOString() });
+    }
+    
+    const query = `
+      SELECT 
+        p.*,
+        u.username as modified_by_name
+      FROM payments p
+      LEFT JOIN users u ON p.modified_by = u.id
+      WHERE p.student_id = $1
+      ORDER BY p.payment_date DESC
+    `;
+    
+    logger.queryStart('student payments', query, [id]);
+    const queryStart = Date.now();
+    const result = await pool.query(query, [id]);
+    const queryTime = Date.now() - queryStart;
+    logger.querySuccess('student payments', null, result, false);
+    logger.info('GET student payments success', { requestId, queryTime, count: result.rows.length });
+    res.json(result.rows);
+    
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    logger.requestError('GET', `/api/students/${req.params.id}/payments`, requestId, startTime, error);
+    res.status(500).json({ error: 'Failed to fetch student payments', details: error.message, requestId: requestId, timestamp: new Date().toISOString() });
   }
 });
 
@@ -1321,7 +1462,6 @@ router.get('/reports/expired/preview', async (req, res) => {
       WHERE s.membership_status = 'expired' 
          OR (s.membership_till < CURRENT_DATE AND s.membership_status != 'inactive')
       ORDER BY s.membership_till ASC, s.name ASC
-      LIMIT 100
     `;
     
     logger.queryStart('expired students preview', query);
