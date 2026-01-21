@@ -4812,17 +4812,19 @@ function Students() {
                 )}
               </Select>
             </FormControl>
-            <TextField
-              fullWidth
-              label="Membership Start Date"
-              type="date"
-              value={editStudent.membershipDate}
-              onChange={(e) => setEditStudent({ ...editStudent, membershipDate: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-              required
-              error={editAttempted && (!editStudent.membershipDate || !editStudent.membershipDate.trim())}
-              helperText={editAttempted && (!editStudent.membershipDate || !editStudent.membershipDate.trim()) ? 'Membership start date is required' : ''}
-            />
+            {user && user.role === 'admin' && (
+              <TextField
+                fullWidth
+                label="Membership Start Date"
+                type="date"
+                value={editStudent.membershipDate}
+                onChange={(e) => setEditStudent({ ...editStudent, membershipDate: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                required
+                error={editAttempted && (!editStudent.membershipDate || !editStudent.membershipDate.trim())}
+                helperText={editAttempted && (!editStudent.membershipDate || !editStudent.membershipDate.trim()) ? 'Membership start date is required' : ''}
+              />
+            )}
             <FormControl fullWidth disabled={!editStudent.sex || editSeatLoading}>
               <InputLabel>Seat Number</InputLabel>
               <Select
