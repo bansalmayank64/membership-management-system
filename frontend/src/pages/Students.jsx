@@ -4990,7 +4990,9 @@ function Students() {
         error={error}
         totalPaid={viewStudentTotalPaid}
         onEdit={(s) => {
-          setViewStudentOpen(false); setSelectedItemForAction({ ...s }); setEditStudent({
+          setViewStudentOpen(false); 
+          setSelectedItemForAction({ ...s }); 
+          const editData = {
             id: s.id,
             name: s.name,
             contactNumber: s.contact_number,
@@ -5002,7 +5004,10 @@ function Students() {
             membershipType: s.membership_type || s.membershipType,
             aadhaarNumber: s.aadhaar_number || s.aadhaarNumber || '',
             address: s.address || ''
-          }); setEditStudentOpen(true);
+          };
+          setEditStudent(editData);
+          if (editData.sex) fetchEditAvailableSeats(editData.sex, editData.seatNumber);
+          setEditStudentOpen(true);
         }}
         onViewPayments={(s) => { setSelectedItemForAction({ ...s }); handlePaymentHistory(s); }}
       />

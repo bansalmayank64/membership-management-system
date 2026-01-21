@@ -383,8 +383,15 @@ export default function StudentActivitiesDialog({ open, onClose, student }) {
         </Box>
       </DialogTitle>
 
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="activity tabs">
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', px: { xs: 1, md: 3 } }}>
+        <Tabs 
+          value={tabValue} 
+          onChange={handleTabChange} 
+          aria-label="activity tabs"
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+        >
           <Tab 
             label={`All (${activities.length})`} 
             icon={<HistoryIcon />} 
