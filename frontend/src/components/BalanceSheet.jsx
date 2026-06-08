@@ -408,7 +408,12 @@ export default function BalanceSheet({ startDate: propStartDate, endDate: propEn
                       <TableBody>
                         {cumulativeRows.map((row) => (
                           <TableRow key={row.date} hover>
-                            <TableCell>{formatDateTimeForDisplay(`${row.date}T00:00:00`)}</TableCell>
+                            <TableCell>
+                              {new Date(`${row.date}T00:00:00`).toLocaleDateString('en-GB', {
+                                day: '2-digit',
+                                month: 'short',
+                              })}
+                            </TableCell>
                             <TableCell align="right">₹{Number(row.expenses || 0).toLocaleString()}</TableCell>
                             <TableCell align="right">₹{Number(row.cumulativeExpenses || 0).toLocaleString()}</TableCell>
                             <TableCell align="right">₹{Number(row.cash || 0).toLocaleString()}</TableCell>
