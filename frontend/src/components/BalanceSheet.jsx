@@ -137,7 +137,10 @@ export default function BalanceSheet({ startDate: propStartDate, endDate: propEn
 
       for (let cursor = new Date(cursorStart); cursor <= cursorEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
         const key = cursor.toISOString().slice(0, 10);
-        const current = dayMap.get(key) || { expenses: 0, cash: 0, online: 0, totalPayments: 0 };
+        const current = dayMap.get(key);
+        if (!current) {
+          continue; // Skip dates not present in source
+        }
         cumulativeExpenses += current.expenses;
         cumulativeCash += current.cash;
         cumulativeOnline += current.online;
