@@ -16,6 +16,8 @@ import {
   CircularProgress,
   Divider,
   Collapse,
+  ToggleButton,
+  ToggleButtonGroup,
   useTheme,
   useMediaQuery,
   Card,
@@ -43,6 +45,9 @@ export default function BalanceSheet({ startDate: propStartDate, endDate: propEn
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [reportMode, setReportMode] = useState('detailed');
+  const [cumulativeRows, setCumulativeRows] = useState([]);
+  const [cumulativeLoading, setCumulativeLoading] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [loadingGroups, setLoadingGroups] = useState({});
   const timersRef = useRef({});
@@ -71,6 +76,104 @@ export default function BalanceSheet({ startDate: propStartDate, endDate: propEn
       .catch(err => setError(err.message || 'Failed to load'))
       .finally(() => setLoading(false));
   }, [startDate, endDate]);
+
+  const handleReportModeChange = (_, nextMode) => {
+    if (!nextMode) return;
+    setReportMode(nextMode);
+    const params = new URLSearchParams(location.search);
+    params.set('mode', nextMode);
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+  };
+
+  const fetchCumulativeReport = async () => {
+    setCumulativeLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      params.set('page', '0');
+      params.set('pageSize', '100000');
+
+      const [paymentsResp, expensesResp] = await Promise.all([
+        fetch(`/api/payments?${params.toString()}`, { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` } }),
+        fetch(`/api/expenses?${params.toString()}`, { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` } })
+      ]);
+
+      if (!paymentsResp.ok || !expensesResp.ok) throw new Error('Failed to load cumulative report');
+
+      const paymentsPayload = await paymentsResp.json();
+      const expensesPayload = await expensesResp.json();
+      const payments = Array.isArray(paymentsPayload) ? paymentsPayload : (paymentsPayload.payments || []);
+      const expenses = Array.isArray(expensesPayload) ? expensesPayload : (expensesPayload.expenses || []);
+
+      const dayMap = new Map();
+      expenses.forEach(item => {
+        const key = (item.expense_date || '').slice(0, 10);
+        if (!key) return;
+        const current = dayMap.get(key) || { expenses: 0, cash: 0, online: 0, totalPayments: 0 };
+        current.expenses += Number(item.amount) || 0;
+        dayMap.set(key, current);
+      });
+      payments.forEach(item => {
+        const key = (item.payment_date || '').slice(0, 10);
+        if (!key) return;
+        const current = dayMap.get(key) || { expenses: 0, cash: 0, online: 0, totalPayments: 0 };
+        const amount = Number(item.amount) || 0;
+        if ((item.payment_mode || '').toLowerCase() === 'cash') current.cash += amount;
+        else if ((item.payment_mode || '').toLowerCase() === 'online') current.online += amount;
+        current.totalPayments += amount;
+        dayMap.set(key, current);
+      });
+
+      const start = startDate ? new Date(`${startDate}T00:00:00Z`) : null;
+      const end = endDate ? new Date(`${endDate}T23:59:59Z`) : null;
+      const rows = [];
+      let cumulativeExpenses = 0;
+      let cumulativeCash = 0;
+      let cumulativeOnline = 0;
+      let cumulativeTotalPayments = 0;
+      const cursorStart = start ? new Date(start) : new Date(new Date().getFullYear(), 0, 1);
+      const cursorEnd = end ? new Date(end) : new Date(new Date().getFullYear(), 11, 31);
+
+      for (let cursor = new Date(cursorStart); cursor <= cursorEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+        const key = cursor.toISOString().slice(0, 10);
+        const current = dayMap.get(key) || { expenses: 0, cash: 0, online: 0, totalPayments: 0 };
+        cumulativeExpenses += current.expenses;
+        cumulativeCash += current.cash;
+        cumulativeOnline += current.online;
+        cumulativeTotalPayments += current.totalPayments;
+
+        rows.push({
+          date: key,
+          expenses: current.expenses,
+          cumulativeExpenses,
+          cash: current.cash,
+          cumulativeCash,
+          online: current.online,
+          cumulativeOnline,
+          totalPayments: current.totalPayments,
+          cumulativeTotalPayments,
+        });
+      }
+
+      setCumulativeRows(rows);
+    } catch (err) {
+      console.error('fetchCumulativeReport error', err);
+      setCumulativeRows([]);
+    } finally {
+      setCumulativeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const modeFromUrl = query.get('mode');
+    if (modeFromUrl === 'detailed' || modeFromUrl === 'simplified') setReportMode(modeFromUrl);
+    else setReportMode('detailed');
+  }, [query]);
+
+  useEffect(() => {
+    if (reportMode === 'detailed') fetchCumulativeReport();
+  }, [reportMode, startDate, endDate]);
 
   const toggleExpand = (key) => {
     // if already loading for this group, ignore click
@@ -265,375 +368,422 @@ export default function BalanceSheet({ startDate: propStartDate, endDate: propEn
           <Typography>No data</Typography>
         ) : (
           <Box>
-            <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'baseline' }}>
-              <Typography variant="h6">Income: ₹{Number(data.totalIncome || 0).toLocaleString()}</Typography>
-              <Typography variant="h6" sx={{ color: 'error.main' }}>Expenses: ₹{Number(data.totalExpenses || 0).toLocaleString()}</Typography>
-              <Typography variant="h6" sx={{ color: (data.net >= 0 ? 'success.main' : 'error.main') }}>Net: ₹{Number(data.net || 0).toLocaleString()}</Typography>
+            <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <Typography variant="h6">Income: ₹{Number(data.totalIncome || 0).toLocaleString()}</Typography>
+                <Typography variant="h6" sx={{ color: 'error.main' }}>Expenses: ₹{Number(data.totalExpenses || 0).toLocaleString()}</Typography>
+                <Typography variant="h6" sx={{ color: (data.net >= 0 ? 'success.main' : 'error.main') }}>Net: ₹{Number(data.net || 0).toLocaleString()}</Typography>
+              </Box>
+              <ToggleButtonGroup value={reportMode} exclusive onChange={handleReportModeChange} size="small" color="primary">
+                <ToggleButton value="detailed">Detailed</ToggleButton>
+                <ToggleButton value="simplified">Simplified</ToggleButton>
+              </ToggleButtonGroup>
             </Box>
 
             <Divider sx={{ mb: 2 }} />
 
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Income Breakdown</Typography>
-            {isMobile ? (
+            {reportMode === 'detailed' ? (
               <Box>
-                {data.paymentsByType && data.paymentsByType.length > 0 ? data.paymentsByType.map((p, idx) => {
-                  const keyName = `pay-${idx}`;
-                  const pageState = groupPages[keyName] || { page: 0, total: (p.items ? p.items.length : 0) };
-                  const loaded = p.items ? p.items.length : 0;
-                  const allLoaded = pageState.total && loaded >= pageState.total;
-                  return (
-                    <Card key={`pay-card-${idx}`} sx={{ mb: 1 }}>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <IconButton size="small" onClick={() => toggleExpand(keyName)} disabled={!!loadingGroups[keyName]}>
-                              {expanded[keyName] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                            </IconButton>
-                            {loadingGroups[keyName] ? <CircularProgress size={18} /> : null}
-                            <Typography sx={{ fontWeight: 700 }}>{p.type}</Typography>
-                          </Box>
-                          <Typography>₹{Number(p.amount || 0).toLocaleString()}</Typography>
-                        </Box>
-                        <Collapse
-                          in={!!expanded[keyName]}
-                          timeout="auto"
-                          unmountOnExit
-                          onEntered={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
-                          onExited={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
-                        >
-                          <List>
-                            {p.items.map((it, i2) => (
-                              <ListItem key={`pitem-${idx}-${i2}`}>
-                                <ListItemText primary={`${it.student_name || it.student_id || 'N/A'} — ₹${Number(it.amount || 0).toLocaleString()}`} secondary={`${formatDateTimeForDisplay(it.payment_date)} • ${it.payment_mode || ''}`} />
-                              </ListItem>
-                            ))}
-                          </List>
-                          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                            <Button size="small" onClick={async () => {
-                              try {
-                                setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
-                                const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
-                                const resp = await financeService.getGroupItems({ group: 'payments', key: p.type, startDate, endDate, page: nextPage, pageSize: 10 });
-                                setData(prev => {
-                                  if (!prev) return prev;
-                                  const newPayments = (prev.paymentsByType || []).map((g, gi) => {
-                                    if (gi === idx) {
-                                      return { ...g, items: (g.items || []).concat(resp.items || []) };
-                                    }
-                                    return g;
-                                  });
-                                  return { ...prev, paymentsByType: newPayments };
-                                });
-                                setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
-                              } catch (err) {
-                                console.error('Load more payments error', err && err.message ? err.message : err, err && err.body ? err.body : null);
-                                setError(err && err.message ? err.message : 'Failed to load more payments');
-                              } finally {
-                                setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
-                              }
-                            }} disabled={!!loadingGroups[keyName] || allLoaded}>
-                              {loadingGroups[keyName] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
-                            </Button>
-                          </Box>
-                        </Collapse>
-                      </CardContent>
-                    </Card>
-                  );
-                }) : (
-                  <Typography>No income</Typography>
-                )}
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Type</TableCell>
-                      <TableCell>Amount (₹)</TableCell>
-                      <TableCell>Details</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.paymentsByType && data.paymentsByType.length > 0 ? data.paymentsByType.map((p, idx) => (
-                        <React.Fragment key={`pay-group-${idx}`}>
-                          <TableRow key={`p-${idx}`}>
-                            <TableCell>
-                              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                                <IconButton size="small" onClick={() => toggleExpand(`pay-${idx}`)} disabled={!!loadingGroups[`pay-${idx}`]}>
-                                  {expanded[`pay-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                                </IconButton>
-                                {loadingGroups[`pay-${idx}`] ? <CircularProgress size={18} /> : null}
-                                <Typography component="span">{p.type}</Typography>
-                              </Box>
-                            </TableCell>
-                            <TableCell>₹{Number(p.amount || 0).toLocaleString()}</TableCell>
-                            <TableCell>{p.items.length} item(s)</TableCell>
-                          </TableRow>
-                          <TableRow key={`p-collapse-${idx}`}>
-                            <TableCell colSpan={3} sx={{ p: 0, border: 0 }}>
-                              <Collapse
-                                in={!!expanded[`pay-${idx}`]}
-                                timeout="auto"
-                                unmountOnExit
-                                onEntered={() => setLoadingGroups(prev => ({ ...prev, [`pay-${idx}`]: false }))}
-                                onExited={() => setLoadingGroups(prev => ({ ...prev, [`pay-${idx}`]: false }))}
-                              >
-                                <Box sx={{ p: 1 }}>
-                                  <Table size="small">
-                                    <TableHead>
-                                      <TableRow>
-                                        <TableCell>Student</TableCell>
-                                        <TableCell>Amount</TableCell>
-                                        <TableCell>Type</TableCell>
-                                        <TableCell>Date</TableCell>
-                                        <TableCell>Mode</TableCell>
-                                      </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                      {p.items.map((it, i2) => (
-                                        <TableRow key={`pitem-${idx}-${i2}`}>
-                                          <TableCell>{it.student_name || it.student_id || 'N/A'}</TableCell>
-                                          <TableCell>₹{Number(it.amount || 0).toLocaleString()}</TableCell>
-                                          <TableCell>{it.payment_type}</TableCell>
-                                          <TableCell>{formatDateTimeForDisplay(it.payment_date)}</TableCell>
-                                          <TableCell>{it.payment_mode}</TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                  {/* Load more for payments group */}
-                                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                                    {(() => {
-                                      const keyName = `pay-${idx}`;
-                                      const pageState = groupPages[keyName] || { page: 0, total: (p.items ? p.items.length : 0) };
-                                      const loaded = p.items ? p.items.length : 0;
-                                      const allLoaded = pageState.total && loaded >= pageState.total;
-                                      return (
-                                        <Button
-                                          size="small"
-                                          onClick={async () => {
-                                            try {
-                                              setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
-                                              const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
-                                              const resp = await financeService.getGroupItems({ group: 'payments', key: p.type, startDate, endDate, page: nextPage, pageSize: 10 });
-                                              // append items
-                                              setData(prev => {
-                                                if (!prev) return prev;
-                                                const newPayments = (prev.paymentsByType || []).map((g, gi) => {
-                                                  if (gi === idx) {
-                                                    return { ...g, items: (g.items || []).concat(resp.items || []) };
-                                                  }
-                                                  return g;
-                                                });
-                                                return { ...prev, paymentsByType: newPayments };
-                                              });
-                                              setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
-                                            } catch (err) {
-                                              // Log detailed error info and show brief message in UI
-                                              console.error('Load more payments error', err && err.message ? err.message : err, err && err.body ? err.body : null);
-                                              setError(err && err.message ? err.message : 'Failed to load more payments');
-                                            } finally {
-                                              setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
-                                            }
-                                          }}
-                                          disabled={!!loadingGroups[`pay-${idx}`] || allLoaded}
-                                        >
-                                          {loadingGroups[`pay-${idx}`] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
-                                        </Button>
-                                      );
-                                    })()}
-                                  </Box>
-                                </Box>
-                              </Collapse>
-                            </TableCell>
-                          </TableRow>
-                        </React.Fragment>
-                      )) : (
-                      <TableRow><TableCell colSpan={4}>No income</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-
-            <Box sx={{ my: 2 }} />
-
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Expenses Breakdown</Typography>
-            {isMobile ? (
-              <Box>
-                {data.expenseByCategory && data.expenseByCategory.length > 0 ? data.expenseByCategory.map((c, idx) => {
-                  const keyName = `exp-${idx}`;
-                  const pageState = groupPages[keyName] || { page: 0, total: (c.items ? c.items.length : 0) };
-                  const loaded = c.items ? c.items.length : 0;
-                  const allLoaded = pageState.total && loaded >= pageState.total;
-                  return (
-                    <Card key={`exp-card-${idx}`} sx={{ mb: 1 }}>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <IconButton size="small" onClick={() => toggleExpand(keyName)} disabled={!!loadingGroups[keyName]}>
-                              {expanded[keyName] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                            </IconButton>
-                            {loadingGroups[keyName] ? <CircularProgress size={18} /> : null}
-                            <Typography sx={{ fontWeight: 700 }}>{c.category}</Typography>
-                          </Box>
-                          <Typography>₹{Number(c.amount || 0).toLocaleString()}</Typography>
-                        </Box>
-                        <Collapse
-                          in={!!expanded[keyName]}
-                          timeout="auto"
-                          unmountOnExit
-                          onEntered={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
-                          onExited={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
-                        >
-                          <List>
-                            {c.items.map((it, i2) => (
-                              <ListItem key={`eit-${idx}-${i2}`}>
-                                <ListItemText primary={`${it.description || ''} — ₹${Number(it.amount || 0).toLocaleString()}`} secondary={formatDateForDisplay(it.expense_date)} />
-                              </ListItem>
-                            ))}
-                          </List>
-                          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                            <Button size="small" onClick={async () => {
-                              try {
-                                setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
-                                const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
-                                const resp = await financeService.getGroupItems({ group: 'expenses', key: c.category || c.category_name || c.categoryId, startDate, endDate, page: nextPage, pageSize: 10 });
-                                setData(prev => {
-                                  if (!prev) return prev;
-                                  const newExpenseGroups = (prev.expenseByCategory || []).map((g, gi) => {
-                                    if (gi === idx) {
-                                      return { ...g, items: (g.items || []).concat(resp.items || []) };
-                                    }
-                                    return g;
-                                  });
-                                  return { ...prev, expenseByCategory: newExpenseGroups };
-                                });
-                                setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
-                              } catch (err) {
-                                console.error('Load more expenses error', err && err.message ? err.message : err, err && err.body ? err.body : null);
-                                setError(err && err.message ? err.message : 'Failed to load more expenses');
-                              } finally {
-                                setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
-                              }
-                            }} disabled={!!loadingGroups[keyName] || allLoaded}>
-                              {loadingGroups[keyName] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
-                            </Button>
-                          </Box>
-                        </Collapse>
-                      </CardContent>
-                    </Card>
-                  );
-                }) : (
-                  <Typography>No expenses</Typography>
-                )}
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Category</TableCell>
-                      <TableCell>Amount (₹)</TableCell>
-                      <TableCell>Items</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.expenseByCategory && data.expenseByCategory.length > 0 ? data.expenseByCategory.map((c, idx) => (
-                      <React.Fragment key={`exp-group-${idx}`}>
-                        <TableRow key={`c-${idx}`}>
-                          <TableCell>
-                            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                              <IconButton size="small" onClick={() => toggleExpand(`exp-${idx}`)} disabled={!!loadingGroups[`exp-${idx}`]}>
-                                {expanded[`exp-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                              </IconButton>
-                              {loadingGroups[`exp-${idx}`] ? <CircularProgress size={18} /> : null}
-                              <Typography component="span">{c.category}</Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell>₹{Number(c.amount || 0).toLocaleString()}</TableCell>
-                          <TableCell>{c.items.length} item(s)</TableCell>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>Detailed cumulative report</Typography>
+                {cumulativeLoading ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
+                ) : cumulativeRows.length === 0 ? (
+                  <Typography color="text.secondary">No daily payment or expense data is available for this range.</Typography>
+                ) : (
+                  <TableContainer component={Card}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date</TableCell>
+                          <TableCell align="right">Expenses</TableCell>
+                          <TableCell align="right">Cum. Expenses</TableCell>
+                          <TableCell align="right">Cash</TableCell>
+                          <TableCell align="right">Cum. Cash</TableCell>
+                          <TableCell align="right">Online</TableCell>
+                          <TableCell align="right">Cum. Online</TableCell>
+                          <TableCell align="right">Total Payment</TableCell>
+                          <TableCell align="right">Cum. Total Payment</TableCell>
                         </TableRow>
-                        <TableRow key={`c-collapse-${idx}`}>
-                          <TableCell colSpan={3} sx={{ p: 0, border: 0 }}>
+                      </TableHead>
+                      <TableBody>
+                        {cumulativeRows.map((row) => (
+                          <TableRow key={row.date} hover>
+                            <TableCell>{formatDateTimeForDisplay(`${row.date}T00:00:00`)}</TableCell>
+                            <TableCell align="right">₹{Number(row.expenses || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.cumulativeExpenses || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.cash || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.cumulativeCash || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.online || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.cumulativeOnline || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.totalPayments || 0).toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{Number(row.cumulativeTotalPayments || 0).toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+            ) : (
+              <Box>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>Income Breakdown</Typography>
+                {isMobile ? (
+                  <Box>
+                    {data.paymentsByType && data.paymentsByType.length > 0 ? data.paymentsByType.map((p, idx) => {
+                      const keyName = `pay-${idx}`;
+                      const pageState = groupPages[keyName] || { page: 0, total: (p.items ? p.items.length : 0) };
+                      const loaded = p.items ? p.items.length : 0;
+                      const allLoaded = pageState.total && loaded >= pageState.total;
+                      return (
+                        <Card key={`pay-card-${idx}`} sx={{ mb: 1 }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <IconButton size="small" onClick={() => toggleExpand(keyName)} disabled={!!loadingGroups[keyName]}>
+                                  {expanded[keyName] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                </IconButton>
+                                {loadingGroups[keyName] ? <CircularProgress size={18} /> : null}
+                                <Typography sx={{ fontWeight: 700 }}>{p.type}</Typography>
+                              </Box>
+                              <Typography>₹{Number(p.amount || 0).toLocaleString()}</Typography>
+                            </Box>
                             <Collapse
-                              in={!!expanded[`exp-${idx}`]}
+                              in={!!expanded[keyName]}
                               timeout="auto"
                               unmountOnExit
-                              onEntered={() => setLoadingGroups(prev => ({ ...prev, [`exp-${idx}`]: false }))}
-                              onExited={() => setLoadingGroups(prev => ({ ...prev, [`exp-${idx}`]: false }))}
+                              onEntered={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
+                              onExited={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
                             >
-                              <Box sx={{ p: 1 }}>
-                                <Table size="small">
-                                  <TableHead>
-                                    <TableRow>
-                                      <TableCell>Description</TableCell>
-                                      <TableCell>Amount</TableCell>
-                                      <TableCell>Date</TableCell>
-                                    </TableRow>
-                                  </TableHead>
-                                  <TableBody>
-                                    {c.items.map((it, i2) => (
-                                      <TableRow key={`eit-${idx}-${i2}`}>
-                                        <TableCell>{it.description || ''}</TableCell>
-                                        <TableCell>₹{Number(it.amount || 0).toLocaleString()}</TableCell>
-                                        <TableCell>{formatDateForDisplay(it.expense_date)}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                                {/* Load more for expense group */}
-                                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                                  {(() => {
-                                    const keyName = `exp-${idx}`;
-                                    const pageState = groupPages[keyName] || { page: 0, total: (c.items ? c.items.length : 0) };
-                                    const loaded = c.items ? c.items.length : 0;
-                                    const allLoaded = pageState.total && loaded >= pageState.total;
-                                    return (
-                                      <Button
-                                        size="small"
-                                        onClick={async () => {
-                                          try {
-                                            setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
-                                            const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
-                                            // For expenses, server expects category name or id; use category string when available
-                                            const resp = await financeService.getGroupItems({ group: 'expenses', key: c.category || c.category_name || c.categoryId, startDate, endDate, page: nextPage, pageSize: 10 });
-                                            setData(prev => {
-                                              if (!prev) return prev;
-                                              const newExpenseGroups = (prev.expenseByCategory || []).map((g, gi) => {
-                                                if (gi === idx) {
-                                                  return { ...g, items: (g.items || []).concat(resp.items || []) };
-                                                }
-                                                return g;
-                                              });
-                                              return { ...prev, expenseByCategory: newExpenseGroups };
-                                            });
-                                            setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
-                                          } catch (err) {
-                                            console.error('Load more expenses error', err && err.message ? err.message : err, err && err.body ? err.body : null);
-                                            setError(err && err.message ? err.message : 'Failed to load more expenses');
-                                          } finally {
-                                            setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
-                                          }
-                                        }}
-                                        disabled={!!loadingGroups[`exp-${idx}`] || allLoaded}
-                                      >
-                                        {loadingGroups[`exp-${idx}`] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
-                                      </Button>
-                                    );
-                                  })()}
-                                </Box>
+                              <List>
+                                {p.items.map((it, i2) => (
+                                  <ListItem key={`pitem-${idx}-${i2}`}>
+                                    <ListItemText primary={`${it.student_name || it.student_id || 'N/A'} — ₹${Number(it.amount || 0).toLocaleString()}`} secondary={`${formatDateTimeForDisplay(it.payment_date)} • ${it.payment_mode || ''}`} />
+                                  </ListItem>
+                                ))}
+                              </List>
+                              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                                <Button size="small" onClick={async () => {
+                                  try {
+                                    setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
+                                    const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
+                                    const resp = await financeService.getGroupItems({ group: 'payments', key: p.type, startDate, endDate, page: nextPage, pageSize: 10 });
+                                    setData(prev => {
+                                      if (!prev) return prev;
+                                      const newPayments = (prev.paymentsByType || []).map((g, gi) => {
+                                        if (gi === idx) {
+                                          return { ...g, items: (g.items || []).concat(resp.items || []) };
+                                        }
+                                        return g;
+                                      });
+                                      return { ...prev, paymentsByType: newPayments };
+                                    });
+                                    setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
+                                  } catch (err) {
+                                    console.error('Load more payments error', err && err.message ? err.message : err, err && err.body ? err.body : null);
+                                    setError(err && err.message ? err.message : 'Failed to load more payments');
+                                  } finally {
+                                    setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
+                                  }
+                                }} disabled={!!loadingGroups[keyName] || allLoaded}>
+                                  {loadingGroups[keyName] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
+                                </Button>
                               </Box>
                             </Collapse>
-                          </TableCell>
-                        </TableRow>
-                      </React.Fragment>
-                    )) : (
-                      <TableRow><TableCell colSpan={4}>No expenses</TableCell></TableRow>
+                          </CardContent>
+                        </Card>
+                      );
+                    }) : (
+                      <Typography>No income</Typography>
                     )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                  </Box>
+                ) : (
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Type</TableCell>
+                          <TableCell>Amount (₹)</TableCell>
+                          <TableCell>Details</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {data.paymentsByType && data.paymentsByType.length > 0 ? data.paymentsByType.map((p, idx) => (
+                            <React.Fragment key={`pay-group-${idx}`}>
+                              <TableRow key={`p-${idx}`}>
+                                <TableCell>
+                                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                                    <IconButton size="small" onClick={() => toggleExpand(`pay-${idx}`)} disabled={!!loadingGroups[`pay-${idx}`]}>
+                                      {expanded[`pay-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                    </IconButton>
+                                    {loadingGroups[`pay-${idx}`] ? <CircularProgress size={18} /> : null}
+                                    <Typography component="span">{p.type}</Typography>
+                                  </Box>
+                                </TableCell>
+                                <TableCell>₹{Number(p.amount || 0).toLocaleString()}</TableCell>
+                                <TableCell>{p.items.length} item(s)</TableCell>
+                              </TableRow>
+                              <TableRow key={`p-collapse-${idx}`}>
+                                <TableCell colSpan={3} sx={{ p: 0, border: 0 }}>
+                                  <Collapse
+                                    in={!!expanded[`pay-${idx}`]}
+                                    timeout="auto"
+                                    unmountOnExit
+                                    onEntered={() => setLoadingGroups(prev => ({ ...prev, [`pay-${idx}`]: false }))}
+                                    onExited={() => setLoadingGroups(prev => ({ ...prev, [`pay-${idx}`]: false }))}
+                                  >
+                                    <Box sx={{ p: 1 }}>
+                                      <Table size="small">
+                                        <TableHead>
+                                          <TableRow>
+                                            <TableCell>Student</TableCell>
+                                            <TableCell>Amount</TableCell>
+                                            <TableCell>Type</TableCell>
+                                            <TableCell>Date</TableCell>
+                                            <TableCell>Mode</TableCell>
+                                          </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                          {p.items.map((it, i2) => (
+                                            <TableRow key={`pitem-${idx}-${i2}`}>
+                                              <TableCell>{it.student_name || it.student_id || 'N/A'}</TableCell>
+                                              <TableCell>₹{Number(it.amount || 0).toLocaleString()}</TableCell>
+                                              <TableCell>{it.payment_type}</TableCell>
+                                              <TableCell>{formatDateTimeForDisplay(it.payment_date)}</TableCell>
+                                              <TableCell>{it.payment_mode}</TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                                        {(() => {
+                                          const keyName = `pay-${idx}`;
+                                          const pageState = groupPages[keyName] || { page: 0, total: (p.items ? p.items.length : 0) };
+                                          const loaded = p.items ? p.items.length : 0;
+                                          const allLoaded = pageState.total && loaded >= pageState.total;
+                                          return (
+                                            <Button
+                                              size="small"
+                                              onClick={async () => {
+                                                try {
+                                                  setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
+                                                  const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
+                                                  const resp = await financeService.getGroupItems({ group: 'payments', key: p.type, startDate, endDate, page: nextPage, pageSize: 10 });
+                                                  setData(prev => {
+                                                    if (!prev) return prev;
+                                                    const newPayments = (prev.paymentsByType || []).map((g, gi) => {
+                                                      if (gi === idx) {
+                                                        return { ...g, items: (g.items || []).concat(resp.items || []) };
+                                                      }
+                                                      return g;
+                                                    });
+                                                    return { ...prev, paymentsByType: newPayments };
+                                                  });
+                                                  setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
+                                                } catch (err) {
+                                                  console.error('Load more payments error', err && err.message ? err.message : err, err && err.body ? err.body : null);
+                                                  setError(err && err.message ? err.message : 'Failed to load more payments');
+                                                } finally {
+                                                  setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
+                                                }
+                                              }}
+                                              disabled={!!loadingGroups[`pay-${idx}`] || allLoaded}
+                                            >
+                                              {loadingGroups[`pay-${idx}`] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
+                                            </Button>
+                                          );
+                                        })()}
+                                      </Box>
+                                    </Box>
+                                  </Collapse>
+                                </TableCell>
+                              </TableRow>
+                            </React.Fragment>
+                          )) : (
+                          <TableRow><TableCell colSpan={4}>No income</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+
+                <Box sx={{ my: 2 }} />
+
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>Expenses Breakdown</Typography>
+                {isMobile ? (
+                  <Box>
+                    {data.expenseByCategory && data.expenseByCategory.length > 0 ? data.expenseByCategory.map((c, idx) => {
+                      const keyName = `exp-${idx}`;
+                      const pageState = groupPages[keyName] || { page: 0, total: (c.items ? c.items.length : 0) };
+                      const loaded = c.items ? c.items.length : 0;
+                      const allLoaded = pageState.total && loaded >= pageState.total;
+                      return (
+                        <Card key={`exp-card-${idx}`} sx={{ mb: 1 }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <IconButton size="small" onClick={() => toggleExpand(keyName)} disabled={!!loadingGroups[keyName]}>
+                                  {expanded[keyName] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                </IconButton>
+                                {loadingGroups[keyName] ? <CircularProgress size={18} /> : null}
+                                <Typography sx={{ fontWeight: 700 }}>{c.category}</Typography>
+                              </Box>
+                              <Typography>₹{Number(c.amount || 0).toLocaleString()}</Typography>
+                            </Box>
+                            <Collapse
+                              in={!!expanded[keyName]}
+                              timeout="auto"
+                              unmountOnExit
+                              onEntered={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
+                              onExited={() => setLoadingGroups(prev => ({ ...prev, [keyName]: false }))}
+                            >
+                              <List>
+                                {c.items.map((it, i2) => (
+                                  <ListItem key={`eit-${idx}-${i2}`}>
+                                    <ListItemText primary={`${it.description || ''} — ₹${Number(it.amount || 0).toLocaleString()}`} secondary={formatDateForDisplay(it.expense_date)} />
+                                  </ListItem>
+                                ))}
+                              </List>
+                              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                                <Button size="small" onClick={async () => {
+                                  try {
+                                    setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
+                                    const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
+                                    const resp = await financeService.getGroupItems({ group: 'expenses', key: c.category || c.category_name || c.categoryId, startDate, endDate, page: nextPage, pageSize: 10 });
+                                    setData(prev => {
+                                      if (!prev) return prev;
+                                      const newExpenseGroups = (prev.expenseByCategory || []).map((g, gi) => {
+                                        if (gi === idx) {
+                                          return { ...g, items: (g.items || []).concat(resp.items || []) };
+                                        }
+                                        return g;
+                                      });
+                                      return { ...prev, expenseByCategory: newExpenseGroups };
+                                    });
+                                    setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
+                                  } catch (err) {
+                                    console.error('Load more expenses error', err && err.message ? err.message : err, err && err.body ? err.body : null);
+                                    setError(err && err.message ? err.message : 'Failed to load more expenses');
+                                  } finally {
+                                    setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
+                                  }
+                                }} disabled={!!loadingGroups[keyName] || allLoaded}>
+                                  {loadingGroups[keyName] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
+                                </Button>
+                              </Box>
+                            </Collapse>
+                          </CardContent>
+                        </Card>
+                      );
+                    }) : (
+                      <Typography>No expenses</Typography>
+                    )}
+                  </Box>
+                ) : (
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Category</TableCell>
+                          <TableCell>Amount (₹)</TableCell>
+                          <TableCell>Items</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {data.expenseByCategory && data.expenseByCategory.length > 0 ? data.expenseByCategory.map((c, idx) => (
+                          <React.Fragment key={`exp-group-${idx}`}>
+                            <TableRow key={`c-${idx}`}>
+                              <TableCell>
+                                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                                  <IconButton size="small" onClick={() => toggleExpand(`exp-${idx}`)} disabled={!!loadingGroups[`exp-${idx}`]}>
+                                    {expanded[`exp-${idx}`] ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                  </IconButton>
+                                  {loadingGroups[`exp-${idx}`] ? <CircularProgress size={18} /> : null}
+                                  <Typography component="span">{c.category}</Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell>₹{Number(c.amount || 0).toLocaleString()}</TableCell>
+                              <TableCell>{c.items.length} item(s)</TableCell>
+                            </TableRow>
+                            <TableRow key={`c-collapse-${idx}`}>
+                              <TableCell colSpan={3} sx={{ p: 0, border: 0 }}>
+                                <Collapse
+                                  in={!!expanded[`exp-${idx}`]}
+                                  timeout="auto"
+                                  unmountOnExit
+                                  onEntered={() => setLoadingGroups(prev => ({ ...prev, [`exp-${idx}`]: false }))}
+                                  onExited={() => setLoadingGroups(prev => ({ ...prev, [`exp-${idx}`]: false }))}
+                                >
+                                  <Box sx={{ p: 1 }}>
+                                    <Table size="small">
+                                      <TableHead>
+                                        <TableRow>
+                                          <TableCell>Description</TableCell>
+                                          <TableCell>Amount</TableCell>
+                                          <TableCell>Date</TableCell>
+                                        </TableRow>
+                                      </TableHead>
+                                      <TableBody>
+                                        {c.items.map((it, i2) => (
+                                          <TableRow key={`eit-${idx}-${i2}`}>
+                                            <TableCell>{it.description || ''}</TableCell>
+                                            <TableCell>₹{Number(it.amount || 0).toLocaleString()}</TableCell>
+                                            <TableCell>{formatDateForDisplay(it.expense_date)}</TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                                      {(() => {
+                                        const keyName = `exp-${idx}`;
+                                        const pageState = groupPages[keyName] || { page: 0, total: (c.items ? c.items.length : 0) };
+                                        const loaded = c.items ? c.items.length : 0;
+                                        const allLoaded = pageState.total && loaded >= pageState.total;
+                                        return (
+                                          <Button
+                                            size="small"
+                                            onClick={async () => {
+                                              try {
+                                                setLoadingGroups(prev => ({ ...prev, [keyName]: true }));
+                                                const nextPage = (groupPages[keyName] && groupPages[keyName].page !== undefined) ? groupPages[keyName].page + 1 : 1;
+                                                const resp = await financeService.getGroupItems({ group: 'expenses', key: c.category || c.category_name || c.categoryId, startDate, endDate, page: nextPage, pageSize: 10 });
+                                                setData(prev => {
+                                                  if (!prev) return prev;
+                                                  const newExpenseGroups = (prev.expenseByCategory || []).map((g, gi) => {
+                                                    if (gi === idx) {
+                                                      return { ...g, items: (g.items || []).concat(resp.items || []) };
+                                                    }
+                                                    return g;
+                                                  });
+                                                  return { ...prev, expenseByCategory: newExpenseGroups };
+                                                });
+                                                setGroupPages(prev => ({ ...prev, [keyName]: { page: nextPage, total: resp.total } }));
+                                              } catch (err) {
+                                                console.error('Load more expenses error', err && err.message ? err.message : err, err && err.body ? err.body : null);
+                                                setError(err && err.message ? err.message : 'Failed to load more expenses');
+                                              } finally {
+                                                setLoadingGroups(prev => ({ ...prev, [keyName]: false }));
+                                              }
+                                            }}
+                                            disabled={!!loadingGroups[`exp-${idx}`] || allLoaded}
+                                          >
+                                            {loadingGroups[`exp-${idx}`] ? <CircularProgress size={18} /> : (allLoaded ? 'All loaded' : 'Load more')}
+                                          </Button>
+                                        );
+                                      })()}
+                                    </Box>
+                                  </Box>
+                                </Collapse>
+                              </TableCell>
+                            </TableRow>
+                          </React.Fragment>
+                        )) : (
+                          <TableRow><TableCell colSpan={4}>No expenses</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
             )}
 
           </Box>
