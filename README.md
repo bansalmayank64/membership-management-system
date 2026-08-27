@@ -79,6 +79,30 @@ npm run build
 
 The frontend expects the backend API base to be provided via `VITE_API_URL` in production builds.
 
+## Pre-Commit & Push Workflow (Summary)
+
+Follow these quick steps before committing and pushing changes:
+
+1. **Build & Sync Assets (`postinstall`)**:
+   ```powershell
+   cd backend
+   node ./scripts/build-and-copy.js
+   cd ..
+   ```
+   *(Builds frontend and syncs production files to `backend/public`)*
+
+2. **Stage & Commit**:
+   ```powershell
+   git status
+   git add .
+   git commit -m "your commit message"
+   ```
+
+3. **Push to Remote**:
+   ```powershell
+   git push
+   ```
+
 ## Database setup
 
 1. Create a Postgres database (Neon recommended).
