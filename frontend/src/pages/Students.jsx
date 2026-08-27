@@ -84,7 +84,8 @@ import {
   AccessTime as AccessTimeIcon,
   Person as PersonIcon,
   Clear as ClearIcon,
-  Timeline as TimelineIcon
+  Timeline as TimelineIcon,
+  PersonOff as PersonOffIcon
 } from '@mui/icons-material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import CloseIcon from '@mui/icons-material/Close';
@@ -307,8 +308,12 @@ function Students() {
 
   // Deactivate / refund states
   const [deactivateRefundAmount, setDeactivateRefundAmount] = useState(0);
+  const [deactivateCalculatedRefundAmount, setDeactivateCalculatedRefundAmount] = useState(0);
+  const [deactivateRefundPaymentMode, setDeactivateRefundPaymentMode] = useState('cash');
+  const [deactivateRefundRemarks, setDeactivateRefundRemarks] = useState('');
   const [deactivateRefundDays, setDeactivateRefundDays] = useState(0);
   const [deactivateFeeConfig, setDeactivateFeeConfig] = useState(null);
+  const [deactivateTotalPaid, setDeactivateTotalPaid] = useState(0);
   const [processingDeactivate, setProcessingDeactivate] = useState(false);
 
   // Reactivate confirmation dialog state
@@ -1857,13 +1862,35 @@ function Students() {
     (async () => {
       try {
         setDeactivateRefundAmount(0);
+        setDeactivateCalculatedRefundAmount(0);
         setDeactivateRefundDays(0);
         setDeactivateFeeConfig(null);
+        setDeactivateRefundPaymentMode('cash');
+        setDeactivateRefundRemarks('');
+        setDeactivateTotalPaid(0);
+
+        // Fetch student total payments to determine max refundable amount
+        try {
+          const paymentsResp = await fetch(`/api/payments/student/${selectedItemForAction.id}`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          if (paymentsResp.ok) {
+            const paymentsData = await paymentsResp.json();
+            const total = (paymentsData || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            setDeactivateTotalPaid(Math.max(0, total));
+          }
+        } catch (payErr) {
+          logger.warn('⚠️ [handleDeactivateStudent] Failed to fetch payments for total paid', payErr);
+        }
 
         const membershipTillRaw = selectedItemForAction?.membership_till || selectedItemForAction?.membershipTill || null;
         if (!membershipTillRaw) {
           // No end date => no refundable days
           setDeactivateRefundAmount(0);
+          setDeactivateCalculatedRefundAmount(0);
           setDeactivateRefundDays(0);
           setDeleteConfirmOpen(true);
           return;
@@ -1874,6 +1901,7 @@ function Students() {
         // Only refund if membership_till is in the future
         if (isNaN(membershipTill.getTime()) || membershipTill <= today) {
           setDeactivateRefundAmount(0);
+          setDeactivateCalculatedRefundAmount(0);
           setDeactivateRefundDays(0);
           setDeleteConfirmOpen(true);
           return;
@@ -1899,12 +1927,15 @@ function Students() {
             if (cfg && parseFloat(cfg.monthly_fees) > 0) {
               const dailyRate = cfg.monthly_fees / 30;
               const refundAmount = Math.round(dailyRate * extraDays);
+              setDeactivateCalculatedRefundAmount(refundAmount);
               setDeactivateRefundAmount(refundAmount);
             } else {
+              setDeactivateCalculatedRefundAmount(0);
               setDeactivateRefundAmount(0);
             }
           } else {
             setDeactivateFeeConfig(null);
+            setDeactivateCalculatedRefundAmount(0);
             setDeactivateRefundAmount(0);
           }
         }
@@ -1914,6 +1945,7 @@ function Students() {
         logger.error('❌ [handleDeactivateStudent] Error while preparing refund info', err);
         // Open dialog anyway but with no refund info
         setDeactivateRefundAmount(0);
+        setDeactivateCalculatedRefundAmount(0);
         setDeactivateRefundDays(0);
         setDeactivateFeeConfig(null);
         setDeleteConfirmOpen(true);
@@ -2029,24 +2061,48 @@ function Students() {
 
   // Confirm deactivate student
   const confirmDeactivateStudent = async () => {
-    logger.debug('🔴 [confirmDeactivateStudent] Called', { selectedItemForAction, deactivateRefundAmount, deactivateRefundDays });
+    const refundAmountNum = parseFloat(deactivateRefundAmount) || 0;
+    const maxAllowedRefund = deactivateCalculatedRefundAmount > 0
+      ? (deactivateTotalPaid > 0 ? Math.min(deactivateCalculatedRefundAmount, deactivateTotalPaid) : deactivateCalculatedRefundAmount)
+      : 0;
+
+    logger.debug('🔴 [confirmDeactivateStudent] Called', { selectedItemForAction, refundAmountNum, maxAllowedRefund, deactivateRefundDays });
 
     if (!selectedItemForAction) {
       logger.error('❌ [confirmDeactivateStudent] No selected item for action, aborting');
       return;
     }
 
+    if (refundAmountNum < 0) {
+      setSnackbarMessage('Refund amount cannot be negative');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+
+    if (refundAmountNum > maxAllowedRefund) {
+      setSnackbarMessage(`Refund amount (₹${refundAmountNum}) cannot exceed the actual calculated refund of ₹${maxAllowedRefund}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+
     setProcessingDeactivate(true);
     try {
       // If there is a refund to process, create a refund payment first
-      if (deactivateRefundAmount > 0) {
+      if (refundAmountNum > 0) {
+        const isPartial = deactivateCalculatedRefundAmount > 0 && refundAmountNum < deactivateCalculatedRefundAmount;
+        const defaultRemarks = isPartial
+          ? `Partial refund on deactivation for ${selectedItemForAction.name} (₹${refundAmountNum} of ₹${deactivateCalculatedRefundAmount} for ${deactivateRefundDays} remaining days)`
+          : `Refund on deactivation for ${selectedItemForAction.name} (${deactivateRefundDays} days)`;
+
         const paymentPayload = {
           student_id: selectedItemForAction.id,
-          amount: -Math.abs(deactivateRefundAmount), // negative amount for refund
+          amount: -Math.abs(refundAmountNum), // negative amount for refund
           payment_date: todayInIST(),
-          payment_mode: 'cash',
+          payment_mode: deactivateRefundPaymentMode || 'cash',
           payment_type: 'refund',
-          remarks: `Refund on deactivation for ${selectedItemForAction.name} (${deactivateRefundDays} days)`,
+          remarks: deactivateRefundRemarks.trim() || defaultRemarks,
           modified_by: 1,
           extend_membership: false
         };
@@ -2124,7 +2180,7 @@ function Students() {
         throw new Error('Failed to deactivate student');
       }
 
-      setSnackbarMessage(deactivateRefundAmount > 0 ? `Student deactivated and refunded ₹${deactivateRefundAmount}` : 'Student deactivated successfully');
+      setSnackbarMessage(refundAmountNum > 0 ? `Student deactivated and refunded ₹${refundAmountNum}` : 'Student deactivated successfully');
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       setDeleteConfirmOpen(false);
@@ -5020,46 +5076,190 @@ function Students() {
       />
 
       {/* Deactivate Confirmation Dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={() => {
-        setDeleteConfirmOpen(false);
-        handleActionClose(); // Close action menu when dialog is cancelled
-      }}>
-        <DialogTitle>Confirm Deactivation</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to deactivate student "{selectedItemForAction?.name || 'Unknown'}"?
-            This will remove their seat assignment and move them to the deactivated students list.
-            Their data will be preserved and they can be reactivated later.
+      <Dialog 
+        open={deleteConfirmOpen} 
+        onClose={() => {
+          setDeleteConfirmOpen(false);
+          handleActionClose(); // Close action menu when dialog is cancelled
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <PersonOffIcon color="error" /> Confirm Deactivation
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body1">
+            Are you sure you want to deactivate student <strong>"{selectedItemForAction?.name || 'Unknown'}"</strong>?
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-            Student ID: {selectedItemForAction?.id || 'N/A'}, Name: {selectedItemForAction?.name || 'N/A'}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            This will release seat <strong>{selectedItemForAction?.seat_number || 'N/A'}</strong> and move the student to the Deactivated list. Their data is preserved and they can be reactivated later.
           </Typography>
-
-          {/* Refund Information (calculated) */}
-          {deactivateRefundDays > 0 && (
-            <Box sx={{ mt: 2, p: 2, borderRadius: 1, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
-              <Typography variant="subtitle2">Refund Summary</Typography>
-              <Typography variant="body2" color="text.secondary">Remaining Membership Days: {deactivateRefundDays} day(s)</Typography>
-              <Typography variant="body2" color="text.secondary">Membership: {deactivateFeeConfig?.membership_type || selectedItemForAction?.membership_type} • Monthly Fee: ₹{deactivateFeeConfig?.monthly_fees ?? 'N/A'}</Typography>
-              <Typography variant="body2" sx={{ mt: 1, fontWeight: 600 }}>Estimated Refund: ₹{deactivateRefundAmount}</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                Proceeding will create a refund entry and set membership end date to today.
+          
+          <Box sx={{ mt: 1.5, mb: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+            <Typography variant="caption" color="text.secondary" display="block">
+              <strong>Student ID:</strong> {selectedItemForAction?.id || 'N/A'} &nbsp;|&nbsp; 
+              <strong>Contact:</strong> {selectedItemForAction?.contact_number || 'N/A'} &nbsp;|&nbsp; 
+              <strong>Plan:</strong> {selectedItemForAction?.membership_type || 'full_time'} ({selectedItemForAction?.sex || 'N/A'})
+            </Typography>
+            {selectedItemForAction?.membership_till && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                <strong>Current Membership Till:</strong> {formatIsoToDMonYYYY(selectedItemForAction.membership_till)}
+                {deactivateRefundDays > 0 ? ` (${deactivateRefundDays} days remaining)` : ' (Expired / No remaining days)'}
               </Typography>
-            </Box>
-          )}
+            )}
+            {deactivateTotalPaid > 0 && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                <strong>Total Paid by Student:</strong> ₹{deactivateTotalPaid}
+              </Typography>
+            )}
+          </Box>
+
+          {/* Refund Information & Editable Amount */}
+          {(() => {
+            const maxAllowedRefund = deactivateCalculatedRefundAmount > 0
+              ? (deactivateTotalPaid > 0 ? Math.min(deactivateCalculatedRefundAmount, deactivateTotalPaid) : deactivateCalculatedRefundAmount)
+              : 0;
+            const refundNum = parseFloat(deactivateRefundAmount) || 0;
+            const isExceeding = refundNum > maxAllowedRefund;
+            const isNegative = refundNum < 0;
+
+            return (
+              <Box sx={{ mt: 2, p: 2, borderRadius: 1.5, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                    Refund Settings
+                  </Typography>
+                  {maxAllowedRefund > 0 && (
+                    <Chip 
+                      size="small" 
+                      color="info" 
+                      variant="outlined"
+                      label={`Max Refund: ₹${maxAllowedRefund} (${deactivateRefundDays} days)`} 
+                    />
+                  )}
+                </Box>
+
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {deactivateRefundDays > 0
+                    ? `Calculated refund for ${deactivateRefundDays} unused days is ₹${maxAllowedRefund}. You can edit the amount below for a partial refund (up to ₹${maxAllowedRefund}) or set ₹0.`
+                    : 'No unused membership days remaining. Refund amount must be ₹0.'}
+                </Typography>
+
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={7}>
+                    <TextField
+                      fullWidth
+                      label="Refund Amount (₹)"
+                      type="number"
+                      size="small"
+                      value={deactivateRefundAmount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '') {
+                          setDeactivateRefundAmount('');
+                          return;
+                        }
+                        const num = parseFloat(val);
+                        setDeactivateRefundAmount(isNaN(num) ? 0 : num);
+                      }}
+                      inputProps={{
+                        min: 0,
+                        max: maxAllowedRefund
+                      }}
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">₹</InputAdornment>,
+                      }}
+                      helperText={
+                        isNegative
+                          ? 'Refund amount cannot be negative'
+                          : isExceeding
+                            ? `Cannot exceed actual calculated refund of ₹${maxAllowedRefund}`
+                            : `Allowed range: ₹0 to ₹${maxAllowedRefund}`
+                      }
+                      error={isNegative || isExceeding}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={5}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>Refund Mode</InputLabel>
+                      <Select
+                        value={deactivateRefundPaymentMode}
+                        onChange={(e) => setDeactivateRefundPaymentMode(e.target.value)}
+                        label="Refund Mode"
+                      >
+                        <MenuItem value="cash">Cash</MenuItem>
+                        <MenuItem value="online">Online / UPI</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+
+                {/* Quick preset chips */}
+                {maxAllowedRefund > 0 && (() => {
+                  // Find single nearest rounded amount (multiple of 50) strictly less than maxAllowedRefund
+                  const nearestRounded = (maxAllowedRefund % 50 === 0)
+                    ? maxAllowedRefund - 50
+                    : Math.floor(maxAllowedRefund / 50) * 50;
+
+                  return (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary', fontWeight: 600 }}>
+                        Quick Presets:
+                      </Typography>
+                      <Stack direction="row" spacing={0.8} sx={{ flexWrap: 'wrap', gap: 0.8 }}>
+                        <Chip
+                          label="₹0 (No Refund)"
+                          size="small"
+                          clickable
+                          variant={refundNum === 0 ? 'filled' : 'outlined'}
+                          onClick={() => setDeactivateRefundAmount(0)}
+                        />
+                        {nearestRounded > 0 && (
+                          <Chip
+                            label={`Rounded (₹${nearestRounded})`}
+                            size="small"
+                            clickable
+                            color="secondary"
+                            variant={refundNum === nearestRounded ? 'filled' : 'outlined'}
+                            onClick={() => setDeactivateRefundAmount(nearestRounded)}
+                          />
+                        )}
+                        <Chip
+                          label={`Full (₹${maxAllowedRefund})`}
+                          size="small"
+                          clickable
+                          variant={refundNum === maxAllowedRefund ? 'filled' : 'outlined'}
+                          color="primary"
+                          onClick={() => setDeactivateRefundAmount(maxAllowedRefund)}
+                        />
+                      </Stack>
+                    </Box>
+                  );
+                })()}
+
+                <TextField
+                  fullWidth
+                  label="Refund Remarks / Notes (Optional)"
+                  size="small"
+                  sx={{ mt: 2 }}
+                  value={deactivateRefundRemarks}
+                  onChange={(e) => setDeactivateRefundRemarks(e.target.value)}
+                  placeholder={`e.g. Partial refund on deactivation for ${selectedItemForAction?.name || 'student'}`}
+                />
+              </Box>
+            );
+          })()}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => {
-            setDeleteConfirmOpen(false);
-            handleActionClose(); // Close action menu when cancelled
-          }} disabled={processingDeactivate}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={confirmDeactivateStudent}
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button 
+            onClick={() => {
+              setDeleteConfirmOpen(false);
+              handleActionClose();
+            }} 
             disabled={processingDeactivate}
           >
-            {processingDeactivate ? 'Processing...' : (deactivateRefundAmount > 0 ? `Deactivate & Refund ₹${deactivateRefundAmount}` : 'Deactivate & Refund')}
+            Cancel
           </Button>
           <Button
             variant="outlined"
@@ -5067,7 +5267,27 @@ function Students() {
             onClick={handleDeactivateOnly}
             disabled={processingDeactivate}
           >
-            {processingDeactivate ? 'Processing...' : 'Deactivate Only'}
+            {processingDeactivate ? 'Processing...' : 'Deactivate Only (No Refund)'}
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={confirmDeactivateStudent}
+            disabled={
+              processingDeactivate || 
+              (parseFloat(deactivateRefundAmount) || 0) < 0 ||
+              (parseFloat(deactivateRefundAmount) || 0) > (
+                deactivateCalculatedRefundAmount > 0
+                  ? (deactivateTotalPaid > 0 ? Math.min(deactivateCalculatedRefundAmount, deactivateTotalPaid) : deactivateCalculatedRefundAmount)
+                  : 0
+              )
+            }
+          >
+            {processingDeactivate 
+              ? 'Processing...' 
+              : ((parseFloat(deactivateRefundAmount) || 0) > 0 
+                  ? `Deactivate & Refund ₹${parseFloat(deactivateRefundAmount) || 0}` 
+                  : 'Deactivate Student')}
           </Button>
         </DialogActions>
       </Dialog>

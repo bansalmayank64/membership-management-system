@@ -3,20 +3,27 @@ const { pool } = require('../config/database');
 const logger = require('../utils/logger');
 const { toISTDateString } = require('../utils/dateUtils');
 
-// Helper: prefer membership_till if present, otherwise use canonical membership_date, otherwise today
+// Helper: prefer membership_till if present and in future, otherwise use today (for expired / reactivated students)
 const getMembershipBaseDate = (student) => {
   try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     if (student && student.membership_till) {
       const d = new Date(student.membership_till);
-      if (!isNaN(d.getTime())) return d;
+      if (!isNaN(d.getTime())) {
+        return d > today ? d : today;
+      }
     }
 
     if (student && student.membership_date) {
       const sd = new Date(student.membership_date);
-      if (!isNaN(sd.getTime())) return sd;
+      if (!isNaN(sd.getTime())) {
+        return sd > today ? sd : today;
+      }
     }
 
-    return new Date();
+    return today;
   } catch (err) {
     return new Date();
   }
