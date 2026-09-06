@@ -176,6 +176,11 @@ router.get('/:id/pbs', async (req, res) => {
         maximum_delay_days: 0,
         confidence_pct: 0,
         raw_score: 100,
+        timeliness_score: 35,
+        avg_delay_score: 25,
+        recent_behavior_score: 20,
+        consec_score: 10,
+        max_delay_score: 10,
         recent_3_month_late_pct: 0,
         recent_4_6_month_late_pct: 0,
         recent_7_12_month_late_pct: 0,
@@ -258,6 +263,14 @@ router.get('/:id/pbs', async (req, res) => {
 
       confidencePct: parseInt(bpssRow.confidence_pct, 10),
       rawScore: parseFloat(bpssRow.raw_score),
+
+      scoreBreakdown: {
+        timelinessScore:      parseFloat(bpssRow.timeliness_score),
+        avgDelayScore:        parseFloat(bpssRow.avg_delay_score),
+        recentBehaviorScore:  parseFloat(bpssRow.recent_behavior_score),
+        consecScore:          parseFloat(bpssRow.consec_score),
+        maxDelayScore:        parseFloat(bpssRow.max_delay_score),
+      },
 
       lastPaymentDate: bpssRow.last_payment_date,
       gracePeriodDays: GRACE_PERIOD_DAYS,

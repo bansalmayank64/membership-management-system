@@ -522,7 +522,8 @@ timeline(
    AND np.rn         = tl.rn + 1
 ),
 
--- Renewal payments (rn > 1) in the last 12 months, classified for scoring.
+-- All payments in the last 12 months (including enrollment), classified for scoring.
+-- rn=1 (enrollment) is included: if a student paid days after registering, that is a fault.
 -- delay_days is zeroed for inactive returns so they don't skew averages.
 -- is_late uses a 2-day grace period (scored on-time, but UI still shows the real delay).
 recent_cycles AS (
@@ -534,7 +535,6 @@ recent_cycles AS (
     (NOT is_inactive_return AND delay_raw > 2)                          AS is_late  -- 2-day grace
   FROM timeline
   WHERE payment_date >= CURRENT_DATE - INTERVAL '1 year'
-    AND rn > 1
 ),
 
 -- Per-student totals and sub-period counts needed for the weighted recent-behavior component.
@@ -589,26 +589,87 @@ streak_calc AS (
   GROUP BY student_id
 ),
 
--- Simplified scoring formula:
---   faultRate  = faults / payments
---   rawScore   = 100 × (1 − faultRate)
---   confidence = min(payments / 12, 1)   — blends toward 100 when data is sparse
---   PBS        = rawScore × confidence + 100 × (1 − confidence)
-pbs_calc AS (
+-- Late rate (0.0–1.0) for each of the three time windows used in the recent-behavior score.
+-- Windows are non-overlapping: 0–3 m, 4–6 m, 7–12 m.
+rate_calc AS (
+  SELECT
+    student_id,
+    CASE WHEN applicable_3m > 0
+         THEN late_3m::NUMERIC / applicable_3m                       ELSE 0 END AS rate_3m,
+    CASE WHEN (applicable_6m - applicable_3m) > 0
+         THEN (late_6m - late_3m)::NUMERIC
+              / (applicable_6m - applicable_3m)                      ELSE 0 END AS rate_4_6m,
+    CASE WHEN (total_applicable - applicable_6m) > 0
+         THEN (total_late - late_6m)::NUMERIC
+              / (total_applicable - applicable_6m)                   ELSE 0 END AS rate_7_12m
+  FROM agg
+),
+
+-- Compute each of the 5 score components (see formula in the header comment).
+-- recent_behavior_score weights recent months more heavily: 50 % last-3m, 30 % 4-6m, 20 % 7-12m.
+-- consec_score loses 2 pts per consecutive late cycle, floored at 0.
+-- avg/max delay scores are linear with a 30-day cap (≥ 30 days late → 0 pts).
+score_components AS (
   SELECT
     a.student_id,
-    LEAST(a.total_applicable::NUMERIC / 12, 1.0)                         AS confidence,
+    a.total_applicable,
+    a.on_time,
+    a.total_late,
     CASE WHEN a.total_applicable > 0
-         THEN ROUND(100.0 * (1.0 - a.total_late::NUMERIC / a.total_applicable), 1)
-         ELSE 100 END                                                     AS raw_score,
-    CASE WHEN a.total_applicable = 0 THEN 100
+         THEN ROUND(a.total_late::NUMERIC / a.total_applicable * 100, 1)
+         ELSE 0 END                                                      AS late_pct,
+    ROUND(a.avg_delay::NUMERIC, 1)                                       AS avg_delay,
+    a.max_delay,
+    a.last_payment_date,
+    COALESCE(sc.consec_streak, 0)                                        AS consec_streak,
+    ROUND(rc.rate_3m    * 100, 1)                                        AS rate_3m_pct,
+    ROUND(rc.rate_4_6m  * 100, 1)                                        AS rate_4_6m_pct,
+    ROUND(rc.rate_7_12m * 100, 1)                                        AS rate_7_12m_pct,
+    -- 1. Timeliness (35 pts)
+    CASE WHEN a.total_applicable > 0
+         THEN ROUND(35.0 * (1.0 - a.total_late::NUMERIC / a.total_applicable), 2)
+         ELSE 35.0 END                                                   AS timeliness_score,
+    -- 2. Average delay (25 pts); capped at 30 days → 0 pts
+    ROUND(25.0 * (1.0 - LEAST(a.avg_delay / 30.0, 1.0)), 2)             AS avg_delay_score,
+    -- 3. Recent behavior (20 pts); weighted 50/30/20 across 3/4-6/7-12 month windows
+    ROUND(20.0 * (1.0 - (rc.rate_3m   * 0.5
+                        + rc.rate_4_6m  * 0.3
+                        + rc.rate_7_12m * 0.2)), 2)                      AS recent_behavior_score,
+    -- 4. Consecutive late (10 pts); −2 pts per streak cycle, floored at 0
+    GREATEST(0, 10 - COALESCE(sc.consec_streak, 0) * 2)                 AS consec_score,
+    -- 5. Maximum delay (10 pts); capped at 30 days → 0 pts
+    ROUND(10.0 * (1.0 - LEAST(a.max_delay::NUMERIC / 30.0, 1.0)), 2)    AS max_delay_score
+  FROM agg a
+  LEFT JOIN streak_calc sc ON sc.student_id = a.student_id
+  JOIN  rate_calc    rc ON rc.student_id = a.student_id
+),
+
+-- Sum the five components into a raw total before applying confidence.
+raw_scores AS (
+  SELECT
+    sc.*,
+    ROUND(sc.timeliness_score + sc.avg_delay_score + sc.recent_behavior_score
+          + sc.consec_score + sc.max_delay_score)::INTEGER               AS raw_total
+  FROM score_components sc
+),
+
+-- Apply confidence on top of the 5-component raw total.
+-- confidence = min(payments / 12, 1) — blends raw_total toward 100 when data is sparse,
+-- so a student with only a few payments is not over-penalised.
+-- PBS = raw_total × confidence + 100 × (1 − confidence)
+pbs_calc AS (
+  SELECT
+    rs.student_id,
+    LEAST(rs.total_applicable::NUMERIC / 12, 1.0)                        AS confidence,
+    rs.raw_total                                                          AS raw_score,
+    CASE WHEN rs.total_applicable = 0 THEN 100
          ELSE GREATEST(0, LEAST(100, ROUND(
-           100.0 * (1.0 - a.total_late::NUMERIC / a.total_applicable)
-             * LEAST(a.total_applicable::NUMERIC / 12, 1.0)
-           + 100.0 * (1.0 - LEAST(a.total_applicable::NUMERIC / 12, 1.0))
+           rs.raw_total::NUMERIC
+             * LEAST(rs.total_applicable::NUMERIC / 12, 1.0)
+           + 100.0 * (1.0 - LEAST(rs.total_applicable::NUMERIC / 12, 1.0))
          )::INTEGER))
     END                                                                   AS pbs_score
-  FROM agg a
+  FROM raw_scores rs
 )
 
 -- Final output: one row per student.
@@ -639,6 +700,12 @@ SELECT
   COALESCE(a.max_delay,        0)                                        AS maximum_delay_days,
   ROUND(COALESCE(pc.confidence, 0) * 100)::INTEGER                       AS confidence_pct,
   COALESCE(pc.raw_score,       100)                                      AS raw_score,
+  -- 5-component score breakdown (NULL → full-points default for NO_DATA students)
+  COALESCE(rs.timeliness_score,       35)                                AS timeliness_score,
+  COALESCE(rs.avg_delay_score,        25)                                AS avg_delay_score,
+  COALESCE(rs.recent_behavior_score,  20)                                AS recent_behavior_score,
+  COALESCE(rs.consec_score,           10)                                AS consec_score,
+  COALESCE(rs.max_delay_score,        10)                                AS max_delay_score,
   -- sub-period late rates kept for display (non-overlapping windows)
   CASE WHEN COALESCE(a.applicable_3m, 0) > 0
        THEN ROUND(a.late_3m::NUMERIC / a.applicable_3m * 100, 1)
@@ -656,6 +723,7 @@ SELECT
 FROM student_fee sf
 LEFT JOIN agg        a  ON a.student_id  = sf.student_id
 LEFT JOIN pbs_calc   pc ON pc.student_id = sf.student_id
+LEFT JOIN raw_scores rs ON rs.student_id = sf.student_id
 LEFT JOIN streak_calc sc ON sc.student_id = sf.student_id;
 
 CREATE UNIQUE INDEX idx_bpss_scores_student_id ON bpss_scores(student_id);

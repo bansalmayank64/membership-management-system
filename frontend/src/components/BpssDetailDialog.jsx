@@ -58,7 +58,8 @@ function MetricRow({ label, value }) {
 export default function BpssDetailDialog({ open, onClose, bpss }) {
   if (!bpss || bpss.scoreStatus === 'FREE_MEMBER' || bpss.scoreStatus === 'NEW_MEMBER') return null;
 
-  const { score, riskLevel, scoreStatus, metrics, justification, paymentHistory, gracePeriodDays, confidencePct = 0, rawScore } = bpss;
+  const { score, riskLevel, scoreStatus, metrics, justification, paymentHistory,
+          gracePeriodDays, confidencePct = 0, rawScore, scoreBreakdown } = bpss;
 
   const isNoData = scoreStatus === 'NO_DATA';
   const riskColor = RISK_COLOR[riskLevel] || 'default';
@@ -126,18 +127,39 @@ export default function BpssDetailDialog({ open, onClose, bpss }) {
         ) : (
           <Grid container spacing={2}>
 
-            {/* ── Score summary + confidence ─────────────── */}
+            {/* ── Score breakdown ────────────────────────── */}
             <Grid item xs={12} md={6}>
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>
-                  Score Summary
+                  Score Breakdown
                 </Typography>
-                <MetricRow label="Fault rate"            value={`${metrics.latePercentage.toFixed(1)}%`} />
-                <MetricRow label="Score (unadjusted)"    value={rawScore != null ? Math.round(rawScore) : '—'} />
-                <MetricRow label="Final score"           value={score} />
+                {scoreBreakdown && [
+                  { label: 'Payment timeliness',  max: 35, val: scoreBreakdown.timelinessScore },
+                  { label: 'Average delay',        max: 25, val: scoreBreakdown.avgDelayScore },
+                  { label: 'Recent behaviour',     max: 20, val: scoreBreakdown.recentBehaviorScore },
+                  { label: 'Consecutive streak',   max: 10, val: scoreBreakdown.consecScore },
+                  { label: 'Worst delay',          max: 10, val: scoreBreakdown.maxDelayScore },
+                ].map(({ label, max, val }) => (
+                  <Box key={label} sx={{ mb: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
+                      <Typography variant="body2" color="text.secondary">{label}</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        {Math.round(val)} / {max}
+                      </Typography>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={(val / max) * 100}
+                      color={(val / max) >= 0.8 ? 'success' : (val / max) >= 0.5 ? 'warning' : 'error'}
+                      sx={{ height: 6, borderRadius: 3 }}
+                    />
+                  </Box>
+                ))}
                 <Divider sx={{ my: 1 }} />
+                <MetricRow label="Raw score"   value={rawScore != null ? Math.round(rawScore) : '—'} />
+                <MetricRow label="Final score" value={score} />
                 {/* Confidence: how much of a full year's data is available */}
-                <Box>
+                <Box sx={{ mt: 1 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                     <Typography variant="body2" color="text.secondary">History tracked</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
