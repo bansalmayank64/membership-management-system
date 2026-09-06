@@ -271,6 +271,20 @@ export async function deleteExpense(expenseId) {
   }
 }
 
+// Fetch PBS (Payment Behaviour Score) data for a student
+export async function getStudentPbs(studentId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/students/${studentId}/pbs`, {
+      headers: getAuthHeaders(),
+    });
+    await handleResponse(response);
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching student PBS:', error);
+    throw error;
+  }
+}
+
 // Mark expired seat as vacant
 export async function markSeatAsVacant(seatNumber) {
   try {
@@ -305,7 +319,8 @@ const apiDefault = {
   addExpense,
   updateExpense,
   deleteExpense,
-  markSeatAsVacant
+  markSeatAsVacant,
+  getStudentPbs,
 };
 
 export default apiDefault;

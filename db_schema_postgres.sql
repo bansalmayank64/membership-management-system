@@ -8,6 +8,7 @@
 --
 -- DROP COMMANDS - Clean up existing objects
 -- Drop triggers first (depend on functions)
+DROP MATERIALIZED VIEW IF EXISTS bpss_scores;
 DROP VIEW IF EXISTS seat_status_view;
 DROP TRIGGER IF EXISTS trg_check_seat_sex_match ON students;
 DROP TRIGGER IF EXISTS trg_students_audit ON students;
@@ -411,3 +412,250 @@ COMMENT ON COLUMN ai_query_frequency.original_query_example IS 'Example of the o
 COMMENT ON COLUMN ai_query_frequency.frequency_count IS 'Number of times this query pattern has been used';
 COMMENT ON COLUMN ai_query_frequency.first_used_at IS 'When this query pattern was first used';
 COMMENT ON COLUMN ai_query_frequency.last_used_at IS 'When this query pattern was last used';
+
+-- BPSS (Behavior Payment Score System) Materialized View
+--
+-- Computes a 0–100 payment behavior score per student from existing data only.
+-- No new tables are created. Refresh daily at 01:00 AM IST via node-cron (server.js).
+-- Manual refresh: REFRESH MATERIALIZED VIEW CONCURRENTLY bpss_scores;
+--
+-- Scoring formula (100 pts total):
+--   35 pts  Payment Timeliness  (late_cycles / applicable_cycles)
+--   25 pts  Average Delay       (avg delay days, capped at 30)
+--   20 pts  Recent Behavior     (weighted 50/30/20 across last 3/4-6/7-12 months)
+--   10 pts  Consecutive Late    (−2 pts per streak cycle, min 0)
+--   10 pts  Maximum Delay       (max delay days, capped at 30)
+--
+-- Inactive-return rule: a payment is not counted as late when a students_history
+-- record with membership_status = 'inactive' exists between the previous period
+-- end and the payment date — i.e., the student was explicitly deactivated.
+-- First payment per student (enrollment) is excluded from applicable cycles.
+-- Students with no applicable cycles → bpss_score = 100, score_status = 'NO_DATA'.
+
+CREATE MATERIALIZED VIEW bpss_scores AS
+WITH RECURSIVE
+
+-- Gender-specific monthly fee per student from the current fee config.
+-- LEFT JOIN so students with no fee config still appear (monthly_fee = 0, excluded downstream).
+student_fee AS (
+  SELECT
+    s.id   AS student_id,
+    s.name AS student_name,
+    s.sex,
+    s.membership_date::DATE AS membership_date,
+    CASE WHEN s.sex = 'male'
+         THEN COALESCE(fc.male_monthly_fees, 0)
+         ELSE COALESCE(fc.female_monthly_fees, 0)
+    END AS monthly_fee
+  FROM students s
+  LEFT JOIN student_fees_config fc
+    ON fc.membership_type = s.membership_type
+),
+
+-- All monthly_fee payments per student, ranked oldest-first.
+-- ext_days = how many days of membership the payment buys (amount / monthly_fee × 30).
+-- Free memberships (monthly_fee = 0) are excluded to avoid division by zero.
+-- Payments before membership_date are excluded so that a "fresh membership start"
+-- on reactivation resets the PBS timeline to the new start date.
+numbered_payments AS (
+  SELECT
+    p.id,
+    p.student_id,
+    p.payment_date::DATE                                                 AS payment_date,
+    p.amount,
+    sf.monthly_fee,
+    sf.membership_date,
+    FLOOR((p.amount / sf.monthly_fee) * 30)::INTEGER                    AS ext_days,
+    ROW_NUMBER() OVER (PARTITION BY p.student_id ORDER BY p.payment_date, p.id) AS rn
+  FROM payments p
+  JOIN student_fee sf ON sf.student_id = p.student_id
+  WHERE p.payment_type = 'monthly_fee'
+    AND sf.monthly_fee > 0
+    AND p.payment_date >= sf.membership_date
+),
+
+-- Recursive CTE: walks each student's payment chain to compute, for every payment:
+--   expected_due    — when membership should have been renewed (= simulated_till of prior payment)
+--   simulated_till  — mirrors app logic: GREATEST(expected_due, payment_date) + ext_days
+--   delay_raw       — calendar days between expected_due and actual payment (0 if early)
+--   is_inactive_return — TRUE when a students_history row proves the student was deactivated
+--                        during the gap; those gaps are not penalised as late payments
+--
+-- Column list is explicit so the UNION ALL member's positional mapping is unambiguous.
+timeline(
+  id, student_id, payment_date, amount, monthly_fee, ext_days, rn,
+  expected_due, simulated_till, delay_raw, is_inactive_return
+) AS (
+  -- Base case: enrollment payment. Sets the first simulated_till; excluded from scoring (rn=1).
+  -- expected_due = membership_date (the original join date, not payment_date).
+  -- GREATEST(...) + ext_days prevents backdating when the first payment arrives late.
+  SELECT
+    np.id, np.student_id, np.payment_date, np.amount, np.monthly_fee, np.ext_days, np.rn,
+    np.membership_date,
+    GREATEST(np.membership_date, np.payment_date) + np.ext_days,
+    GREATEST(0, (np.payment_date - np.membership_date)),
+    FALSE
+  FROM numbered_payments np
+  WHERE np.rn = 1
+
+  UNION ALL
+
+  -- Recursive case: each renewal payment.
+  -- expected_due = previous simulated_till (the date membership should have been renewed).
+  -- is_inactive_return: check students_history for an explicit deactivation event in the gap;
+  --   avoids penalising planned inactive periods as late payments.
+  SELECT
+    np.id, np.student_id, np.payment_date, np.amount, np.monthly_fee, np.ext_days, np.rn,
+    tl.simulated_till,
+    GREATEST(tl.simulated_till, np.payment_date) + np.ext_days,
+    GREATEST(0, (np.payment_date - tl.simulated_till)),
+    EXISTS (
+      SELECT 1 FROM students_history sh
+      WHERE sh.id                     = tl.student_id
+        AND sh.membership_status      = 'inactive'
+        AND sh.action_timestamp::DATE > tl.simulated_till   -- deactivation happened after last period
+        AND sh.action_timestamp::DATE <= np.payment_date    -- and before (or on) this payment
+    )                                                                    AS is_inactive_return
+  FROM timeline tl
+  JOIN numbered_payments np
+    ON np.student_id = tl.student_id
+   AND np.rn         = tl.rn + 1
+),
+
+-- Renewal payments (rn > 1) in the last 12 months, classified for scoring.
+-- delay_days is zeroed for inactive returns so they don't skew averages.
+-- is_late uses a 2-day grace period (scored on-time, but UI still shows the real delay).
+recent_cycles AS (
+  SELECT
+    student_id,
+    payment_date,
+    CASE WHEN is_inactive_return THEN 0 ELSE delay_raw END              AS delay_days,
+    (NOT is_inactive_return)                                             AS is_applicable,
+    (NOT is_inactive_return AND delay_raw > 2)                          AS is_late  -- 2-day grace
+  FROM timeline
+  WHERE payment_date >= CURRENT_DATE - INTERVAL '1 year'
+    AND rn > 1
+),
+
+-- Per-student totals and sub-period counts needed for the weighted recent-behavior component.
+agg AS (
+  SELECT
+    student_id,
+    COUNT(*)           FILTER (WHERE is_applicable)                      AS total_applicable,
+    COUNT(*)           FILTER (WHERE is_applicable AND NOT is_late)      AS on_time,
+    COUNT(*)           FILTER (WHERE is_applicable AND is_late)          AS total_late,
+    COALESCE(AVG(delay_days) FILTER (WHERE is_applicable AND is_late), 0) AS avg_delay,
+    COALESCE(MAX(delay_days) FILTER (WHERE is_applicable),             0) AS max_delay,
+    MAX(payment_date)                                                    AS last_payment_date,
+    COUNT(*) FILTER (WHERE is_applicable
+                       AND payment_date >= CURRENT_DATE - INTERVAL '3 months')  AS applicable_3m,
+    COUNT(*) FILTER (WHERE is_applicable AND is_late
+                       AND payment_date >= CURRENT_DATE - INTERVAL '3 months')  AS late_3m,
+    COUNT(*) FILTER (WHERE is_applicable
+                       AND payment_date >= CURRENT_DATE - INTERVAL '6 months')  AS applicable_6m,
+    COUNT(*) FILTER (WHERE is_applicable AND is_late
+                       AND payment_date >= CURRENT_DATE - INTERVAL '6 months')  AS late_6m
+  FROM recent_cycles
+  GROUP BY student_id
+),
+
+-- Rank applicable cycles newest-first per student to identify the current late streak.
+recent_ordered AS (
+  SELECT
+    student_id, is_late,
+    ROW_NUMBER() OVER (PARTITION BY student_id ORDER BY payment_date DESC) AS rn
+  FROM recent_cycles
+  WHERE is_applicable
+),
+
+-- For each row, find the rank of the most recent on-time payment.
+-- Rows with rn < first_ontime_rn are part of the current consecutive late run.
+streak_base AS (
+  SELECT
+    student_id, is_late, rn,
+    MIN(CASE WHEN NOT is_late THEN rn ELSE NULL END)
+      OVER (PARTITION BY student_id)                                     AS first_ontime_rn
+  FROM recent_ordered
+),
+
+-- Count late cycles that are strictly more recent than the last on-time cycle.
+-- If first_ontime_rn IS NULL the student has never paid on time → count all late rows.
+streak_calc AS (
+  SELECT
+    student_id,
+    COUNT(*) FILTER (WHERE is_late
+                       AND (first_ontime_rn IS NULL OR rn < first_ontime_rn)) AS consec_streak
+  FROM streak_base
+  GROUP BY student_id
+),
+
+-- Simplified scoring formula:
+--   faultRate  = faults / payments
+--   rawScore   = 100 × (1 − faultRate)
+--   confidence = min(payments / 12, 1)   — blends toward 100 when data is sparse
+--   PBS        = rawScore × confidence + 100 × (1 − confidence)
+pbs_calc AS (
+  SELECT
+    a.student_id,
+    LEAST(a.total_applicable::NUMERIC / 12, 1.0)                         AS confidence,
+    CASE WHEN a.total_applicable > 0
+         THEN ROUND(100.0 * (1.0 - a.total_late::NUMERIC / a.total_applicable), 1)
+         ELSE 100 END                                                     AS raw_score,
+    CASE WHEN a.total_applicable = 0 THEN 100
+         ELSE GREATEST(0, LEAST(100, ROUND(
+           100.0 * (1.0 - a.total_late::NUMERIC / a.total_applicable)
+             * LEAST(a.total_applicable::NUMERIC / 12, 1.0)
+           + 100.0 * (1.0 - LEAST(a.total_applicable::NUMERIC / 12, 1.0))
+         )::INTEGER))
+    END                                                                   AS pbs_score
+  FROM agg a
+)
+
+-- Final output: one row per student.
+-- Students with no applicable cycles get score = 100, score_status = 'NO_DATA'.
+-- confidence_pct (0–100) expresses how much of a full 12-month history is available.
+SELECT
+  sf.student_id,
+  sf.student_name,
+  COALESCE(pc.pbs_score, 100)                                            AS bpss_score,
+  CASE
+    WHEN COALESCE(a.total_applicable, 0) = 0 THEN 'Trusted'
+    WHEN pc.pbs_score >= 90                   THEN 'Trusted'
+    WHEN pc.pbs_score >= 75                   THEN 'Reliable'
+    WHEN pc.pbs_score >= 60                   THEN 'Average'
+    WHEN pc.pbs_score >= 40                   THEN 'Watchlist'
+    ELSE                                           'Defaulter'
+  END                                                                    AS risk_level,
+  CASE WHEN COALESCE(a.total_applicable, 0) = 0 THEN 'NO_DATA'
+       ELSE 'ACTIVE'
+  END                                                                    AS score_status,
+  COALESCE(a.total_applicable, 0)                                        AS total_applicable_cycles,
+  COALESCE(a.on_time,          0)                                        AS on_time_cycles,
+  COALESCE(a.total_late,       0)                                        AS late_cycles,
+  CASE WHEN COALESCE(a.total_applicable, 0) > 0
+       THEN ROUND(a.total_late::NUMERIC / a.total_applicable * 100, 1)
+       ELSE 0 END                                                        AS late_percentage,
+  COALESCE(a.avg_delay,        0)                                        AS average_delay_days,
+  COALESCE(a.max_delay,        0)                                        AS maximum_delay_days,
+  ROUND(COALESCE(pc.confidence, 0) * 100)::INTEGER                       AS confidence_pct,
+  COALESCE(pc.raw_score,       100)                                      AS raw_score,
+  -- sub-period late rates kept for display (non-overlapping windows)
+  CASE WHEN COALESCE(a.applicable_3m, 0) > 0
+       THEN ROUND(a.late_3m::NUMERIC / a.applicable_3m * 100, 1)
+       ELSE 0 END                                                        AS recent_3_month_late_pct,
+  CASE WHEN COALESCE(a.applicable_6m - a.applicable_3m, 0) > 0
+       THEN ROUND((a.late_6m - a.late_3m)::NUMERIC
+                  / (a.applicable_6m - a.applicable_3m) * 100, 1)
+       ELSE 0 END                                                        AS recent_4_6_month_late_pct,
+  CASE WHEN COALESCE(a.total_applicable - a.applicable_6m, 0) > 0
+       THEN ROUND((a.total_late - a.late_6m)::NUMERIC
+                  / (a.total_applicable - a.applicable_6m) * 100, 1)
+       ELSE 0 END                                                        AS recent_7_12_month_late_pct,
+  COALESCE(sc.consec_streak,   0)                                        AS current_consecutive_late_cycles,
+  a.last_payment_date
+FROM student_fee sf
+LEFT JOIN agg        a  ON a.student_id  = sf.student_id
+LEFT JOIN pbs_calc   pc ON pc.student_id = sf.student_id
+LEFT JOIN streak_calc sc ON sc.student_id = sf.student_id;
+
+CREATE UNIQUE INDEX idx_bpss_scores_student_id ON bpss_scores(student_id);

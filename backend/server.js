@@ -16,6 +16,7 @@ const financeRoutes = require('./routes/finance');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const reportsRoutes = require('./routes/reports');
+const bpssRoutes = require('./routes/bpss');
 const auth = require('./middleware/auth');
 
 dotenv.config();
@@ -67,6 +68,7 @@ app.use('/api/payments', auth, paymentRoutes);
 app.use('/api/expenses', auth, expenseRoutes);
 app.use('/api/finance', auth, financeRoutes);
 app.use('/api/reports', auth, reportsRoutes);
+app.use('/api/students', auth, bpssRoutes);
 
 // Public endpoint for frontend to fetch expense categories (protected)
 app.get('/api/expense-categories', auth, async (req, res) => {
@@ -96,7 +98,7 @@ app.listen(PORT, async () => {
   const logger = require('./utils/logger');
   logger.info(`Server is running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  
+
   // Initialize Metabase service
   try {
     const metabaseInitialized = await metabaseService.initialize();
@@ -108,6 +110,7 @@ app.listen(PORT, async () => {
   } catch (error) {
     logger.warn('Failed to initialize Metabase service', { error: error.message });
   }
+
 });
 
 module.exports = app;
