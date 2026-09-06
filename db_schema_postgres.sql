@@ -442,6 +442,7 @@ student_fee AS (
     s.id   AS student_id,
     s.name AS student_name,
     s.sex,
+    s.membership_status,
     s.membership_date::DATE AS membership_date,
     CASE WHEN s.sex = 'male'
          THEN COALESCE(fc.male_monthly_fees, 0)
@@ -522,19 +523,97 @@ timeline(
    AND np.rn         = tl.rn + 1
 ),
 
+-- Latest simulated_till per student — the date their paid coverage runs out.
+last_period AS (
+  SELECT DISTINCT ON (student_id)
+    student_id,
+    simulated_till
+  FROM timeline
+  ORDER BY student_id, rn DESC
+),
+
+-- Synthetic first-payment event for active students who have no payments at all and are
+-- more than 2 days past their membership_date.
+-- ext_days = 30 (one expected month) so coverage_days = 30 → confidence = 1/12.
+pending_first_payment AS (
+  SELECT
+    sf.student_id,
+    CURRENT_DATE                                                         AS payment_date,
+    30                                                                   AS ext_days,
+    (CURRENT_DATE - sf.membership_date)::INTEGER                        AS delay_days,
+    TRUE                                                                 AS is_applicable,
+    TRUE                                                                 AS is_late
+  FROM student_fee sf
+  WHERE sf.monthly_fee > 0
+    AND sf.membership_status = 'active'
+    AND sf.membership_date <= CURRENT_DATE - 2
+    AND sf.membership_date >= CURRENT_DATE - INTERVAL '1 year'
+    AND NOT EXISTS (
+      SELECT 1 FROM payments p
+      WHERE p.student_id   = sf.student_id
+        AND p.payment_type = 'monthly_fee'
+    )
+),
+
+-- Synthetic overdue cycle for active students who HAVE made payments before but whose last
+-- coverage period expired > 2 days ago without a follow-up payment.
+-- Guards against false positives: skips students deactivated after their last coverage ended.
+pending_renewal AS (
+  SELECT
+    lp.student_id,
+    CURRENT_DATE                                                         AS payment_date,
+    30                                                                   AS ext_days,
+    (CURRENT_DATE - lp.simulated_till)::INTEGER                         AS delay_days,
+    TRUE                                                                 AS is_applicable,
+    TRUE                                                                 AS is_late
+  FROM last_period lp
+  JOIN student_fee sf ON sf.student_id = lp.student_id
+  WHERE sf.membership_status = 'active'
+    AND lp.simulated_till < CURRENT_DATE - 2
+    AND lp.simulated_till >= CURRENT_DATE - INTERVAL '1 year'
+    AND NOT EXISTS (
+      SELECT 1 FROM payments p
+      WHERE p.student_id   = lp.student_id
+        AND p.payment_type = 'monthly_fee'
+        AND p.payment_date > lp.simulated_till
+    )
+    -- Do not penalise if the student was explicitly deactivated after coverage ended
+    AND NOT EXISTS (
+      SELECT 1 FROM students_history sh
+      WHERE sh.id                     = lp.student_id
+        AND sh.membership_status      = 'inactive'
+        AND sh.action_timestamp::DATE > lp.simulated_till
+    )
+),
+
 -- All payments in the last 12 months (including enrollment), classified for scoring.
+-- ext_days is carried forward so agg can sum coverage days (partial payments add up correctly).
 -- rn=1 (enrollment) is included: if a student paid days after registering, that is a fault.
 -- delay_days is zeroed for inactive returns so they don't skew averages.
 -- is_late uses a 2-day grace period (scored on-time, but UI still shows the real delay).
+-- is_synthetic flags rows synthesised for outstanding overdue gaps (no real payment yet);
+--   agg excludes them from last_payment_date so the display shows the last actual payment.
 recent_cycles AS (
   SELECT
     student_id,
     payment_date,
+    ext_days,
     CASE WHEN is_inactive_return THEN 0 ELSE delay_raw END              AS delay_days,
     (NOT is_inactive_return)                                             AS is_applicable,
-    (NOT is_inactive_return AND delay_raw > 2)                          AS is_late  -- 2-day grace
+    (NOT is_inactive_return AND delay_raw > 2)                          AS is_late,
+    FALSE                                                               AS is_synthetic
   FROM timeline
   WHERE payment_date >= CURRENT_DATE - INTERVAL '1 year'
+
+  UNION ALL
+
+  SELECT student_id, payment_date, ext_days, delay_days, is_applicable, is_late, TRUE
+  FROM pending_first_payment
+
+  UNION ALL
+
+  SELECT student_id, payment_date, ext_days, delay_days, is_applicable, is_late, TRUE
+  FROM pending_renewal
 ),
 
 -- Per-student totals and sub-period counts needed for the weighted recent-behavior component.
@@ -542,11 +621,14 @@ agg AS (
   SELECT
     student_id,
     COUNT(*)           FILTER (WHERE is_applicable)                      AS total_applicable,
+    -- coverage_days = sum of ext_days for applicable payments;
+    -- dividing by 30 gives months of coverage regardless of how many partial payments were made.
+    COALESCE(SUM(ext_days) FILTER (WHERE is_applicable), 0)              AS total_coverage_days,
     COUNT(*)           FILTER (WHERE is_applicable AND NOT is_late)      AS on_time,
     COUNT(*)           FILTER (WHERE is_applicable AND is_late)          AS total_late,
     COALESCE(AVG(delay_days) FILTER (WHERE is_applicable AND is_late), 0) AS avg_delay,
     COALESCE(MAX(delay_days) FILTER (WHERE is_applicable),             0) AS max_delay,
-    MAX(payment_date)                                                    AS last_payment_date,
+    MAX(payment_date) FILTER (WHERE NOT is_synthetic)                   AS last_payment_date,
     COUNT(*) FILTER (WHERE is_applicable
                        AND payment_date >= CURRENT_DATE - INTERVAL '3 months')  AS applicable_3m,
     COUNT(*) FILTER (WHERE is_applicable AND is_late
@@ -613,6 +695,7 @@ score_components AS (
   SELECT
     a.student_id,
     a.total_applicable,
+    a.total_coverage_days,
     a.on_time,
     a.total_late,
     CASE WHEN a.total_applicable > 0
@@ -660,13 +743,15 @@ raw_scores AS (
 pbs_calc AS (
   SELECT
     rs.student_id,
-    LEAST(rs.total_applicable::NUMERIC / 12, 1.0)                        AS confidence,
+    -- Confidence = months of coverage / 12.  Uses coverage_days so that partial payments
+    -- (e.g. two ½-month payments) are treated as one month, not two.
+    LEAST(rs.total_coverage_days::NUMERIC / (12.0 * 30), 1.0)            AS confidence,
     rs.raw_total                                                          AS raw_score,
-    CASE WHEN rs.total_applicable = 0 THEN 100
+    CASE WHEN rs.total_coverage_days = 0 THEN 100
          ELSE GREATEST(0, LEAST(100, ROUND(
            rs.raw_total::NUMERIC
-             * LEAST(rs.total_applicable::NUMERIC / 12, 1.0)
-           + 100.0 * (1.0 - LEAST(rs.total_applicable::NUMERIC / 12, 1.0))
+             * LEAST(rs.total_coverage_days::NUMERIC / (12.0 * 30), 1.0)
+           + 100.0 * (1.0 - LEAST(rs.total_coverage_days::NUMERIC / (12.0 * 30), 1.0))
          )::INTEGER))
     END                                                                   AS pbs_score
   FROM raw_scores rs
@@ -699,6 +784,9 @@ SELECT
   COALESCE(a.avg_delay,        0)                                        AS average_delay_days,
   COALESCE(a.max_delay,        0)                                        AS maximum_delay_days,
   ROUND(COALESCE(pc.confidence, 0) * 100)::INTEGER                       AS confidence_pct,
+  -- coverage_months: how many full months of paid coverage exist in the last 12 months.
+  -- Partial payments are aggregated correctly: two ½-month payments = 1 month.
+  LEAST(ROUND(COALESCE(a.total_coverage_days, 0)::NUMERIC / 30)::INTEGER, 12) AS coverage_months,
   COALESCE(pc.raw_score,       100)                                      AS raw_score,
   -- 5-component score breakdown (NULL → full-points default for NO_DATA students)
   COALESCE(rs.timeliness_score,       35)                                AS timeliness_score,

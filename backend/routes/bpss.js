@@ -89,6 +89,7 @@ SELECT
   tl.id,
   tl.payment_date,
   tl.expected_due                                                    AS due_date,
+  tl.simulated_till                                                  AS coverage_till,
   tl.amount,
   CASE WHEN tl.is_inactive_return THEN 0 ELSE tl.delay_raw END      AS delay_days,
   CASE
@@ -169,6 +170,7 @@ router.get('/:id/pbs', async (req, res) => {
         risk_level: 'Trusted',
         score_status: 'NO_DATA',
         total_applicable_cycles: 0,
+        coverage_months: 0,
         on_time_cycles: 0,
         late_cycles: 0,
         late_percentage: 0,
@@ -214,33 +216,59 @@ router.get('/:id/pbs', async (req, res) => {
     ]);
     const paymentHistory = histRes.rows;
 
-    // 8. New members have only their enrollment payment (rn=1 is excluded from scoring).
-    // Detect this: NO_DATA from the view but at least one payment exists in the last year.
-    // They haven't missed anything — PBS simply has no renewal cycles to judge yet.
+    // 8. No payments at all AND view still shows NO_DATA → student is within the 2-day grace
+    // period (the materialized view synthesises a real score once the grace window passes).
+    if (bpssRow.score_status === 'NO_DATA' && paymentHistory.length === 0) {
+      return res.json({
+        studentId, studentName: student.name,
+        score: null, riskLevel: null, scoreStatus: 'NEW_MEMBER',
+        metrics: null, scoreBreakdown: null, lastPaymentDate: null,
+        gracePeriodDays: GRACE_PERIOD_DAYS,
+        justification: 'No payments yet. PBS will be available after the first payment.',
+        paymentHistory: [],
+      });
+    }
+
+    // 8b. Student has some payments but the view still shows NO_DATA
+    // (e.g. only an inactive-return payment in the window — no scorable cycles).
     if (bpssRow.score_status === 'NO_DATA' && paymentHistory.length > 0) {
       return res.json({
-        studentId: studentId,
-        studentName: student.name,
-        score: null,
-        riskLevel: null,
-        scoreStatus: 'NEW_MEMBER',
-        metrics: null,
-        scoreBreakdown: null,
+        studentId, studentName: student.name,
+        score: null, riskLevel: null, scoreStatus: 'NEW_MEMBER',
+        metrics: null, scoreBreakdown: null,
         lastPaymentDate: paymentHistory[0]?.payment_date ?? null,
         gracePeriodDays: GRACE_PERIOD_DAYS,
-        justification: 'No renewal cycles yet. PBS will be available after the first renewal payment.',
+        justification: 'No scorable payment cycles yet.',
         paymentHistory: paymentHistory.map((row) => ({
-          id: row.id,
-          paymentDate: row.payment_date,
-          dueDate: row.due_date,
-          amount: parseFloat(row.amount),
-          delayDays: parseInt(row.delay_days, 10),
+          id: row.id, paymentDate: row.payment_date, dueDate: row.due_date,
+          amount: parseFloat(row.amount), delayDays: parseInt(row.delay_days, 10),
           paymentStatus: row.payment_status,
         })),
       });
     }
 
-    // 9. Build response object
+    // 9. Determine whether the student's current payment is overdue.
+    // For students with real payment history: coverage ended at the last simulated_till.
+    // For students with no real payments (pending_first_payment case): coverage started at membership_date.
+    let currentPaymentOverdueDays = null;
+    {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let coverageEnd = null;
+      if (paymentHistory.length > 0) {
+        const ct = paymentHistory[0].coverage_till;
+        if (ct) { coverageEnd = new Date(ct); coverageEnd.setHours(0, 0, 0, 0); }
+      } else if (bpssRow.score_status === 'ACTIVE') {
+        coverageEnd = new Date(student.membership_date);
+        coverageEnd.setHours(0, 0, 0, 0);
+      }
+      if (coverageEnd) {
+        const days = Math.floor((today - coverageEnd) / (1000 * 60 * 60 * 24));
+        if (days > GRACE_PERIOD_DAYS) currentPaymentOverdueDays = days;
+      }
+    }
+
+    // 10. Build response object
     const response = {
       studentId: bpssRow.student_id,
       studentName: bpssRow.student_name,
@@ -250,6 +278,7 @@ router.get('/:id/pbs', async (req, res) => {
 
       metrics: {
         totalApplicableCycles: parseInt(bpssRow.total_applicable_cycles, 10),
+        coverageMonths: parseInt(bpssRow.coverage_months, 10),
         onTimeCycles: parseInt(bpssRow.on_time_cycles, 10),
         lateCycles: parseInt(bpssRow.late_cycles, 10),
         latePercentage: parseFloat(bpssRow.late_percentage),
@@ -274,12 +303,14 @@ router.get('/:id/pbs', async (req, res) => {
 
       lastPaymentDate: bpssRow.last_payment_date,
       gracePeriodDays: GRACE_PERIOD_DAYS,
+      currentPaymentOverdueDays,
       justification: generateJustification(bpssRow),
 
       paymentHistory: paymentHistory.map((row) => ({
         id: row.id,
         paymentDate: row.payment_date,
         dueDate: row.due_date,
+        coverageTill: row.coverage_till,
         amount: parseFloat(row.amount),
         delayDays: parseInt(row.delay_days, 10),
         paymentStatus: row.payment_status,

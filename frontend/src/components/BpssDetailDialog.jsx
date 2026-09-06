@@ -59,7 +59,8 @@ export default function BpssDetailDialog({ open, onClose, bpss }) {
   if (!bpss || bpss.scoreStatus === 'FREE_MEMBER' || bpss.scoreStatus === 'NEW_MEMBER') return null;
 
   const { score, riskLevel, scoreStatus, metrics, justification, paymentHistory,
-          gracePeriodDays, confidencePct = 0, rawScore, scoreBreakdown } = bpss;
+          gracePeriodDays, confidencePct = 0, rawScore, scoreBreakdown,
+          currentPaymentOverdueDays } = bpss;
 
   const isNoData = scoreStatus === 'NO_DATA';
   const riskColor = RISK_COLOR[riskLevel] || 'default';
@@ -163,7 +164,7 @@ export default function BpssDetailDialog({ open, onClose, bpss }) {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                     <Typography variant="body2" color="text.secondary">History tracked</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {metrics.totalApplicableCycles} of 12 months
+                      {metrics.coverageMonths} of 12 months
                     </Typography>
                   </Box>
                   <LinearProgress
@@ -207,12 +208,33 @@ export default function BpssDetailDialog({ open, onClose, bpss }) {
               </Paper>
             </Grid>
 
+            {/* ── Overdue banner when no payment history exists yet ── */}
+            {(!paymentHistory || paymentHistory.length === 0) && currentPaymentOverdueDays != null && (
+              <Grid item xs={12}>
+                <Chip
+                  label={`No payment made yet · ${currentPaymentOverdueDays} day${currentPaymentOverdueDays !== 1 ? 's' : ''} overdue`}
+                  color={currentPaymentOverdueDays > 10 ? 'error' : 'warning'}
+                  sx={{ fontWeight: 600 }}
+                />
+              </Grid>
+            )}
+
             {/* ── Payment history table ───────────────────── */}
             {paymentHistory && paymentHistory.length > 0 && (
               <Grid item xs={12}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                  Payment History (last 12 months)
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Payment History (last 12 months)
+                  </Typography>
+                  {currentPaymentOverdueDays != null && (
+                    <Chip
+                      label={`Current payment due · ${currentPaymentOverdueDays} day${currentPaymentOverdueDays !== 1 ? 's' : ''} overdue`}
+                      color={currentPaymentOverdueDays > 10 ? 'error' : 'warning'}
+                      size="small"
+                      sx={{ fontWeight: 600 }}
+                    />
+                  )}
+                </Box>
                 {/* Desktop table */}
                 <Paper variant="outlined" sx={{ display: { xs: 'none', sm: 'block' } }}>
                   <Table size="small">
@@ -233,7 +255,15 @@ export default function BpssDetailDialog({ open, onClose, bpss }) {
                             <TableCell>{formatDateForDisplay(row.dueDate)}</TableCell>
                             <TableCell>{formatDateForDisplay(row.paymentDate)}</TableCell>
                             <TableCell align="right">₹{Number(row.amount).toLocaleString()}</TableCell>
-                            <TableCell align="right">
+                            <TableCell
+                              align="right"
+                              sx={{
+                                color: row.paymentStatus === 'inactive_return' ? 'text.secondary'
+                                     : row.paymentStatus === 'late'            ? 'error.main'
+                                     : row.delayDays > 0                       ? 'success.main'
+                                     : 'text.primary',
+                              }}
+                            >
                               {row.paymentStatus === 'inactive_return' ? '—' : row.delayDays}
                             </TableCell>
                             <TableCell>
@@ -267,7 +297,10 @@ export default function BpssDetailDialog({ open, onClose, bpss }) {
                           </Typography>
                         </Box>
                         {row.paymentStatus !== 'inactive_return' && row.delayDays > 0 && (
-                          <Typography variant="caption" color="error.main">
+                          <Typography
+                            variant="caption"
+                            color={row.paymentStatus === 'late' ? 'error.main' : 'success.main'}
+                          >
                             {row.delayDays} day{row.delayDays !== 1 ? 's' : ''} late
                           </Typography>
                         )}
