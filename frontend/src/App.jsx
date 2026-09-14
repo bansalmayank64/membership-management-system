@@ -12,6 +12,7 @@ import Expenses from './pages/Expenses';
 import AdminPanel from './pages/AdminPanel';
 import ActivityLog from './pages/ActivityLog';
 import BalanceSheet from './components/BalanceSheet';
+import BulkSmsPage from './pages/BulkSmsPage';
 
 function App() {
   return (
@@ -55,6 +56,11 @@ function App() {
               <AdminRoute>
                 <ActivityLog />
               </AdminRoute>
+            } />
+            <Route path="/sms/:type" element={
+              <ProtectedRoute>
+                <BulkSmsPage />
+              </ProtectedRoute>
             } />
           </Routes>
         </ThemeProvider>
