@@ -642,6 +642,7 @@ function Students() {
   // Fee configuration states
   const [feeConfig, setFeeConfig] = useState(null);
   const [membershipExtensionDays, setMembershipExtensionDays] = useState(0);
+  const [membershipNewTill, setMembershipNewTill] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -770,7 +771,7 @@ function Students() {
     };
   }, [isMobile]);
 
-  // Effect to calculate membership extension days when payment amount changes
+  // Effect to calculate membership extension days and projected new date when payment amount changes
   useEffect(() => {
     if (paymentData.amount && feeConfig && parseFloat(feeConfig.monthly_fees) > 0) {
       const amount = parseFloat(paymentData.amount);
@@ -780,13 +781,27 @@ function Students() {
         const days = Math.floor((amount / monthlyFee) * 30);
         setMembershipExtensionDays(days);
         logger.debug('[membershipCalculation] Payment amount/extension', { amount, monthlyFee, days });
+
+        const baseDateStr = selectedItemForAction?.membership_till || selectedItemForAction?.membership_date || null;
+        const dateOnly = baseDateStr ? baseDateStr.slice(0, 10) : null;
+        let baseDate = dateOnly ? new Date(dateOnly + 'T00:00:00') : new Date();
+        if (isNaN(baseDate.getTime())) baseDate = new Date();
+        const newDt = new Date(baseDate);
+        if (paymentData.type === 'refund') {
+          newDt.setDate(newDt.getDate() - days);
+        } else {
+          newDt.setDate(newDt.getDate() + days);
+        }
+        setMembershipNewTill(newDt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
       } else {
         setMembershipExtensionDays(0);
+        setMembershipNewTill(null);
       }
     } else {
       setMembershipExtensionDays(0);
+      setMembershipNewTill(null);
     }
-  }, [paymentData.amount, feeConfig]);
+  }, [paymentData.amount, paymentData.type, feeConfig, selectedItemForAction]);
 
   const fetchData = async () => {
     logger.debug('[fetchData] Starting data fetch');
@@ -4811,6 +4826,7 @@ function Students() {
         setPaymentData={setPaymentData}
         feeConfig={feeConfig}
         membershipExtensionDays={membershipExtensionDays}
+        membershipNewTill={membershipNewTill}
         loading={paymentLoading}
         isMobile={isMobile}
       />

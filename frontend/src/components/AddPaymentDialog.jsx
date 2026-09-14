@@ -40,6 +40,7 @@ const AddPaymentDialog = ({
   // Fee configuration and membership extension
   feeConfig,
   membershipExtensionDays,
+  membershipNewTill = null,
   // Loading and UI state
   loading = false,
   isMobile = false
@@ -277,6 +278,11 @@ const AddPaymentDialog = ({
               <Typography variant="body2" color="info.contrastText">
                 Extension Days: {membershipExtensionDays} days
               </Typography>
+              {membershipNewTill && (
+                <Typography variant="body2" color="info.contrastText" sx={{ mt: 0.5, fontWeight: 700 }}>
+                  New membership date: {new Date(membershipNewTill + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </Typography>
+              )}
             </Box>
           )}
 
@@ -322,6 +328,11 @@ const AddPaymentDialog = ({
               <Typography variant="body2" color="error.contrastText" sx={{ mt: 1 }}>
                 This refund will reduce the student's membership by {membershipExtensionDays} days if applied.
               </Typography>
+              {membershipNewTill && (
+                <Typography variant="body2" color="error.contrastText" sx={{ mt: 0.5, fontWeight: 700 }}>
+                  New membership date: {new Date(membershipNewTill + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </Typography>
+              )}
             </Box>
           )}
         </Stack>

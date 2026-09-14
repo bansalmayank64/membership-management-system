@@ -952,6 +952,7 @@ function Payments() {
         onAmountChange={handleLocalAmountChange}
         feeConfig={feeConfig}
         membershipExtensionDays={membershipExtensionDays}
+        membershipNewTill={membershipNewTill}
         loading={paymentLoadingLocal}
         isMobile={isMobile}
   error={error}

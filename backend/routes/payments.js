@@ -3,26 +3,27 @@ const { pool } = require('../config/database');
 const logger = require('../utils/logger');
 const { toISTDateString } = require('../utils/dateUtils');
 
-// Helper: prefer membership_till if present and in future, otherwise use today (for expired / reactivated students)
+// Helper: return the student's current membership end date as the base for extensions.
+// Always uses membership_till (or membership_date) regardless of whether it is in the past,
+// so that late or advance payments extend from the real coverage end, not from today.
 const getMembershipBaseDate = (student) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     if (student && student.membership_till) {
       const d = new Date(student.membership_till);
       if (!isNaN(d.getTime())) {
-        return d > today ? d : today;
+        return d;
       }
     }
 
     if (student && student.membership_date) {
       const sd = new Date(student.membership_date);
       if (!isNaN(sd.getTime())) {
-        return sd > today ? sd : today;
+        return sd;
       }
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return today;
   } catch (err) {
     return new Date();
