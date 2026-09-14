@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -94,6 +94,7 @@ function Students() {
   // Theme and mobile breakpoint detection
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const navigate = useNavigate();
 
   // Header ref and dynamic sticky offset for stats (prevents visual gap)
   const headerRef = useRef(null);
@@ -2996,6 +2997,7 @@ function Students() {
                 cursor: 'pointer',
                 bgcolor: activeStatFilter === 'expiredStudents' ? 'error.light' : 'background.paper',
                 '&:hover': { bgcolor: 'error.light' },
+                '&:hover .tile-sms-btn': { opacity: 1, pointerEvents: 'auto' },
                 borderRadius: 2,
                 boxShadow: 1
               }}
@@ -3009,6 +3011,9 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expired Students</Typography>
+                <Box className="tile-sms-btn" sx={{ opacity: 0, pointerEvents: 'none', mt: 0.5 }}>
+                  <Button size="small" variant="contained" color="error" sx={{ fontSize: '0.6rem', py: 0.25, px: 0.75, minWidth: 0 }} onClick={(e) => { e.stopPropagation(); navigate('/sms/expired'); }}>Send SMS</Button>
+                </Box>
               </CardContent>
             </Card>
 
@@ -3019,6 +3024,7 @@ function Students() {
                 cursor: 'pointer',
                 bgcolor: activeStatFilter === 'expiringStudents' ? 'warning.light' : 'background.paper',
                 '&:hover': { bgcolor: 'warning.light' },
+                '&:hover .tile-sms-btn': { opacity: 1, pointerEvents: 'auto' },
                 borderRadius: 2,
                 boxShadow: 1
               }}
@@ -3032,6 +3038,9 @@ function Students() {
                   </Typography>
                 </Box>
                 <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Expiring Students</Typography>
+                <Box className="tile-sms-btn" sx={{ opacity: 0, pointerEvents: 'none', mt: 0.5 }}>
+                  <Button size="small" variant="contained" color="warning" sx={{ fontSize: '0.6rem', py: 0.25, px: 0.75, minWidth: 0 }} onClick={(e) => { e.stopPropagation(); navigate('/sms/expiring'); }}>Send SMS</Button>
+                </Box>
               </CardContent>
             </Card>
 
@@ -3194,23 +3203,29 @@ function Students() {
             </CardContent>
           </Card>
 
-          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiredStudents' ? 'error.light' : 'background.paper' }} onClick={() => handleStatClick('expiredStudents')}>
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiredStudents' ? 'error.light' : 'background.paper', '&:hover': { bgcolor: 'error.light' }, '&:hover .tile-sms-btn': { opacity: 1, pointerEvents: 'auto' } }} onClick={() => handleStatClick('expiredStudents')}>
             <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
                 <PersonIcon sx={{ color: 'error.main', fontSize: 18, mr: 0.5 }} />
                 <Typography variant="h6" fontWeight="bold" color="error.main">{stats.expiredStudents}</Typography>
               </Box>
               <Typography variant="caption">Expired Students</Typography>
+              <Box className="tile-sms-btn" sx={{ opacity: 0, pointerEvents: 'none', mt: 0.5 }}>
+                <Button size="small" variant="contained" color="error" sx={{ fontSize: '0.6rem', py: 0.25, px: 0.75, minWidth: 0 }} onClick={(e) => { e.stopPropagation(); navigate('/sms/expired'); }}>Send SMS</Button>
+              </Box>
             </CardContent>
           </Card>
 
-          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiringStudents' ? 'warning.light' : 'background.paper' }} onClick={() => handleStatClick('expiringStudents')}>
+          <Card sx={{ minWidth: 120, borderRadius: 2, boxShadow: 1, cursor: 'pointer', bgcolor: activeStatFilter === 'expiringStudents' ? 'warning.light' : 'background.paper', '&:hover': { bgcolor: 'warning.light' }, '&:hover .tile-sms-btn': { opacity: 1, pointerEvents: 'auto' } }} onClick={() => handleStatClick('expiringStudents')}>
             <CardContent sx={{ p: 1.25, textAlign: 'center' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
                 <AccessTimeIcon sx={{ color: 'warning.main', fontSize: 18, mr: 0.5 }} />
                 <Typography variant="h6" fontWeight="bold" color="warning.main">{stats.expiringStudents}</Typography>
               </Box>
               <Typography variant="caption">Expiring Students</Typography>
+              <Box className="tile-sms-btn" sx={{ opacity: 0, pointerEvents: 'none', mt: 0.5 }}>
+                <Button size="small" variant="contained" color="warning" sx={{ fontSize: '0.6rem', py: 0.25, px: 0.75, minWidth: 0 }} onClick={(e) => { e.stopPropagation(); navigate('/sms/expiring'); }}>Send SMS</Button>
+              </Box>
             </CardContent>
           </Card>
 
